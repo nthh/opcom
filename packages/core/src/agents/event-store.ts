@@ -1,0 +1,472 @@
+// SQLite-backed event store for agent session persistence and analytics
+
+import { join } from "node:path";
+import { createRequire } from "node:module";
+import type { AgentSession, NormalizedEvent } from "@opcom/types";
+import { opcomRoot } from "../config/paths.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("event-store");
+
+// Use createRequire for ESM compat with better-sqlite3 (native addon)
+const require = createRequire(import.meta.url);
+
+export interface ToolUsageStat {
+  toolName: string;
+  count: number;
+  successCount: number;
+  failureCount: number;
+  successRate: number;
+}
+
+export interface SessionStat {
+  sessionId: string;
+  backend: string;
+  projectId: string;
+  state: string;
+  startedAt: string;
+  stoppedAt: string | null;
+  durationMinutes: number | null;
+  eventCount: number;
+  toolCount: number;
+}
+
+export interface DailyActivity {
+  date: string;
+  sessions: number;
+  events: number;
+  tools: number;
+}
+
+type BetterSqlite3Database = {
+  pragma(source: string): unknown;
+  exec(source: string): void;
+  prepare(source: string): {
+    run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+  };
+  close(): void;
+};
+
+export class EventStore {
+  private db: BetterSqlite3Database;
+  private lastToolName = new Map<string, string>();
+
+  // Prepared statements
+  private stmtInsertEvent!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtUpsertSession!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtUpdateSessionState!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadSessionEvents!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadAllSessions!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadSessionsByProject!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadSessionsByState!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadSessionsByProjectAndState!: ReturnType<BetterSqlite3Database["prepare"]>;
+
+  constructor(dbPath?: string) {
+    const Database = require("better-sqlite3");
+    const resolvedPath = dbPath ?? join(opcomRoot(), "events.db");
+    this.db = new Database(resolvedPath) as BetterSqlite3Database;
+
+    // WAL mode + relaxed sync for write performance
+    this.db.pragma("journal_mode = WAL");
+    this.db.pragma("synchronous = NORMAL");
+
+    this.migrate();
+    this.prepareStatements();
+  }
+
+  private migrate(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        backend TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        work_item_id TEXT,
+        state TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        stopped_at TEXT,
+        last_activity TEXT,
+        pid INTEGER,
+        backend_session_id TEXT,
+        context_tokens_used INTEGER,
+        context_max_tokens INTEGER
+      );
+
+      CREATE TABLE IF NOT EXISTS events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        type TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        text TEXT,
+        role TEXT,
+        tool_name TEXT,
+        tool_input TEXT,
+        tool_output TEXT,
+        tool_success INTEGER,
+        reason TEXT,
+        context_tokens INTEGER,
+        data_json TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
+      CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
+      CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
+    `);
+  }
+
+  private prepareStatements(): void {
+    this.stmtInsertEvent = this.db.prepare(`
+      INSERT INTO events (session_id, type, timestamp, text, role, tool_name, tool_input, tool_output, tool_success, reason, context_tokens, data_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.stmtUpsertSession = this.db.prepare(`
+      INSERT INTO sessions (id, backend, project_id, work_item_id, state, started_at, stopped_at, last_activity, pid, backend_session_id, context_tokens_used, context_max_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        state = excluded.state,
+        stopped_at = excluded.stopped_at,
+        last_activity = excluded.last_activity,
+        pid = excluded.pid,
+        backend_session_id = excluded.backend_session_id,
+        context_tokens_used = excluded.context_tokens_used,
+        context_max_tokens = excluded.context_max_tokens
+    `);
+
+    this.stmtUpdateSessionState = this.db.prepare(`
+      UPDATE sessions SET state = ?, stopped_at = ?, last_activity = ? WHERE id = ?
+    `);
+
+    this.stmtLoadSessionEvents = this.db.prepare(`
+      SELECT * FROM events WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?
+    `);
+
+    this.stmtLoadAllSessions = this.db.prepare(`
+      SELECT * FROM sessions ORDER BY started_at DESC
+    `);
+
+    this.stmtLoadSessionsByProject = this.db.prepare(`
+      SELECT * FROM sessions WHERE project_id = ? ORDER BY started_at DESC
+    `);
+
+    this.stmtLoadSessionsByState = this.db.prepare(`
+      SELECT * FROM sessions WHERE state = ? ORDER BY started_at DESC
+    `);
+
+    this.stmtLoadSessionsByProjectAndState = this.db.prepare(`
+      SELECT * FROM sessions WHERE project_id = ? AND state = ? ORDER BY started_at DESC
+    `);
+  }
+
+  insertEvent(sessionId: string, event: NormalizedEvent): void {
+    const data = event.data;
+
+    // Track tool_name: on tool_start, remember the name; on tool_end, carry it forward
+    let toolName = data?.toolName ?? null;
+    if (event.type === "tool_start" && toolName) {
+      this.lastToolName.set(sessionId, toolName);
+    } else if (event.type === "tool_end" && !toolName) {
+      toolName = this.lastToolName.get(sessionId) ?? null;
+    }
+
+    try {
+      this.stmtInsertEvent.run(
+        sessionId,
+        event.type,
+        event.timestamp,
+        data?.text ?? null,
+        data?.role ?? null,
+        toolName,
+        data?.toolInput ?? null,
+        data?.toolOutput ?? null,
+        data?.toolSuccess != null ? (data.toolSuccess ? 1 : 0) : null,
+        data?.reason ?? null,
+        data?.contextTokens ?? null,
+        data ? JSON.stringify(data) : null,
+      );
+    } catch (err) {
+      log.warn("failed to insert event", { sessionId, type: event.type, error: String(err) });
+    }
+  }
+
+  upsertSession(session: AgentSession): void {
+    try {
+      this.stmtUpsertSession.run(
+        session.id,
+        session.backend,
+        session.projectId,
+        session.workItemId ?? null,
+        session.state,
+        session.startedAt,
+        session.stoppedAt ?? null,
+        session.lastActivity ?? null,
+        session.pid ?? null,
+        session.backendSessionId ?? null,
+        session.contextUsage?.tokensUsed ?? null,
+        session.contextUsage?.maxTokens ?? null,
+      );
+    } catch (err) {
+      log.warn("failed to upsert session", { sessionId: session.id, error: String(err) });
+    }
+  }
+
+  updateSessionState(sessionId: string, state: string, stoppedAt?: string): void {
+    try {
+      this.stmtUpdateSessionState.run(
+        state,
+        stoppedAt ?? null,
+        new Date().toISOString(),
+        sessionId,
+      );
+    } catch (err) {
+      log.warn("failed to update session state", { sessionId, error: String(err) });
+    }
+  }
+
+  loadSessionEvents(
+    sessionId: string,
+    opts?: { limit?: number; offset?: number },
+  ): NormalizedEvent[] {
+    const limit = opts?.limit ?? 10000;
+    const offset = opts?.offset ?? 0;
+    const rows = this.stmtLoadSessionEvents.all(sessionId, limit, offset) as Array<{
+      session_id: string;
+      type: string;
+      timestamp: string;
+      text: string | null;
+      role: string | null;
+      tool_name: string | null;
+      tool_input: string | null;
+      tool_output: string | null;
+      tool_success: number | null;
+      reason: string | null;
+      context_tokens: number | null;
+      data_json: string | null;
+    }>;
+
+    return rows.map((row) => {
+      const event: NormalizedEvent = {
+        type: row.type as NormalizedEvent["type"],
+        sessionId: row.session_id,
+        timestamp: row.timestamp,
+      };
+
+      // Rebuild data from columns (prefer columns over data_json for queryability)
+      const data: NormalizedEvent["data"] = {};
+      let hasData = false;
+
+      if (row.text != null) { data.text = row.text; hasData = true; }
+      if (row.role != null) { data.role = row.role as "assistant" | "user" | "system"; hasData = true; }
+      if (row.tool_name != null) { data.toolName = row.tool_name; hasData = true; }
+      if (row.tool_input != null) { data.toolInput = row.tool_input; hasData = true; }
+      if (row.tool_output != null) { data.toolOutput = row.tool_output; hasData = true; }
+      if (row.tool_success != null) { data.toolSuccess = row.tool_success === 1; hasData = true; }
+      if (row.reason != null) { data.reason = row.reason; hasData = true; }
+      if (row.context_tokens != null) { data.contextTokens = row.context_tokens; hasData = true; }
+
+      if (hasData) {
+        event.data = data;
+      }
+
+      return event;
+    });
+  }
+
+  loadAllSessions(opts?: { projectId?: string; state?: string }): AgentSession[] {
+    let rows: unknown[];
+
+    if (opts?.projectId && opts?.state) {
+      rows = this.stmtLoadSessionsByProjectAndState.all(opts.projectId, opts.state);
+    } else if (opts?.projectId) {
+      rows = this.stmtLoadSessionsByProject.all(opts.projectId);
+    } else if (opts?.state) {
+      rows = this.stmtLoadSessionsByState.all(opts.state);
+    } else {
+      rows = this.stmtLoadAllSessions.all();
+    }
+
+    return (rows as Array<{
+      id: string;
+      backend: string;
+      project_id: string;
+      work_item_id: string | null;
+      state: string;
+      started_at: string;
+      stopped_at: string | null;
+      last_activity: string | null;
+      pid: number | null;
+      backend_session_id: string | null;
+      context_tokens_used: number | null;
+      context_max_tokens: number | null;
+    }>).map((row) => {
+      const session: AgentSession = {
+        id: row.id,
+        backend: row.backend as AgentSession["backend"],
+        projectId: row.project_id,
+        state: row.state as AgentSession["state"],
+        startedAt: row.started_at,
+      };
+      if (row.work_item_id) session.workItemId = row.work_item_id;
+      if (row.stopped_at) session.stoppedAt = row.stopped_at;
+      if (row.last_activity) session.lastActivity = row.last_activity;
+      if (row.pid != null) session.pid = row.pid;
+      if (row.backend_session_id) session.backendSessionId = row.backend_session_id;
+      if (row.context_tokens_used != null && row.context_max_tokens != null) {
+        session.contextUsage = {
+          tokensUsed: row.context_tokens_used,
+          maxTokens: row.context_max_tokens,
+          percentage: (row.context_tokens_used / row.context_max_tokens) * 100,
+        };
+      }
+      return session;
+    });
+  }
+
+  // --- Analytics ---
+
+  toolUsageStats(opts?: { projectId?: string }): ToolUsageStat[] {
+    let query = `
+      SELECT
+        tool_name,
+        COUNT(*) as count,
+        SUM(CASE WHEN tool_success = 1 THEN 1 ELSE 0 END) as success_count,
+        SUM(CASE WHEN tool_success = 0 THEN 1 ELSE 0 END) as failure_count
+      FROM events
+      WHERE type = 'tool_end' AND tool_name IS NOT NULL
+    `;
+    const params: unknown[] = [];
+
+    if (opts?.projectId) {
+      query += ` AND session_id IN (SELECT id FROM sessions WHERE project_id = ?)`;
+      params.push(opts.projectId);
+    }
+
+    query += ` GROUP BY tool_name ORDER BY count DESC`;
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      tool_name: string;
+      count: number;
+      success_count: number;
+      failure_count: number;
+    }>;
+
+    return rows.map((row) => ({
+      toolName: row.tool_name,
+      count: row.count,
+      successCount: row.success_count,
+      failureCount: row.failure_count,
+      successRate: row.count > 0 ? row.success_count / row.count : 0,
+    }));
+  }
+
+  toolSuccessRates(opts?: { projectId?: string }): ToolUsageStat[] {
+    // Same as toolUsageStats but sorted by success rate
+    const stats = this.toolUsageStats(opts);
+    return stats.sort((a, b) => a.successRate - b.successRate);
+  }
+
+  sessionStats(opts?: { projectId?: string }): SessionStat[] {
+    let query = `
+      SELECT
+        s.id as session_id,
+        s.backend,
+        s.project_id,
+        s.state,
+        s.started_at,
+        s.stopped_at,
+        CASE
+          WHEN s.stopped_at IS NOT NULL
+          THEN ROUND((julianday(s.stopped_at) - julianday(s.started_at)) * 24 * 60, 1)
+          ELSE NULL
+        END as duration_minutes,
+        (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) as event_count,
+        (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id AND e.type IN ('tool_start', 'tool_end')) as tool_count
+      FROM sessions s
+    `;
+    const params: unknown[] = [];
+
+    if (opts?.projectId) {
+      query += ` WHERE s.project_id = ?`;
+      params.push(opts.projectId);
+    }
+
+    query += ` ORDER BY s.started_at DESC`;
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      session_id: string;
+      backend: string;
+      project_id: string;
+      state: string;
+      started_at: string;
+      stopped_at: string | null;
+      duration_minutes: number | null;
+      event_count: number;
+      tool_count: number;
+    }>;
+
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      backend: row.backend,
+      projectId: row.project_id,
+      state: row.state,
+      startedAt: row.started_at,
+      stoppedAt: row.stopped_at,
+      durationMinutes: row.duration_minutes,
+      eventCount: row.event_count,
+      toolCount: row.tool_count,
+    }));
+  }
+
+  dailyActivity(opts?: { projectId?: string; days?: number }): DailyActivity[] {
+    const days = opts?.days ?? 30;
+
+    let query = `
+      SELECT
+        date(e.timestamp) as date,
+        COUNT(DISTINCT e.session_id) as sessions,
+        COUNT(*) as events,
+        SUM(CASE WHEN e.type IN ('tool_start', 'tool_end') THEN 1 ELSE 0 END) as tools
+      FROM events e
+      WHERE e.timestamp >= date('now', '-' || ? || ' days')
+    `;
+    const params: unknown[] = [days];
+
+    if (opts?.projectId) {
+      query += ` AND e.session_id IN (SELECT id FROM sessions WHERE project_id = ?)`;
+      params.push(opts.projectId);
+    }
+
+    query += ` GROUP BY date(e.timestamp) ORDER BY date ASC`;
+
+    const rows = this.db.prepare(query).all(...params) as Array<{
+      date: string;
+      sessions: number;
+      events: number;
+      tools: number;
+    }>;
+
+    return rows.map((row) => ({
+      date: row.date,
+      sessions: row.sessions,
+      events: row.events,
+      tools: row.tools,
+    }));
+  }
+
+  /** Import existing session YAML data (events will be empty for old sessions) */
+  importSessions(sessions: AgentSession[]): void {
+    for (const session of sessions) {
+      this.upsertSession(session);
+    }
+  }
+
+  close(): void {
+    try {
+      this.db.close();
+    } catch (err) {
+      log.warn("failed to close event store", { error: String(err) });
+    }
+  }
+}

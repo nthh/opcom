@@ -1,0 +1,19 @@
+{
+  "name": "@opcom/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "opcom": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@opcom/core": "*",
+    "@opcom/types": "*",
+    "ws": "^8.18.0"
+  },
+  "files": [
+    "dist"
+  ]
+}
