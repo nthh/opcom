@@ -15,6 +15,17 @@ import { runTriage } from "./commands/triage.js";
 import { runOracle } from "./commands/oracle.js";
 import { runScheduleList, runScheduleAdd, runScheduleRemove } from "./commands/schedule.js";
 import { runAnalytics } from "./commands/analytics.js";
+import {
+  runPlanList,
+  runPlanCreate,
+  runPlanShow,
+  runPlanExecute,
+  runPlanPause,
+  runPlanResume,
+  runPlanContext,
+  runPlanSkip,
+  runPlanHygiene,
+} from "./commands/plan.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -154,6 +165,54 @@ async function main(): Promise<void> {
       return runAnalytics(sub, analyticsOpts);
     }
 
+    case "plan": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+          return runPlanList();
+        case "create": {
+          const planOpts: { name?: string; scope?: string; projectIds?: string[] } = {};
+          for (let i = 2; i < args.length; i++) {
+            if (args[i] === "--name" && args[i + 1]) { planOpts.name = args[++i]; }
+            else if (args[i] === "--scope" && args[i + 1]) { planOpts.scope = args[++i]; }
+            else if (args[i] === "--project" && args[i + 1]) {
+              if (!planOpts.projectIds) planOpts.projectIds = [];
+              planOpts.projectIds.push(args[++i]);
+            }
+          }
+          return runPlanCreate(planOpts);
+        }
+        case "show":
+          return runPlanShow(args[2]);
+        case "execute":
+        case "run":
+          return runPlanExecute(args[2]);
+        case "pause":
+          return runPlanPause(args[2]);
+        case "resume":
+          return runPlanResume(args[2]);
+        case "context":
+          if (!args[2]) {
+            console.error("  Usage: opcom plan context <text> [plan-id]");
+            process.exit(1);
+          }
+          return runPlanContext(args[2], args[3]);
+        case "skip":
+          if (!args[2]) {
+            console.error("  Usage: opcom plan skip <ticket-id> [plan-id]");
+            process.exit(1);
+          }
+          return runPlanSkip(args[2], args[3]);
+        case "hygiene":
+          return runPlanHygiene();
+        default:
+          console.error("  Usage: opcom plan <list|create|show|execute|pause|resume|context|skip|hygiene>");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "dev": {
       if (!args[1]) {
         console.error("  Usage: opcom dev <project> [service]");
@@ -207,6 +266,15 @@ function printHelp(): void {
     analytics tools [--project X]    Tool usage frequency + success rates
     analytics sessions [--project X] Session durations and event counts
     analytics daily [--project X] [--days N] Daily activity summary
+    plan list                    List execution plans
+    plan create [opts]           Create plan from tickets
+    plan show [plan-id]          Show plan DAG with tracks
+    plan execute [plan-id]       Execute plan (start agents)
+    plan pause [plan-id]         Pause active plan
+    plan resume [plan-id]        Resume paused plan
+    plan context <text> [id]     Add context to plan
+    plan skip <ticket> [id]      Skip a step
+    plan hygiene                 Run ticket health checks
     schedule list                List scheduled tasks
     schedule add <n> <c> <cmd>   Add a scheduled task (name, cron, command)
     schedule remove <id>         Remove a scheduled task

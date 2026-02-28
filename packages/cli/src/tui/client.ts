@@ -10,6 +10,7 @@ import type {
   NormalizedEvent,
   WorkItem,
   ProjectConfig,
+  Plan,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -24,7 +25,11 @@ import {
   buildTicketCreationPrompt,
   buildTicketChatPrompt,
   createLogger,
+  listPlans,
+  computePlan,
+  savePlan,
 } from "@opcom/core";
+import type { TicketSet } from "@opcom/core";
 
 const log = createLogger("tui-client");
 
@@ -44,6 +49,7 @@ export class TuiClient {
   projects: ProjectStatusSnapshot[] = [];
   agents: AgentSession[] = [];
   agentEvents = new Map<string, NormalizedEvent[]>();
+  activePlan: Plan | null = null;
 
   // Direct-loaded data (fallback mode)
   projectConfigs = new Map<string, ProjectConfig>();
@@ -232,10 +238,26 @@ export class TuiClient {
 
       this.projects = projects;
 
+      // Load active plan
+      await this.loadActivePlan();
+
       // Watch .tickets/ dirs for changes so new tickets appear automatically
       this.watchTicketDirs();
     } catch (err) {
       log.error("loadDirect failed", { error: String(err) });
+    }
+  }
+
+  private async loadActivePlan(): Promise<void> {
+    try {
+      const plans = await listPlans();
+      // Find the most recent active plan (executing/paused/planning)
+      const active = plans.find((p) =>
+        p.status === "executing" || p.status === "paused" || p.status === "planning",
+      );
+      this.activePlan = active ?? null;
+    } catch {
+      // Plans dir may not exist yet
     }
   }
 
@@ -294,6 +316,12 @@ export class TuiClient {
             ? { ...p, git: event.git, workSummary: event.workSummary }
             : p,
         );
+        break;
+
+      case "plan_updated":
+      case "plan_completed":
+      case "plan_paused":
+        this.activePlan = event.plan;
         break;
     }
 
@@ -473,6 +501,75 @@ export class TuiClient {
     }
   }
 
+  async createPlan(projectId: string): Promise<Plan | null> {
+    try {
+      const tickets = this.projectTickets.get(projectId);
+      if (!tickets || tickets.length === 0) {
+        log.warn("createPlan: no tickets for project", { projectId });
+        return null;
+      }
+
+      const ticketSets: TicketSet[] = [{ projectId, tickets }];
+      const scope = { projectIds: [projectId], query: "status:open" };
+      const project = this.projectConfigs.get(projectId);
+      const name = project?.name ?? projectId;
+      const plan = computePlan(ticketSets, scope, name);
+
+      if (plan.steps.length === 0) {
+        log.warn("createPlan: no open tickets after filter");
+        return null;
+      }
+
+      await savePlan(plan);
+      this.activePlan = plan;
+
+      // Notify handlers so TUI re-renders
+      for (const handler of this.handlers) {
+        try {
+          handler({ type: "plan_updated", plan } as ServerEvent);
+        } catch { /* ignore */ }
+      }
+
+      return plan;
+    } catch (err) {
+      log.error("createPlan failed", { error: String(err) });
+      return null;
+    }
+  }
+
+  async executePlan(planId: string): Promise<void> {
+    if (!this.activePlan || this.activePlan.id !== planId) return;
+
+    this.activePlan.status = "executing";
+    await savePlan(this.activePlan);
+
+    // In daemon mode, send command; in offline mode, start the executor locally
+    if (this.ws && this._connected) {
+      this.send({ type: "execute_plan", planId } as ClientCommand);
+    } else if (this.localSessionManager) {
+      const { Executor } = await import("@opcom/core");
+      const executor = new Executor(this.activePlan, this.localSessionManager);
+
+      executor.on("plan_updated", ({ plan }) => {
+        this.activePlan = plan;
+        this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
+      });
+      executor.on("plan_paused", ({ plan }) => {
+        this.activePlan = plan;
+        this.handleServerEvent({ type: "plan_paused", plan } as ServerEvent);
+      });
+      executor.on("plan_completed", ({ plan }) => {
+        this.activePlan = plan;
+        this.handleServerEvent({ type: "plan_completed", plan } as ServerEvent);
+      });
+
+      // Run in background — don't block the TUI
+      executor.run().catch((err) => {
+        log.error("executor run failed", { error: String(err) });
+      });
+    }
+  }
+
   onEvent(handler: EventHandler): () => void {
     this.handlers.push(handler);
     return () => {
@@ -534,6 +631,9 @@ export class TuiClient {
       }
 
       this.projects = projects;
+
+      // Reload active plan
+      await this.loadActivePlan();
 
       // Notify handlers so TUI re-renders with updated data
       for (const handler of this.handlers) {

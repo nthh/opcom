@@ -82,6 +82,7 @@ export class TuiApp {
   private createTicketProjectId: string | null = null;
   private chatTicketWorkItemId: string | null = null; // non-null = chatting about existing ticket
 
+
   constructor() {
     this.client = new TuiClient();
     this.termSize = new TerminalSize();
@@ -166,6 +167,13 @@ export class TuiApp {
       allWorkItems.push(...tickets);
     }
     this.dashboardState.workItems = allWorkItems;
+
+    // Sync plan state
+    if (this.client.activePlan) {
+      this.dashboardState.planPanel = { plan: this.client.activePlan };
+    } else {
+      this.dashboardState.planPanel = null;
+    }
 
     clampDashboard(this.dashboardState);
 
@@ -261,8 +269,12 @@ export class TuiApp {
           keysStr = dim(this.ticketPromptLabel());
         } else if (this.searchMode) {
           keysStr = dim(`Search: ${this.searchQuery}_  (Enter confirm, Esc cancel)`);
+        } else if (this.dashboardState.planPanel) {
+          const ps = this.dashboardState.planPanel.plan.status;
+          const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
+          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  s:scan  S:stop  /:search  1-4:filter  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  P:plan  c:chat  s:scan  S:stop  /:search  1-4:filter  ?:help  q:quit");
         }
         break;
       case 2:
@@ -373,6 +385,7 @@ export class TuiApp {
       return;
     }
 
+
     // Handle help overlay
     if (this.helpVisible) {
       if (data === "?" || data === "\x1b" || data === "q") {
@@ -477,6 +490,30 @@ export class TuiApp {
 
       case "c":
         this.enterCreateTicketMode();
+        return;
+
+      case "P": { // Create plan for selected project
+        const project = state.projects[state.selectedIndex[0]];
+        if (project) {
+          this.client.createPlan(project.id).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      case " ": // Space — approve/pause/resume plan
+        if (state.planPanel) {
+          const plan = state.planPanel.plan;
+          if (plan.status === "planning") {
+            this.client.executePlan(plan.id).catch(() => {});
+          } else if (plan.status === "executing") {
+            this.client.send({ type: "pause_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
+          } else if (plan.status === "paused") {
+            this.client.send({ type: "resume_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
+          }
+        }
         return;
 
       case "/":
@@ -635,6 +672,28 @@ export class TuiApp {
 
       case "c":
         this.enterCreateTicketMode();
+        return;
+
+      case "P": // Create plan for this project
+        if (this.focusedProjectId) {
+          this.client.createPlan(this.focusedProjectId).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+
+      case " ": // Space — approve/pause/resume plan
+        if (this.dashboardState.planPanel) {
+          const plan = this.dashboardState.planPanel.plan;
+          if (plan.status === "planning") {
+            this.client.executePlan(plan.id).catch(() => {});
+          } else if (plan.status === "executing") {
+            this.client.send({ type: "pause_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
+          } else if (plan.status === "paused") {
+            this.client.send({ type: "resume_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
+          }
+        }
         return;
 
       case "d":

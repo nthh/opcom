@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -15,6 +15,10 @@ import {
   progressBar,
 } from "../renderer.js";
 
+export interface PlanPanelState {
+  plan: Plan;
+}
+
 export interface DashboardState {
   projects: ProjectStatusSnapshot[];
   agents: AgentSession[];
@@ -24,6 +28,7 @@ export interface DashboardState {
   scrollOffset: number[]; // scroll offset per panel
   priorityFilter: number | null; // null = all, 0-4 = filter
   searchQuery: string;
+  planPanel: PlanPanelState | null; // non-null when plan is active
 }
 
 export function createDashboardState(): DashboardState {
@@ -36,6 +41,7 @@ export function createDashboardState(): DashboardState {
     scrollOffset: [0, 0, 0],
     priorityFilter: null,
     searchQuery: "",
+    planPanel: null,
   };
 }
 
@@ -49,7 +55,13 @@ export function renderDashboard(
   const agentsPanel = panels.find((p) => p.id === "agents");
 
   if (projectsPanel) renderProjectsPanel(buf, projectsPanel, state, state.focusedPanel === 0);
-  if (workqueuePanel) renderWorkQueuePanel(buf, workqueuePanel, state, state.focusedPanel === 1);
+  if (workqueuePanel) {
+    if (state.planPanel) {
+      renderPlanPanel(buf, workqueuePanel, state, state.focusedPanel === 1);
+    } else {
+      renderWorkQueuePanel(buf, workqueuePanel, state, state.focusedPanel === 1);
+    }
+  }
   if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 2);
 }
 
@@ -185,6 +197,99 @@ function formatWorkItemLine(
 
   const line = `${priority} ${statusIcon} ${item.title}${agentIcon}`;
   return truncate(line, maxWidth);
+}
+
+function planStepIcon(status: string): string {
+  switch (status) {
+    case "blocked": return "\u25cc"; // ◌
+    case "ready": return "\u25cb"; // ○
+    case "in-progress": return "\u25cf"; // ●
+    case "done": return "\u2713"; // ✓
+    case "failed": return "\u2717"; // ✗
+    case "skipped": return "\u2298"; // ⊘
+    default: return "?";
+  }
+}
+
+function planStatusColor(status: string): string {
+  switch (status) {
+    case "in-progress": return ANSI.yellow;
+    case "ready": return ANSI.cyan;
+    case "done": return ANSI.green;
+    case "failed": return ANSI.red;
+    case "skipped": return ANSI.dim;
+    case "blocked": return ANSI.dim;
+    default: return ANSI.white;
+  }
+}
+
+function renderPlanPanel(
+  buf: ScreenBuffer,
+  panel: Panel,
+  state: DashboardState,
+  focused: boolean,
+): void {
+  const plan = state.planPanel!.plan;
+  const done = plan.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
+  const total = plan.steps.length;
+  const planStatusIcon = plan.status === "executing" ? "\u25cf" :
+    plan.status === "paused" ? "\u25cc" :
+    plan.status === "done" ? "\u2713" : "\u25cb";
+
+  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}`;
+
+  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
+
+  const contentWidth = panel.width - 4;
+  const maxItems = panel.height - 2;
+  const selected = state.selectedIndex[1] ?? 0;
+  const scroll = state.scrollOffset[1] ?? 0;
+
+  if (plan.steps.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No steps in plan"), contentWidth);
+    return;
+  }
+
+  // Group by track
+  const tracks = new Map<string, typeof plan.steps>();
+  for (const step of plan.steps) {
+    const track = step.track ?? "unassigned";
+    if (!tracks.has(track)) tracks.set(track, []);
+    tracks.get(track)!.push(step);
+  }
+
+  // Build flat list of display lines: track headers + steps
+  const lines: Array<{ type: "track"; name: string } | { type: "step"; step: typeof plan.steps[0]; index: number }> = [];
+  let stepIdx = 0;
+  for (const [trackName, steps] of tracks) {
+    lines.push({ type: "track", name: trackName });
+    for (const step of steps) {
+      lines.push({ type: "step", step, index: stepIdx++ });
+    }
+  }
+
+  for (let i = 0; i < maxItems && i + scroll < lines.length; i++) {
+    const idx = i + scroll;
+    const line = lines[idx];
+    const row = panel.y + 1 + i;
+
+    if (line.type === "track") {
+      buf.writeLine(row, panel.x + 2, bold(dim(`[${line.name}]`)), contentWidth);
+    } else {
+      const step = line.step;
+      const icon = planStepIcon(step.status);
+      const sColor = planStatusColor(step.status);
+      const statusStr = color(sColor, `${icon} ${step.status}`);
+      const text = `  ${statusStr} ${step.ticketId}`;
+      const isSelected = line.index === selected && focused;
+
+      if (isSelected) {
+        buf.writeLine(row, panel.x + 2, ANSI.reverse + truncate(text, contentWidth) + ANSI.reset, contentWidth);
+      } else {
+        buf.writeLine(row, panel.x + 2, truncate(text, contentWidth), contentWidth);
+      }
+    }
+  }
 }
 
 function renderAgentsPanel(
