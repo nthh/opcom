@@ -126,6 +126,13 @@ export function computePlan(
     });
   }
 
+  // Sort steps by priority (P1 first) so executor picks highest priority ready steps
+  steps.sort((a, b) => {
+    const pa = allTickets.get(a.ticketId)?.ticket.priority ?? 99;
+    const pb = allTickets.get(b.ticketId)?.ticket.priority ?? 99;
+    return pa - pb;
+  });
+
   // Assign tracks
   const tracks = computeTracks(steps);
   for (const [trackName, stepIds] of tracks) {

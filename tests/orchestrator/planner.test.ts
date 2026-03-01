@@ -73,6 +73,23 @@ describe("computePlan", () => {
     expect(plan.steps.every((s) => s.status === "ready")).toBe(true);
   });
 
+  it("sorts steps by priority (P1 before P3)", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "low-pri", priority: 4 }),
+          makeTicket({ id: "high-pri", priority: 1 }),
+          makeTicket({ id: "mid-pri", priority: 2 }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "priority-plan");
+    const ids = plan.steps.map((s) => s.ticketId);
+    expect(ids).toEqual(["high-pri", "mid-pri", "low-pri"]);
+  });
+
   it("filters closed and deferred tickets", () => {
     const tickets: TicketSet[] = [
       {
