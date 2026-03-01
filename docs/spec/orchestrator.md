@@ -268,10 +268,12 @@ private async startStep(step: PlanStep): Promise<void> {
 
 How does the executor know an agent is "done"? Several signals:
 
-1. **Agent exits cleanly** — `agent_end` event with no error. This is the primary signal.
+1. **Agent exits cleanly** — `agent_end` event with no error. This is the primary signal. The session manager emits `session_stopped` on both explicit stops and natural exits.
 2. **Agent goes idle after marking work complete** — agent's last message indicates completion.
 3. **Ticket status changes** — if the agent (or user) marks the ticket as `closed` or `in-progress`, update accordingly.
 4. **Manual confirmation** — user presses a key in TUI to mark step done.
+
+After agent exit, the **verification pipeline** runs (see `docs/spec/verification.md`): auto-commit → test gate → oracle evaluation → mark done/failed. This replaces the naive write-count check.
 
 The executor listens to `SessionManager` events:
 
@@ -384,6 +386,34 @@ The planning agent has access to:
 - Historical data from the event store (what worked, what failed)
 
 Its output is a modified ticket set and a plan. The user confirms before execution begins.
+
+### Ticket Decomposition
+
+Before execution, the planning session (agent or human) reviews each step and decides if it's agent-sized. Large tickets get decomposed into sub-tickets that go back into the ticket graph:
+
+```
+cloud-serverless-adapters (too big for one agent)
+    ↓ planning session decomposes
+cloud-serverless-types          (deps: [])
+cloud-serverless-cf-adapter     (deps: [cloud-serverless-types])
+cloud-serverless-firebase-adapter (deps: [cloud-serverless-types])
+cloud-serverless-tests          (deps: [cf-adapter, firebase-adapter])
+```
+
+Sub-tickets use the existing `parent` field on WorkItem to link back to their origin. The parent ticket is "done" when all children are done. The planner handles this automatically — it already computes status from deps.
+
+Decomposition criteria (agent or human applies these):
+1. **Multiple providers** — one ticket per provider (e.g., R2 adapter, GCS adapter)
+2. **Types + implementation + tests** — if a ticket spans all three and each is non-trivial, split
+3. **TUI + backend** — if a ticket requires both core logic and TUI rendering, split
+4. **Spec complexity** — if the linked spec is >200 lines, the ticket probably needs decomposition
+
+The planning session can be:
+- **Fully agent-driven** — agent reads ticket + spec + codebase, creates sub-tickets
+- **Human-assisted** — agent proposes decomposition, human approves/edits in TUI
+- **Fully manual** — human creates sub-tickets directly
+
+These modes can be mixed per-ticket within the same plan. The `plan.status = "planning"` state is where decomposition happens, before transitioning to `"executing"`.
 
 ### Relationship to Triage
 

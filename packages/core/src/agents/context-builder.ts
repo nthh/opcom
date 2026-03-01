@@ -43,18 +43,47 @@ export async function buildContextPacket(
     };
 
     // Try to load linked spec files
+    const specParts: string[] = [];
     if (workItem.links.length > 0) {
       for (const link of workItem.links) {
         const specPath = join(project.path, link);
         if (existsSync(specPath)) {
           try {
-            workItemData.spec = await readFile(specPath, "utf-8");
-            break; // Use first found spec
+            specParts.push(await readFile(specPath, "utf-8"));
           } catch {
             // Skip
           }
         }
       }
+    }
+
+    // Load relevant ADRs (docs/adr/*.md that reference this ticket or its linked specs)
+    const adrDir = join(project.path, "docs", "adr");
+    if (existsSync(adrDir)) {
+      try {
+        const { readdir: readdirAsync } = await import("node:fs/promises");
+        const adrFiles = await readdirAsync(adrDir);
+        for (const f of adrFiles) {
+          if (!f.endsWith(".md")) continue;
+          try {
+            const adrContent = await readFile(join(adrDir, f), "utf-8");
+            // Include ADR if it references this ticket or any linked spec
+            const refsTicket = adrContent.includes(workItem.id);
+            const refsSpec = workItem.links.some((link) => adrContent.includes(link));
+            if (refsTicket || refsSpec) {
+              specParts.push(`\n---\n## ADR: ${f}\n${adrContent}`);
+            }
+          } catch {
+            // Skip unreadable ADR
+          }
+        }
+      } catch {
+        // ADR dir not listable
+      }
+    }
+
+    if (specParts.length > 0) {
+      workItemData.spec = specParts.join("\n\n---\n\n");
     }
 
     // Load related tickets (deps)

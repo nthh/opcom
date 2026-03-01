@@ -34,6 +34,12 @@ export interface PlanStep {
   error?: string;
 }
 
+export interface VerificationConfig {
+  runTests: boolean;
+  runOracle: boolean;
+  oracleModel?: string;
+}
+
 export interface OrchestratorConfig {
   maxConcurrentAgents: number;
   autoStart: boolean;
@@ -42,6 +48,29 @@ export interface OrchestratorConfig {
   pauseOnFailure: boolean;
   ticketTransitions: boolean;
   autoCommit: boolean;
+  verification: VerificationConfig;
+}
+
+export interface TestGateResult {
+  passed: boolean;
+  testCommand: string;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  output: string;
+  durationMs: number;
+}
+
+export interface VerificationResult {
+  stepTicketId: string;
+  testGate?: TestGateResult;
+  oracle?: {
+    passed: boolean;
+    criteria: Array<{ criterion: string; met: boolean; reasoning: string }>;
+    concerns: string[];
+  };
+  passed: boolean;
+  failureReasons: string[];
 }
 
 export interface HygieneReport {

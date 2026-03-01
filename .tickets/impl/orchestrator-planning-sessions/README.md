@@ -43,3 +43,4 @@ Planning sessions use LLM to analyze current tickets, project state, and user-pr
 - Planning agent correctly reads existing tickets and their dep graph
 - User can inject context ("focus on cloud services") and agent adapts the plan
 - Generated plan respects existing ticket deps and doesn't create cycles
+- Planning session can propose ticket decomposition (see `planning-decomposition` ticket)

@@ -60,6 +60,16 @@ Intelligence layer on top of structured data.
 - **Oracle checking** — Verify agent output against specs and acceptance criteria
 - **Work item generation** — Analyze codebase, suggest tickets for tech debt, missing tests, etc.
 
+## Phase 6.5: Verification + Planning
+Close the loop between agent output and spec compliance.
+
+- **Test gate** — Run project tests after agent completes, before marking step done (see `docs/spec/verification.md`)
+- **Oracle verification** — LLM evaluates git diff against acceptance criteria and linked spec
+- **Planning decomposition** — Break large tickets into agent-sized sub-tickets before execution
+- **Integration smoke tests** — Full build + test suite after concurrent batches and plan completion
+- **ADR infrastructure** — `docs/adr/` directory for architectural decision records, loaded into agent context
+- See ADRs: `002-verification-pipeline.md`, `003-planning-decomposition.md`
+
 ## Phase 7: Scheduling + Integrations
 Automation and external connections.
 

@@ -13,6 +13,10 @@ export function defaultConfig(): OrchestratorConfig {
     pauseOnFailure: true,
     ticketTransitions: true,
     autoCommit: true,
+    verification: {
+      runTests: true,
+      runOracle: false,
+    },
   };
 }
 
