@@ -1,7 +1,7 @@
 ---
 id: cicd-integration
 title: "CI/CD Integration: GitHub Actions Pipeline & Deployment Status"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
@@ -23,21 +23,21 @@ Defines the `CICDAdapter` interface, normalized `Pipeline` and `DeploymentStatus
 
 ## Tasks
 
-- [ ] Define `CICDAdapter` interface: `detect`, `listPipelines`, `getPipeline`, `listDeployments`, `watch`
-- [ ] Define normalized types: `Pipeline`, `PipelineJob`, `PipelineStep`, `PipelineStatus`, `DeploymentStatus`
-- [ ] Implement `GitHubActionsAdapter`:
-  - [ ] Detection: check for GitHub remote + `.github/workflows/` directory
-  - [ ] Map GitHub API workflow run / job / step responses to normalized types
-  - [ ] Status mapping: GitHub conclusion → `PipelineStatus`
-- [ ] Authentication: support `gh auth token` command (preferred) and explicit PAT in config
-- [ ] Polling service:
-  - [ ] Active polling (30s) when pipelines are in progress
-  - [ ] Idle polling (5m) when all pipelines are terminal
-  - [ ] Adaptive: poll more frequently right after a push
-- [ ] REST endpoints: `/projects/:id/pipelines`, `/projects/:id/deployments`, rerun/cancel actions
-- [ ] WebSocket events: `pipeline_updated`, `deployment_updated`
-- [ ] CLI: `opcom ci [project]` to show recent pipeline status
-- [ ] CLI: `opcom ci <project> --watch` for live pipeline tailing
+- [x] Define `CICDAdapter` interface: `detect`, `listPipelines`, `getPipeline`, `listDeployments`, `watch`
+- [x] Define normalized types: `Pipeline`, `PipelineJob`, `PipelineStep`, `PipelineStatus`, `DeploymentStatus`
+- [x] Implement `GitHubActionsAdapter`:
+  - [x] Detection: check for GitHub remote + `.github/workflows/` directory
+  - [x] Map GitHub API workflow run / job / step responses to normalized types
+  - [x] Status mapping: GitHub conclusion → `PipelineStatus`
+- [x] Authentication: support `gh auth token` command (preferred) and explicit PAT in config
+- [x] Polling service:
+  - [x] Active polling (30s) when pipelines are in progress
+  - [x] Idle polling (5m) when all pipelines are terminal
+  - [x] Adaptive: poll more frequently right after a push
+- [x] REST endpoints: `/projects/:id/pipelines`, `/projects/:id/deployments`, rerun/cancel actions
+- [x] WebSocket events: `pipeline_updated`, `deployment_updated`
+- [x] CLI: `opcom ci [project]` to show recent pipeline status
+- [x] CLI: `opcom ci <project> --watch` for live pipeline tailing
 - [ ] Webhook ingestion endpoint: `POST /webhooks/github` for real-time updates (optional upgrade)
 - [ ] `opcom ci setup <project>` to configure webhook via GitHub API
 

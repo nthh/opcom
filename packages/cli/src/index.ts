@@ -15,6 +15,7 @@ import { runTriage } from "./commands/triage.js";
 import { runOracle } from "./commands/oracle.js";
 import { runScheduleList, runScheduleAdd, runScheduleRemove } from "./commands/schedule.js";
 import { runAnalytics } from "./commands/analytics.js";
+import { runCI } from "./commands/ci.js";
 import {
   runPlanList,
   runPlanCreate,
@@ -216,6 +217,12 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "ci": {
+      const ciProject = args[1];
+      const ciWatch = args.includes("--watch");
+      return runCI(ciProject, { watch: ciWatch });
+    }
+
     case "dev": {
       if (!args[1]) {
         console.error("  Usage: opcom dev <project> [service]");
@@ -278,6 +285,8 @@ function printHelp(): void {
     plan context <text> [id]     Add context to plan
     plan skip <ticket> [id]      Skip a step
     plan hygiene                 Run ticket health checks
+    ci [project]                 Show CI/CD pipeline status
+    ci <project> --watch         Watch pipeline status live
     schedule list                List scheduled tasks
     schedule add <n> <c> <cmd>   Add a scheduled task (name, cron, command)
     schedule remove <id>         Remove a scheduled task

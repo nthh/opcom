@@ -24,6 +24,9 @@ import type { TicketSet } from "../orchestrator/planner.js";
 import { savePlan, loadPlan, listPlans, deletePlan } from "../orchestrator/persistence.js";
 import { checkHygiene } from "../orchestrator/hygiene.js";
 import { reconcilePlans } from "../orchestrator/reconcile.js";
+import { GitHubActionsAdapter } from "../integrations/github-actions.js";
+import { CICDPoller } from "../integrations/cicd-poller.js";
+import type { ProjectCICDState } from "../integrations/cicd-poller.js";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -53,10 +56,13 @@ export class Station {
   readonly messageRouter = new MessageRouter();
   private projectStatuses = new Map<string, ProjectStatus>();
   private executors = new Map<string, Executor>(); // planId → running Executor
+  private cicdPoller: CICDPoller | null = null;
   private port: number;
+  private options?: { skipCICD?: boolean };
 
-  constructor(port = 4700) {
+  constructor(port = 4700, options?: { skipCICD?: boolean }) {
     this.port = port;
+    this.options = options;
   }
 
   async start(): Promise<void> {
@@ -71,6 +77,11 @@ export class Station {
 
     // Load project statuses
     await this.refreshAllProjects();
+
+    // Initialize CI/CD polling for GitHub Actions projects (skip in test)
+    if (!this.options?.skipCICD) {
+      await this.initCICDPoller();
+    }
 
     // Wire up session events to broadcast
     this.sessionManager.on("session_created", (session) => {
@@ -127,6 +138,12 @@ export class Station {
   }
 
   async stop(): Promise<void> {
+    // Stop CI/CD polling
+    if (this.cicdPoller) {
+      this.cicdPoller.dispose();
+      this.cicdPoller = null;
+    }
+
     // Stop all running executors
     for (const executor of this.executors.values()) {
       executor.stop();
@@ -418,6 +435,71 @@ export class Station {
       return { status: 200, data: report };
     }
 
+    // --- CI/CD endpoints ---
+
+    // GET /projects/:id/pipelines
+    const pipelinesMatch = path.match(/^\/projects\/([^/]+)\/pipelines$/);
+    if (method === "GET" && pipelinesMatch) {
+      const project = await loadProject(pipelinesMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const state = this.cicdPoller?.getState(project.id);
+      return { status: 200, data: state?.pipelines ?? [] };
+    }
+
+    // GET /projects/:id/pipelines/:runId
+    const pipelineDetailMatch = path.match(/^\/projects\/([^/]+)\/pipelines\/([^/]+)$/);
+    if (method === "GET" && pipelineDetailMatch) {
+      const project = await loadProject(pipelineDetailMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const adapter = new GitHubActionsAdapter();
+        const pipeline = await adapter.getPipeline(project, pipelineDetailMatch[2]);
+        return { status: 200, data: pipeline };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to fetch pipeline";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // GET /projects/:id/deployments
+    const deploymentsMatch = path.match(/^\/projects\/([^/]+)\/deployments$/);
+    if (method === "GET" && deploymentsMatch) {
+      const project = await loadProject(deploymentsMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const state = this.cicdPoller?.getState(project.id);
+      return { status: 200, data: state?.deployments ?? [] };
+    }
+
+    // POST /projects/:id/pipelines/:runId/rerun
+    const rerunMatch = path.match(/^\/projects\/([^/]+)\/pipelines\/([^/]+)\/rerun$/);
+    if (method === "POST" && rerunMatch) {
+      const project = await loadProject(rerunMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const adapter = new GitHubActionsAdapter();
+        const pipeline = await adapter.rerunPipeline(project, rerunMatch[2]);
+        return { status: 200, data: pipeline };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to rerun pipeline";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // POST /projects/:id/pipelines/:runId/cancel
+    const cancelMatch = path.match(/^\/projects\/([^/]+)\/pipelines\/([^/]+)\/cancel$/);
+    if (method === "POST" && cancelMatch) {
+      const project = await loadProject(cancelMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const adapter = new GitHubActionsAdapter();
+        await adapter.cancelPipeline(project, cancelMatch[2]);
+        return { status: 200, data: { cancelled: true } };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to cancel pipeline";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
     return { status: 404, data: { error: "Not found" } };
   }
 
@@ -627,6 +709,38 @@ export class Station {
     executor.run().catch(() => {
       this.executors.delete(plan.id);
     });
+  }
+
+  private async initCICDPoller(): Promise<void> {
+    const adapter = new GitHubActionsAdapter();
+    this.cicdPoller = new CICDPoller(adapter);
+
+    // Subscribe to CI/CD events and broadcast to WebSocket clients
+    this.cicdPoller.onEvent((projectId, event) => {
+      if (event.type === "pipeline_updated") {
+        this.broadcast({ type: "pipeline_updated", projectId, pipeline: event.pipeline });
+      } else if (event.type === "deployment_updated") {
+        this.broadcast({ type: "deployment_updated", projectId, deployment: event.deployment });
+      }
+    });
+
+    // Track all projects that have GitHub Actions
+    const projects = await listProjects();
+    for (const project of projects) {
+      try {
+        const hasCI = await adapter.detect(project);
+        if (hasCI) {
+          await this.cicdPoller.track(project);
+        }
+      } catch {
+        // Skip projects where detection fails (no git remote, etc.)
+      }
+    }
+  }
+
+  /** Get CI/CD state for a project (used by CLI). */
+  getCICDState(projectId: string): ProjectCICDState | undefined {
+    return this.cicdPoller?.getState(projectId);
   }
 
   private async loadAllTickets(): Promise<TicketSet[]> {

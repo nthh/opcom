@@ -268,6 +268,26 @@ export class GitHubActionsAdapter implements CICDAdapter {
     return results;
   }
 
+  async rerunPipeline(project: ProjectConfig, pipelineId: string): Promise<Pipeline> {
+    const { owner, repo } = this.getOwnerRepo(project);
+    await execFileAsync("gh", [
+      "api", `repos/${owner}/${repo}/actions/runs/${pipelineId}/rerun`,
+      "-X", "POST",
+      "-H", "Accept: application/vnd.github+json",
+    ], { timeout: 30_000 });
+    // Fetch the updated run
+    return this.getPipeline(project, pipelineId);
+  }
+
+  async cancelPipeline(project: ProjectConfig, pipelineId: string): Promise<void> {
+    const { owner, repo } = this.getOwnerRepo(project);
+    await execFileAsync("gh", [
+      "api", `repos/${owner}/${repo}/actions/runs/${pipelineId}/cancel`,
+      "-X", "POST",
+      "-H", "Accept: application/vnd.github+json",
+    ], { timeout: 30_000 });
+  }
+
   watch(project: ProjectConfig, callback: (event: CICDEvent) => void): Disposable {
     let disposed = false;
     let timeout: ReturnType<typeof setTimeout> | null = null;
