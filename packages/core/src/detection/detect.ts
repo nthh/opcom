@@ -21,6 +21,7 @@ import { mergeStacks } from "./stack.js";
 import { detectTicketSystem } from "./tickets.js";
 import { detectSubProjects } from "./services.js";
 import { detectGit } from "./git.js";
+import { detectCloudServices } from "../cloud/detect.js";
 
 export async function detectProject(projectPath: string): Promise<DetectionResult> {
   const name = basename(projectPath);
@@ -417,6 +418,14 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     evidence.push(...globResult.evidence);
   }
 
+  // ===================================================================
+  // TIER 4: Cloud service detection (additive)
+  // Scans for cloud database configs, storage, serverless, etc.
+  // ===================================================================
+
+  const cloudResult = await detectCloudServices(projectPath, stack);
+  evidence.push(...cloudResult.evidence);
+
   // --- Determine confidence ---
   let confidence: DetectionResult["confidence"] = "low";
   if (stack.languages.length > 0 && (stack.frameworks.length > 0 || stack.infrastructure.length > 0)) {
@@ -437,6 +446,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     testing,
     linting,
     subProjects: subProjectResult.subProjects,
+    cloudServices: cloudResult.configs,
     evidence,
   };
 }

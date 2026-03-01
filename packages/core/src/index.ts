@@ -135,6 +135,27 @@ export type {
 export { CICDPoller } from "./integrations/cicd-poller.js";
 export type { CICDPollerConfig, ProjectCICDState, PollerEventCallback } from "./integrations/cicd-poller.js";
 
+// Cloud Database Adapters
+export {
+  TursoAdapter,
+  detectTurso,
+  getTursoStatus,
+  parseTursoUrl,
+  NeonAdapter,
+  detectNeon,
+  getNeonStatus,
+  parseNeonUrl,
+  isNeonUrl,
+  detectPrisma,
+  parseMigrateStatus,
+  getPrismaMigrationStatus,
+  runPrismaMigrate,
+  augmentWithPrisma,
+  detectCloudServices,
+  getDatabaseAdapters,
+} from "./cloud/index.js";
+export type { TursoConfig, NeonConfig, PrismaOverlayConfig, CloudDetectionResult } from "./cloud/index.js";
+
 // Orchestrator
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";

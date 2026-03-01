@@ -1,3 +1,5 @@
+import type { CloudServiceConfig } from "./cloud-services.js";
+
 export interface ProjectConfig {
   id: string;
   name: string;
@@ -11,6 +13,7 @@ export interface ProjectConfig {
   testing: TestingConfig | null;
   linting: LintConfig[];
   subProjects: SubProject[];
+  cloudServices: CloudServiceConfig[];
   lastScannedAt: string;
   overrides?: Partial<ProjectConfigOverrides>;
 }

@@ -1,4 +1,5 @@
 import type { StackInfo, WorkSystemInfo, ServiceDefinition, TestingConfig, LintConfig, SubProject, GitInfo, ProjectDocs } from "./project.js";
+import type { CloudServiceConfig } from "./cloud-services.js";
 
 export type DetectionConfidence = "high" | "medium" | "low";
 
@@ -14,6 +15,7 @@ export interface DetectionResult {
   testing: TestingConfig | null;
   linting: LintConfig[];
   subProjects: SubProject[];
+  cloudServices: CloudServiceConfig[];
   evidence: DetectionEvidence[];
 }
 

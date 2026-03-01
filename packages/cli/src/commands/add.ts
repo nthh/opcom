@@ -23,6 +23,7 @@ export function detectionToProjectConfig(result: DetectionResult): ProjectConfig
     testing: result.testing,
     linting: result.linting,
     subProjects: result.subProjects,
+    cloudServices: result.cloudServices,
     lastScannedAt: new Date().toISOString(),
   };
 }

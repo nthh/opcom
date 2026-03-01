@@ -49,6 +49,7 @@ export function validateProjectConfig(data: unknown): ProjectConfig {
     testing: (obj.testing as ProjectConfig["testing"]) ?? null,
     linting: Array.isArray(obj.linting) ? obj.linting : [],
     subProjects: Array.isArray(obj.subProjects) ? obj.subProjects : [],
+    cloudServices: Array.isArray(obj.cloudServices) ? obj.cloudServices : [],
     lastScannedAt: typeof obj.lastScannedAt === "string" ? obj.lastScannedAt : new Date().toISOString(),
     overrides: obj.overrides as ProjectConfig["overrides"],
   };
