@@ -22,6 +22,7 @@ function makeProject(): ProjectConfig {
     testing: null,
     linting: [],
     subProjects: [],
+    cloudServices: [],
     lastScannedAt: "2026-02-27T00:00:00Z",
   };
 }

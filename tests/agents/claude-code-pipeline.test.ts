@@ -141,6 +141,35 @@ describe("ClaudeCodeAdapter pipeline", () => {
     expect(events[1].data?.toolSuccess).toBe(true);
   });
 
+  it("carries toolName from tool_start to tool_end", async () => {
+    const session = await adapter.start(makeConfig());
+
+    // agent_start + message_start + tool_start + message_end + tool_end = 5
+    const eventsPromise = collectEvents(session.id, 5);
+
+    // Send assistant with tool_use, then the result
+    mockProc.stdout.push(JSON.stringify({
+      type: "assistant",
+      message: {
+        content: [{ type: "tool_use", name: "Write", input: { path: "/foo", content: "bar" } }],
+      },
+    }) + "\n");
+
+    mockProc.stdout.push(JSON.stringify({
+      type: "result",
+      result: "File written",
+      is_error: false,
+    }) + "\n");
+
+    const events = await eventsPromise;
+
+    expect(events[2].type).toBe("tool_start");
+    expect(events[2].data?.toolName).toBe("Write");
+    expect(events[4].type).toBe("tool_end");
+    expect(events[4].data?.toolName).toBe("Write");
+    expect(events[4].data?.toolSuccess).toBe(true);
+  });
+
   it("emits stderr lines as error events with 'stderr:' prefix", async () => {
     const session = await adapter.start(makeConfig());
 

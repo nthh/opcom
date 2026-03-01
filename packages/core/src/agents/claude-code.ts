@@ -18,6 +18,7 @@ interface RunningProcess {
   subscribers: Set<(event: NormalizedEvent) => void>;
   prompt_resolve?: () => void;
   streamedText: string; // accumulates text from streaming deltas for dedup
+  pendingToolNames: string[]; // stack of tool names from tool_start, popped on tool_end
 }
 
 export class ClaudeCodeAdapter implements AgentAdapter {
@@ -107,6 +108,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       eventBuffer: [],
       subscribers: new Set(),
       streamedText: "",
+      pendingToolNames: [],
     };
 
     this.processes.set(sessionId, running);
@@ -393,12 +395,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
                   data: { text: block.text as string },
                 });
               } else if (block.type === "tool_use") {
+                const toolName = block.name as string;
+                const proc = this.processes.get(sessionId);
+                if (proc) proc.pendingToolNames.push(toolName);
                 events.push({
                   type: "tool_start",
                   sessionId,
                   timestamp: ts,
                   data: {
-                    toolName: block.name as string,
+                    toolName,
                     toolInput: typeof block.input === "string" ? block.input : JSON.stringify(block.input),
                   },
                 });
@@ -417,13 +422,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       }
 
       case "result": {
-        // Tool result
+        // Tool result — carry forward the tool name from the matching tool_start
         const result = obj.result as string | undefined;
+        const proc = this.processes.get(sessionId);
+        const toolName = proc?.pendingToolNames.shift();
         events.push({
           type: "tool_end",
           sessionId,
           timestamp: ts,
           data: {
+            toolName,
             toolOutput: result,
             toolSuccess: !obj.is_error,
           },

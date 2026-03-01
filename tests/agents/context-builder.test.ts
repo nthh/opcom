@@ -25,6 +25,7 @@ function makeProject(overrides?: Partial<ProjectConfig>): ProjectConfig {
     testing: { framework: "vitest", command: "npm test" },
     linting: [{ name: "eslint", sourceFile: "eslint.config.js" }],
     subProjects: [],
+    cloudServices: [],
     lastScannedAt: "2026-02-27T00:00:00Z",
     ...overrides,
   };

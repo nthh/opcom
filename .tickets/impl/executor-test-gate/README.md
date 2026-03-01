@@ -1,7 +1,7 @@
 ---
 id: executor-test-gate
 title: "Executor: Run Tests as Completion Gate"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:

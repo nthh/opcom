@@ -66,6 +66,7 @@ describe("config roundtrip", () => {
       testing: { framework: "vitest" },
       linting: [{ name: "eslint", sourceFile: "eslint.config.js" }],
       subProjects: [],
+      cloudServices: [],
       lastScannedAt: "2026-02-27T00:00:00Z",
     };
 
@@ -93,7 +94,7 @@ describe("config roundtrip", () => {
     const workspaces = await listWorkspaces();
     expect(workspaces).toHaveLength(2);
 
-    await saveProject({ id: "p1", name: "P1", path: "/tmp/p1", stack: emptyStack(), git: null, workSystem: null, docs: {}, services: [], environments: [], testing: null, linting: [], subProjects: [], lastScannedAt: "2026-01-01T00:00:00Z" });
+    await saveProject({ id: "p1", name: "P1", path: "/tmp/p1", stack: emptyStack(), git: null, workSystem: null, docs: {}, services: [], environments: [], testing: null, linting: [], subProjects: [], cloudServices: [], lastScannedAt: "2026-01-01T00:00:00Z" });
     const projects = await listProjects();
     expect(projects).toHaveLength(1);
   });
