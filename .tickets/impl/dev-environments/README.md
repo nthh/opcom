@@ -1,7 +1,7 @@
 ---
 id: dev-environments
 title: "Dev Environment Management & Port Registry"
-status: closed
+status: open
 type: feature
 priority: 2
 deps:
