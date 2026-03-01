@@ -329,6 +329,55 @@ describe("EventStore", () => {
     expect(loaded[0].contextUsage!.maxTokens).toBe(200000);
     expect(loaded[0].contextUsage!.percentage).toBe(25);
   });
+
+  // --- Plan events ---
+
+  it("inserts and loads plan events", () => {
+    store.insertPlanEvent("plan-1", "plan_started", {
+      detail: { stepCount: 5 },
+    });
+    store.insertPlanEvent("plan-1", "step_started", {
+      stepTicketId: "ticket-a",
+      agentSessionId: "sess-1",
+    });
+    store.insertPlanEvent("plan-1", "step_completed", {
+      stepTicketId: "ticket-a",
+      agentSessionId: "sess-1",
+      detail: { writes: 3 },
+    });
+
+    const events = store.loadPlanEvents("plan-1");
+    expect(events).toHaveLength(3);
+    expect(events[0].eventType).toBe("plan_started");
+    expect(events[0].planId).toBe("plan-1");
+    expect(events[0].stepTicketId).toBeNull();
+    expect(JSON.parse(events[0].detailJson!)).toEqual({ stepCount: 5 });
+
+    expect(events[1].eventType).toBe("step_started");
+    expect(events[1].stepTicketId).toBe("ticket-a");
+    expect(events[1].agentSessionId).toBe("sess-1");
+
+    expect(events[2].eventType).toBe("step_completed");
+  });
+
+  it("returns empty array for unknown plan events", () => {
+    const events = store.loadPlanEvents("nonexistent");
+    expect(events).toHaveLength(0);
+  });
+
+  it("respects limit and offset on loadPlanEvents", () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertPlanEvent("plan-2", `event_${i}`);
+    }
+
+    const page1 = store.loadPlanEvents("plan-2", { limit: 2, offset: 0 });
+    expect(page1).toHaveLength(2);
+    expect(page1[0].eventType).toBe("event_0");
+
+    const page2 = store.loadPlanEvents("plan-2", { limit: 2, offset: 2 });
+    expect(page2).toHaveLength(2);
+    expect(page2[0].eventType).toBe("event_2");
+  });
 });
 
 // --- Helpers ---

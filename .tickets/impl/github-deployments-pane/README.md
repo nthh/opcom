@@ -1,7 +1,7 @@
 ---
 id: github-deployments-pane
 title: "GitHub Deployments & Workflow Status Pane"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:

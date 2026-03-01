@@ -53,6 +53,19 @@ class MockSessionManager {
     this.stopCalls.push(sessionId);
   }
 
+  // Simulate an agent writing files (so completion check passes)
+  simulateWrite(sessionId: string): void {
+    this.emit("agent_event", {
+      sessionId,
+      event: {
+        type: "tool_end",
+        sessionId,
+        timestamp: new Date().toISOString(),
+        data: { toolName: "Edit", toolSuccess: true },
+      },
+    });
+  }
+
   // Simulate an agent completing
   simulateCompletion(sessionId: string): void {
     const session: AgentSession = {
@@ -104,6 +117,11 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
     project: { name: "test", path: "/tmp", stack: {}, testing: null, linting: [], services: [] },
     git: { branch: "main", remote: null, clean: true },
   })),
+}));
+
+const mockCommitStepChanges = vi.fn(async () => true);
+vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
+  commitStepChanges: (...args: unknown[]) => mockCommitStepChanges(...args),
 }));
 
 function makePlan(steps: PlanStep[], configOverrides?: Partial<ReturnType<typeof defaultConfig>>): Plan {
@@ -170,8 +188,9 @@ describe("Executor", () => {
     expect(mockSM.startCalls).toHaveLength(1);
     expect(mockSM.startCalls[0].ticketId).toBe("t1");
 
-    // Simulate t1 agent completing
+    // Simulate t1 agent writing files then completing
     const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
+    mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
 
     await new Promise((r) => setTimeout(r, 50));
@@ -227,8 +246,9 @@ describe("Executor", () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(executor.getPlan().status).toBe("paused");
 
-    // Complete first task
+    // Complete first task (with write activity)
     const sessionId = executor.getPlan().steps.find((s) => s.status === "in-progress")!.agentSessionId!;
+    mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
     await new Promise((r) => setTimeout(r, 100));
 
@@ -284,6 +304,106 @@ describe("Executor", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(plan.steps.find((s) => s.ticketId === "t1")!.status).toBe("skipped");
+
+    executor.stop();
+    await runPromise;
+  });
+});
+
+describe("Executor plan event logging", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    mockSM = new MockSessionManager();
+    vi.clearAllMocks();
+  });
+
+  it("logs plan events to EventStore when provided", async () => {
+    // Create a mock EventStore
+    const planEvents: Array<{ planId: string; eventType: string; opts?: unknown }> = [];
+    const mockEventStore = {
+      insertPlanEvent: (planId: string, eventType: string, opts?: unknown) => {
+        planEvents.push({ planId, eventType, opts });
+      },
+    };
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(
+      plan,
+      mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager,
+      mockEventStore as unknown as import("../../packages/core/src/agents/event-store.js").EventStore,
+    );
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Should have logged plan_started and step_started
+    expect(planEvents.some((e) => e.eventType === "plan_started")).toBe(true);
+    expect(planEvents.some((e) => e.eventType === "step_started")).toBe(true);
+
+    // Complete the step with writes
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateWrite(sessionId);
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Should have logged step_completed and plan_completed
+    expect(planEvents.some((e) => e.eventType === "step_completed")).toBe(true);
+    expect(planEvents.some((e) => e.eventType === "plan_completed")).toBe(true);
+
+    executor.stop();
+    await runPromise;
+  });
+});
+
+describe("Executor auto-commit", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    mockSM = new MockSessionManager();
+    vi.clearAllMocks();
+  });
+
+  it("calls commitStepChanges after step completes when autoCommit is true", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { autoCommit: true });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateWrite(sessionId);
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(mockCommitStepChanges).toHaveBeenCalledWith("/tmp/test-p", "t1");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("does not call commitStepChanges when autoCommit is false", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { autoCommit: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateWrite(sessionId);
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(mockCommitStepChanges).not.toHaveBeenCalled();
 
     executor.stop();
     await runPromise;

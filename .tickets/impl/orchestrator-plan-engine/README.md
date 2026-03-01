@@ -1,7 +1,7 @@
 ---
 id: orchestrator-plan-engine
 title: "Orchestrator: Plan Engine — DAG Computation + Persistence"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:

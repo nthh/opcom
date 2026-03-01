@@ -1,7 +1,7 @@
 ---
 id: orchestrator-executor
 title: "Orchestrator: Executor Loop — Agent Assignment + Pause/Resume"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:

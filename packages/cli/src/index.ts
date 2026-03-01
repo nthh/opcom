@@ -45,8 +45,11 @@ async function main(): Promise<void> {
     case "scan":
       return runScan(args[1]);
 
-    case "status":
-      return runStatus();
+    case "status": {
+      const projectIdx = args.indexOf("--project");
+      const projectFilter = projectIdx !== -1 ? args[projectIdx + 1] : undefined;
+      return runStatus({ projectFilter });
+    }
 
     case "work": {
       if (!args[1]) {
@@ -254,7 +257,7 @@ function printHelp(): void {
     init                         Interactive workspace setup
     add <path>                   Add a project to the workspace
     scan [project]               Re-run detection for one or all projects
-    status                       Show workspace dashboard (default)
+    status [--project <name>]    Show workspace dashboard (default)
     tui                          Interactive terminal dashboard
     work <project>[/<ticket>]    Start agent on a work item
     agent list                   Show running agent sessions

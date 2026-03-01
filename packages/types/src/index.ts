@@ -5,3 +5,5 @@ export * from "./agents.js";
 export * from "./detection.js";
 export * from "./server.js";
 export * from "./plan.js";
+export * from "./cicd.js";
+export * from "./cloud-services.js";

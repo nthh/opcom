@@ -13,6 +13,7 @@ import {
   getFilteredWorkItems,
   getPanelItemCount as getDashboardItemCount,
   type DashboardState,
+  type DashboardWorkItem,
 } from "./views/dashboard.js";
 import {
   renderProjectDetail,
@@ -161,10 +162,14 @@ export class TuiApp {
     this.dashboardState.projects = this.client.projects;
     this.dashboardState.agents = this.client.agents;
 
-    // Aggregate work items from all projects
-    const allWorkItems: WorkItem[] = [];
-    for (const [, tickets] of this.client.projectTickets) {
-      allWorkItems.push(...tickets);
+    // Aggregate work items from all projects with project association
+    const allWorkItems: DashboardWorkItem[] = [];
+    for (const [projectId, tickets] of this.client.projectTickets) {
+      const project = this.client.projects.find((p) => p.id === projectId);
+      const projectName = project?.name ?? projectId;
+      for (const item of tickets) {
+        allWorkItems.push({ item, projectId, projectName });
+      }
     }
     this.dashboardState.workItems = allWorkItems;
 
@@ -274,7 +279,7 @@ export class TuiApp {
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
           keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  P:plan  c:chat  s:scan  S:stop  /:search  1-4:filter  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  f/F:project  /:search  1-4:priority  ?:help  q:quit");
         }
         break;
       case 2:
@@ -316,6 +321,8 @@ export class TuiApp {
       "  s          Scan / re-detect project",
       "  S          Stop selected agent",
       "  /          Search work items",
+      "  f          Cycle project filter",
+      "  F          Clear project filter",
       "  1-4        Filter by priority (0 to clear)",
       "",
       bold("Level 2: Project Detail"),
@@ -546,6 +553,33 @@ export class TuiApp {
         state.priorityFilter = state.priorityFilter === 4 ? null : 4;
         clampDashboard(state);
         return;
+
+      case "f": {
+        // Cycle project filter: null → project1 → project2 → ... → null
+        const projectIds = state.projects.map((p) => p.id);
+        if (projectIds.length === 0) return;
+        if (state.projectFilter === null) {
+          state.projectFilter = projectIds[0];
+        } else {
+          const idx = projectIds.indexOf(state.projectFilter);
+          if (idx === -1 || idx === projectIds.length - 1) {
+            state.projectFilter = null;
+          } else {
+            state.projectFilter = projectIds[idx + 1];
+          }
+        }
+        state.selectedIndex[1] = 0;
+        state.scrollOffset[1] = 0;
+        clampDashboard(state);
+        return;
+      }
+
+      case "F":
+        state.projectFilter = null;
+        state.selectedIndex[1] = 0;
+        state.scrollOffset[1] = 0;
+        clampDashboard(state);
+        return;
     }
   }
 
@@ -563,9 +597,9 @@ export class TuiApp {
     } else if (panel === 1) {
       // Drill into work item
       const items = getFilteredWorkItems(state);
-      const item = items[selected];
-      if (item) {
-        this.navigateToTicket(item);
+      const dw = items[selected];
+      if (dw) {
+        this.navigateToTicket(dw.item, dw.projectId);
       }
     } else if (panel === 2) {
       // Drill into agent
@@ -588,17 +622,11 @@ export class TuiApp {
         this.client.send({ type: "start_agent", projectId: project.id });
       }
     } else if (panel === 1) {
-      // Start agent on work item
+      // Start agent on work item — projectId is carried by the wrapper
       const items = getFilteredWorkItems(state);
-      const item = items[selected];
-      if (item) {
-        // Find which project this ticket belongs to
-        for (const [projectId, tickets] of this.client.projectTickets) {
-          if (tickets.some((t) => t.id === item.id)) {
-            this.client.send({ type: "start_agent", projectId, workItemId: item.id });
-            break;
-          }
-        }
+      const dw = items[selected];
+      if (dw) {
+        this.client.send({ type: "start_agent", projectId: dw.projectId, workItemId: dw.item.id });
       }
     }
   }
@@ -1042,15 +1070,10 @@ export class TuiApp {
       if (state.focusedPanel === 1) {
         // Work items panel — chat about selected work item
         const items = getFilteredWorkItems(state);
-        const item = items[state.selectedIndex[1]];
-        if (item) {
-          workItemId = item.id;
-          for (const [pid, tickets] of this.client.projectTickets) {
-            if (tickets.some((t) => t.id === item.id)) {
-              projectId = pid;
-              break;
-            }
-          }
+        const dw = items[state.selectedIndex[1]];
+        if (dw) {
+          workItemId = dw.item.id;
+          projectId = dw.projectId;
         }
       } else {
         // Projects or agents panel — create new ticket
@@ -1184,7 +1207,7 @@ export class TuiApp {
     this.ticketFocusState = null;
   }
 
-  private navigateToTicket(ticket: WorkItem): void {
+  private navigateToTicket(ticket: WorkItem, projectId?: string): void {
     this.navStack.push({
       level: this.level,
       projectId: this.focusedProjectId ?? undefined,
@@ -1192,14 +1215,19 @@ export class TuiApp {
 
     this.level = 3;
 
-    // Find project config for this ticket
-    let projectConfig = null;
-    for (const [projectId, tickets] of this.client.projectTickets) {
-      if (tickets.some((t) => t.id === ticket.id)) {
-        projectConfig = this.client.projectConfigs.get(projectId) ?? null;
-        break;
+    // Use provided projectId or fall back to reverse-lookup
+    let resolvedProjectId = projectId;
+    if (!resolvedProjectId) {
+      for (const [pid, tickets] of this.client.projectTickets) {
+        if (tickets.some((t) => t.id === ticket.id)) {
+          resolvedProjectId = pid;
+          break;
+        }
       }
     }
+    const projectConfig = resolvedProjectId
+      ? this.client.projectConfigs.get(resolvedProjectId) ?? null
+      : null;
 
     this.ticketFocusState = createTicketFocusState(ticket, projectConfig);
     this.agentFocusState = null;

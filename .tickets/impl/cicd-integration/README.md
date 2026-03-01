@@ -1,7 +1,7 @@
 ---
 id: cicd-integration
 title: "CI/CD Integration: GitHub Actions Pipeline & Deployment Status"
-status: in-progress
+status: closed
 type: feature
 priority: 2
 deps:

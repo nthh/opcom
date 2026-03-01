@@ -41,6 +41,7 @@ export interface OrchestratorConfig {
   worktree: boolean;
   pauseOnFailure: boolean;
   ticketTransitions: boolean;
+  autoCommit: boolean;
 }
 
 export interface HygieneReport {

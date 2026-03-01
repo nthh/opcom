@@ -5,14 +5,17 @@ import type {
   WorkItem,
   AgentSession,
   AgentState,
+  NormalizedEvent,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
+import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
 import { recomputePlan } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket } from "../agents/context-builder.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
+import { commitStepChanges } from "./git-ops.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("executor");
@@ -42,15 +45,18 @@ interface ExecutorEvent {
 export class Executor {
   private plan: Plan;
   private sessionManager: SessionManager;
+  private eventStore: EventStore | null;
   private listeners = new Map<string, Set<EventHandler<unknown>>>();
   private eventQueue: ExecutorEvent[] = [];
   private eventResolve: (() => void) | null = null;
   private running = false;
   private sessionToStep = new Map<string, string>(); // sessionId → ticketId
+  private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
 
-  constructor(plan: Plan, sessionManager: SessionManager) {
+  constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
     this.plan = plan;
     this.sessionManager = sessionManager;
+    this.eventStore = eventStore ?? null;
   }
 
   getPlan(): Plan {
@@ -64,6 +70,7 @@ export class Executor {
     this.running = true;
     this.plan.status = "executing";
     await savePlan(this.plan);
+    this.logPlanEvent("plan_started", { detail: { stepCount: this.plan.steps.length } });
 
     // Wire SessionManager events
     const onStopped = (session: AgentSession) => {
@@ -81,8 +88,17 @@ export class Executor {
       }
     };
 
+    // Track write activity per agent
+    const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
+    const onAgentEvent = ({ sessionId, event: ev }: { sessionId: string; event: NormalizedEvent }) => {
+      if (ev.type === "tool_end" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolSuccess !== false) {
+        this.sessionWrites.set(sessionId, (this.sessionWrites.get(sessionId) ?? 0) + 1);
+      }
+    };
+
     this.sessionManager.on("session_stopped", onStopped);
     this.sessionManager.on("state_change", onStateChange);
+    this.sessionManager.on("agent_event", onAgentEvent);
 
     try {
       // Initial: start agents on ready steps
@@ -99,6 +115,7 @@ export class Executor {
     } finally {
       this.sessionManager.off("session_stopped", onStopped);
       this.sessionManager.off("state_change", onStateChange);
+      this.sessionManager.off("agent_event", onAgentEvent);
     }
   }
 
@@ -165,6 +182,15 @@ export class Executor {
     }
   }
 
+  // --- Plan event logging ---
+
+  private logPlanEvent(
+    eventType: string,
+    opts?: { stepTicketId?: string; agentSessionId?: string; detail?: Record<string, unknown> },
+  ): void {
+    this.eventStore?.insertPlanEvent(this.plan.id, eventType, opts);
+  }
+
   // --- Event queue ---
 
   private pushEvent(event: ExecutorEvent): void {
@@ -193,16 +219,62 @@ export class Executor {
       case "agent_completed": {
         const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
         if (step) {
-          step.status = "done";
-          step.completedAt = new Date().toISOString();
-          if (event.sessionId) this.sessionToStep.delete(event.sessionId);
+          // Check if the agent actually wrote any files
+          const writes = event.sessionId ? (this.sessionWrites.get(event.sessionId) ?? 0) : 0;
 
-          // Ticket transition
-          if (this.plan.config.ticketTransitions) {
-            await this.updateTicketStatusSafe(step, "closed");
+          if (writes === 0) {
+            // Agent exited without making changes — treat as failed
+            step.status = "failed";
+            step.error = "Agent exited without making any file changes";
+            step.completedAt = new Date().toISOString();
+            if (event.sessionId) {
+              this.sessionToStep.delete(event.sessionId);
+              this.sessionWrites.delete(event.sessionId);
+            }
+
+            log.warn("step failed: no writes", { ticketId: step.ticketId });
+            this.emit("step_failed", { step, error: step.error });
+            this.logPlanEvent("step_failed", {
+              stepTicketId: step.ticketId,
+              agentSessionId: event.sessionId,
+              detail: { error: step.error },
+            });
+
+            if (this.plan.config.pauseOnFailure) {
+              this.plan.status = "paused";
+              await savePlan(this.plan);
+              this.emit("plan_paused", { plan: this.plan });
+              this.logPlanEvent("plan_paused", { detail: { reason: "step_failed" } });
+              break;
+            }
+          } else {
+            step.status = "done";
+            step.completedAt = new Date().toISOString();
+            if (event.sessionId) {
+              this.sessionToStep.delete(event.sessionId);
+              this.sessionWrites.delete(event.sessionId);
+            }
+
+            // Ticket transition
+            if (this.plan.config.ticketTransitions) {
+              await this.updateTicketStatusSafe(step, "closed");
+            }
+
+            // Auto-commit changes
+            if (this.plan.config.autoCommit) {
+              const project = await loadProject(step.projectId);
+              if (project) {
+                await commitStepChanges(project.path, step.ticketId);
+              }
+            }
+
+            this.emit("step_completed", { step });
+            this.logPlanEvent("step_completed", {
+              stepTicketId: step.ticketId,
+              agentSessionId: event.sessionId,
+              detail: { writes },
+            });
           }
-
-          this.emit("step_completed", { step });
         }
 
         // Recompute and start newly-ready steps
@@ -219,12 +291,18 @@ export class Executor {
           if (event.sessionId) this.sessionToStep.delete(event.sessionId);
 
           this.emit("step_failed", { step, error: event.error ?? "unknown" });
+          this.logPlanEvent("step_failed", {
+            stepTicketId: step.ticketId,
+            agentSessionId: event.sessionId,
+            detail: { error: event.error },
+          });
         }
 
         if (this.plan.config.pauseOnFailure) {
           this.plan.status = "paused";
           await savePlan(this.plan);
           this.emit("plan_paused", { plan: this.plan });
+          this.logPlanEvent("plan_paused", { detail: { reason: "step_failed" } });
         } else {
           await this.recomputeAndContinue();
         }
@@ -235,11 +313,13 @@ export class Executor {
         this.plan.status = "paused";
         await savePlan(this.plan);
         this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "user" } });
         break;
       }
 
       case "resume": {
         this.plan.status = "executing";
+        this.logPlanEvent("plan_resumed");
         await this.recomputeAndContinue();
         break;
       }
@@ -249,6 +329,7 @@ export class Executor {
         if (step) {
           step.status = "skipped";
           step.completedAt = new Date().toISOString();
+          this.logPlanEvent("step_skipped", { stepTicketId: step.ticketId });
         }
         await this.recomputeAndContinue();
         break;
@@ -279,6 +360,13 @@ export class Executor {
       this.plan.completedAt = new Date().toISOString();
       await savePlan(this.plan);
       this.emit("plan_completed", { plan: this.plan });
+      this.logPlanEvent("plan_completed", {
+        detail: {
+          done: this.plan.steps.filter((s) => s.status === "done").length,
+          failed: this.plan.steps.filter((s) => s.status === "failed").length,
+          skipped: this.plan.steps.filter((s) => s.status === "skipped").length,
+        },
+      });
       this.running = false;
     }
 
@@ -325,6 +413,8 @@ export class Executor {
         workItemId: step.ticketId,
         contextPacket,
         worktree: this.plan.config.worktree,
+        permissionMode: "acceptEdits",
+        additionalDirs: [project.path],
       },
       step.ticketId,
     );
@@ -341,6 +431,10 @@ export class Executor {
 
     await savePlan(this.plan);
     this.emit("step_started", { step, session });
+    this.logPlanEvent("step_started", {
+      stepTicketId: step.ticketId,
+      agentSessionId: session.id,
+    });
   }
 
   private isPlanTerminal(): boolean {

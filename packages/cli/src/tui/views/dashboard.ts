@@ -19,14 +19,21 @@ export interface PlanPanelState {
   plan: Plan;
 }
 
+export interface DashboardWorkItem {
+  item: WorkItem;
+  projectId: string;
+  projectName: string;
+}
+
 export interface DashboardState {
   projects: ProjectStatusSnapshot[];
   agents: AgentSession[];
-  workItems: WorkItem[];
+  workItems: DashboardWorkItem[];
   focusedPanel: number; // 0=projects, 1=workqueue, 2=agents
   selectedIndex: number[]; // selected item per panel
   scrollOffset: number[]; // scroll offset per panel
   priorityFilter: number | null; // null = all, 0-4 = filter
+  projectFilter: string | null; // null = all, string = projectId
   searchQuery: string;
   planPanel: PlanPanelState | null; // non-null when plan is active
 }
@@ -40,6 +47,7 @@ export function createDashboardState(): DashboardState {
     selectedIndex: [0, 0, 0],
     scrollOffset: [0, 0, 0],
     priorityFilter: null,
+    projectFilter: null,
     searchQuery: "",
     planPanel: null,
   };
@@ -131,26 +139,17 @@ function renderWorkQueuePanel(
   state: DashboardState,
   focused: boolean,
 ): void {
-  let items = state.workItems;
+  const items = getFilteredWorkItems(state);
+  const showProject = state.projectFilter === null;
 
-  // Apply priority filter
-  if (state.priorityFilter !== null) {
-    items = items.filter((w) => w.priority === state.priorityFilter);
-  }
-
-  // Apply search filter
-  if (state.searchQuery) {
-    const q = state.searchQuery.toLowerCase();
-    items = items.filter(
-      (w) => w.title.toLowerCase().includes(q) || w.id.toLowerCase().includes(q),
-    );
-  }
-
-  // Sort by priority (P0 first)
-  items = [...items].sort((a, b) => a.priority - b.priority);
-
-  const filterLabel = state.priorityFilter !== null ? ` P${state.priorityFilter}` : "";
-  const title = `Work Queue (${items.length})${filterLabel}`;
+  const projectLabel = state.projectFilter !== null
+    ? (() => {
+        const proj = state.projects.find((p) => p.id === state.projectFilter);
+        return ` [${proj?.name ?? state.projectFilter}]`;
+      })()
+    : "";
+  const priorityLabel = state.priorityFilter !== null ? ` P${state.priorityFilter}` : "";
+  const title = `Work Queue (${items.length})${projectLabel}${priorityLabel}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -166,11 +165,11 @@ function renderWorkQueuePanel(
 
   for (let i = 0; i < maxItems && i + scroll < items.length; i++) {
     const idx = i + scroll;
-    const item = items[idx];
+    const dw = items[idx];
     const row = panel.y + 1 + i;
     const isSelected = idx === selected && focused;
 
-    const line = formatWorkItemLine(item, state.agents, contentWidth);
+    const line = formatWorkItemLine(dw, state.agents, contentWidth, showProject);
     if (isSelected) {
       buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
     } else {
@@ -180,13 +179,17 @@ function renderWorkQueuePanel(
 }
 
 function formatWorkItemLine(
-  item: WorkItem,
+  dw: DashboardWorkItem,
   agents: AgentSession[],
   maxWidth: number,
+  showProject: boolean,
 ): string {
+  const item = dw.item;
   const priorityColors = [ANSI.red, ANSI.red, ANSI.yellow, ANSI.cyan, ANSI.dim];
   const pColor = priorityColors[item.priority] ?? ANSI.dim;
   const priority = color(pColor, `P${item.priority}`);
+
+  const projectLabel = showProject ? dim(`[${dw.projectName}] `) : "";
 
   const statusIcon = item.status === "in-progress" ? color(ANSI.yellow, "\u25b6") :
     item.status === "closed" ? color(ANSI.green, "\u2713") :
@@ -195,7 +198,7 @@ function formatWorkItemLine(
   const hasAgent = agents.some((a) => a.workItemId === item.id && a.state !== "stopped");
   const agentIcon = hasAgent ? " \ud83e\udd16" : "";
 
-  const line = `${priority} ${statusIcon} ${item.title}${agentIcon}`;
+  const line = `${priority} ${statusIcon} ${projectLabel}${item.title}${agentIcon}`;
   return truncate(line, maxWidth);
 }
 
@@ -390,18 +393,31 @@ function formatDuration(startedAt: string, stoppedAt?: string): string {
 
 // --- Navigation helpers ---
 
-export function getFilteredWorkItems(state: DashboardState): WorkItem[] {
+export function getFilteredWorkItems(state: DashboardState): DashboardWorkItem[] {
   let items = state.workItems;
-  if (state.priorityFilter !== null) {
-    items = items.filter((w) => w.priority === state.priorityFilter);
+
+  // Project filter
+  if (state.projectFilter !== null) {
+    items = items.filter((w) => w.projectId === state.projectFilter);
   }
+
+  // Priority filter
+  if (state.priorityFilter !== null) {
+    items = items.filter((w) => w.item.priority === state.priorityFilter);
+  }
+
+  // Search filter
   if (state.searchQuery) {
     const q = state.searchQuery.toLowerCase();
     items = items.filter(
-      (w) => w.title.toLowerCase().includes(q) || w.id.toLowerCase().includes(q),
+      (w) =>
+        w.item.title.toLowerCase().includes(q) ||
+        w.item.id.toLowerCase().includes(q) ||
+        w.projectName.toLowerCase().includes(q),
     );
   }
-  return [...items].sort((a, b) => a.priority - b.priority);
+
+  return [...items].sort((a, b) => a.item.priority - b.item.priority);
 }
 
 export function getPanelItemCount(state: DashboardState, panelIndex: number): number {

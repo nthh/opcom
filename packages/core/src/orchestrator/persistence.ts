@@ -12,6 +12,7 @@ export function defaultConfig(): OrchestratorConfig {
     worktree: false,
     pauseOnFailure: true,
     ticketTransitions: true,
+    autoCommit: true,
   };
 }
 

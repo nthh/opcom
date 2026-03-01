@@ -81,6 +81,9 @@ export interface AgentStartConfig {
   model?: string;
   worktree?: boolean;
   allowedTools?: string[];
+  disallowedTools?: string[];
+  permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
+  additionalDirs?: string[];
   systemPrompt?: string;
   resumeSessionId?: string;
 }

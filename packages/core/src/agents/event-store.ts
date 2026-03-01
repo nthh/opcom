@@ -49,6 +49,16 @@ type BetterSqlite3Database = {
   close(): void;
 };
 
+export interface PlanEventRecord {
+  id: number;
+  planId: string;
+  stepTicketId: string | null;
+  eventType: string;
+  agentSessionId: string | null;
+  detailJson: string | null;
+  timestamp: string;
+}
+
 export class EventStore {
   private db: BetterSqlite3Database;
   private lastToolName = new Map<string, string>();
@@ -62,6 +72,8 @@ export class EventStore {
   private stmtLoadSessionsByProject!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtLoadSessionsByState!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtLoadSessionsByProjectAndState!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtInsertPlanEvent!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadPlanEvents!: ReturnType<BetterSqlite3Database["prepare"]>;
 
   constructor(dbPath?: string) {
     const Database = require("better-sqlite3");
@@ -113,6 +125,18 @@ export class EventStore {
       CREATE INDEX IF NOT EXISTS idx_events_type ON events(type);
       CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
       CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
+
+      CREATE TABLE IF NOT EXISTS plan_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_id TEXT NOT NULL,
+        step_ticket_id TEXT,
+        event_type TEXT NOT NULL,
+        agent_session_id TEXT,
+        detail_json TEXT,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_plan_events_plan_id ON plan_events(plan_id, timestamp);
     `);
   }
 
@@ -157,6 +181,15 @@ export class EventStore {
 
     this.stmtLoadSessionsByProjectAndState = this.db.prepare(`
       SELECT * FROM sessions WHERE project_id = ? AND state = ? ORDER BY started_at DESC
+    `);
+
+    this.stmtInsertPlanEvent = this.db.prepare(`
+      INSERT INTO plan_events (plan_id, step_ticket_id, event_type, agent_session_id, detail_json, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    this.stmtLoadPlanEvents = this.db.prepare(`
+      SELECT * FROM plan_events WHERE plan_id = ? ORDER BY id ASC LIMIT ? OFFSET ?
     `);
   }
 
@@ -452,6 +485,54 @@ export class EventStore {
       sessions: row.sessions,
       events: row.events,
       tools: row.tools,
+    }));
+  }
+
+  // --- Plan events ---
+
+  insertPlanEvent(
+    planId: string,
+    eventType: string,
+    opts?: { stepTicketId?: string; agentSessionId?: string; detail?: Record<string, unknown> },
+  ): void {
+    try {
+      this.stmtInsertPlanEvent.run(
+        planId,
+        opts?.stepTicketId ?? null,
+        eventType,
+        opts?.agentSessionId ?? null,
+        opts?.detail ? JSON.stringify(opts.detail) : null,
+        new Date().toISOString(),
+      );
+    } catch (err) {
+      log.warn("failed to insert plan event", { planId, eventType, error: String(err) });
+    }
+  }
+
+  loadPlanEvents(
+    planId: string,
+    opts?: { limit?: number; offset?: number },
+  ): PlanEventRecord[] {
+    const limit = opts?.limit ?? 10000;
+    const offset = opts?.offset ?? 0;
+    const rows = this.stmtLoadPlanEvents.all(planId, limit, offset) as Array<{
+      id: number;
+      plan_id: string;
+      step_ticket_id: string | null;
+      event_type: string;
+      agent_session_id: string | null;
+      detail_json: string | null;
+      timestamp: string;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      planId: row.plan_id,
+      stepTicketId: row.step_ticket_id,
+      eventType: row.event_type,
+      agentSessionId: row.agent_session_id,
+      detailJson: row.detail_json,
+      timestamp: row.timestamp,
     }));
   }
 

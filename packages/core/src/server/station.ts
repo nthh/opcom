@@ -8,6 +8,7 @@ import type {
   ServerEvent,
   NormalizedEvent,
   ProjectStatusSnapshot,
+  Plan,
 } from "@opcom/types";
 import { SessionManager } from "../agents/session-manager.js";
 import { MessageRouter } from "../agents/message-router.js";
@@ -17,6 +18,12 @@ import { loadGlobalConfig, loadWorkspace, loadProject, listProjects } from "../c
 import { opcomRoot } from "../config/paths.js";
 import { refreshProjectStatus, type ProjectStatus } from "../project/status.js";
 import { scanTickets } from "../detection/tickets.js";
+import { Executor } from "../orchestrator/executor.js";
+import { computePlan } from "../orchestrator/planner.js";
+import type { TicketSet } from "../orchestrator/planner.js";
+import { savePlan, loadPlan, listPlans, deletePlan } from "../orchestrator/persistence.js";
+import { checkHygiene } from "../orchestrator/hygiene.js";
+import { reconcilePlans } from "../orchestrator/reconcile.js";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -45,6 +52,7 @@ export class Station {
   readonly sessionManager = new SessionManager();
   readonly messageRouter = new MessageRouter();
   private projectStatuses = new Map<string, ProjectStatus>();
+  private executors = new Map<string, Executor>(); // planId → running Executor
   private port: number;
 
   constructor(port = 4700) {
@@ -53,6 +61,13 @@ export class Station {
 
   async start(): Promise<void> {
     await this.sessionManager.init();
+
+    // Reconcile stale plans from previous runs
+    const allSessions = await this.sessionManager.loadAllPersistedSessions();
+    const reconciled = await reconcilePlans(allSessions);
+    if (reconciled > 0) {
+      console.log(`  Reconciled ${reconciled} stale plan(s) from previous run`);
+    }
 
     // Load project statuses
     await this.refreshAllProjects();
@@ -112,6 +127,12 @@ export class Station {
   }
 
   async stop(): Promise<void> {
+    // Stop all running executors
+    for (const executor of this.executors.values()) {
+      executor.stop();
+    }
+    this.executors.clear();
+
     await this.sessionManager.shutdown();
 
     // Close all WebSocket connections
@@ -145,7 +166,7 @@ export class Station {
 
     // CORS headers
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
     if (method === "OPTIONS") {
@@ -294,6 +315,109 @@ export class Station {
       return { status: 200, data: { sent: true } };
     }
 
+    // --- Plan endpoints ---
+
+    // GET /plans
+    if (method === "GET" && path === "/plans") {
+      const plans = await listPlans();
+      return { status: 200, data: plans };
+    }
+
+    // GET /plans/:id
+    const planGetMatch = path.match(/^\/plans\/([^/]+)$/);
+    if (method === "GET" && planGetMatch) {
+      const plan = await loadPlan(planGetMatch[1]);
+      if (!plan) return { status: 404, data: { error: "Plan not found" } };
+      return { status: 200, data: plan };
+    }
+
+    // POST /plans
+    if (method === "POST" && path === "/plans") {
+      const data = body as Record<string, unknown>;
+      const ticketSets = await this.loadAllTickets();
+      const plan = computePlan(
+        ticketSets,
+        (data.scope ?? {}) as import("@opcom/types").PlanScope,
+        (data.name as string) ?? "Untitled Plan",
+        undefined,
+        data.config as Partial<import("@opcom/types").OrchestratorConfig> | undefined,
+      );
+      await savePlan(plan);
+      return { status: 201, data: plan };
+    }
+
+    // PATCH /plans/:id
+    const planPatchMatch = path.match(/^\/plans\/([^/]+)$/);
+    if (method === "PATCH" && planPatchMatch) {
+      const plan = await loadPlan(planPatchMatch[1]);
+      if (!plan) return { status: 404, data: { error: "Plan not found" } };
+      const data = body as Record<string, unknown>;
+      if (data.context) {
+        const executor = this.executors.get(plan.id);
+        if (executor) {
+          await executor.injectContext(data.context as string);
+        } else {
+          plan.context += (plan.context ? "\n" : "") + (data.context as string);
+          await savePlan(plan);
+        }
+      }
+      return { status: 200, data: plan };
+    }
+
+    // POST /plans/:id/execute
+    const planExecMatch = path.match(/^\/plans\/([^/]+)\/execute$/);
+    if (method === "POST" && planExecMatch) {
+      const plan = await loadPlan(planExecMatch[1]);
+      if (!plan) return { status: 404, data: { error: "Plan not found" } };
+      if (this.executors.has(plan.id)) {
+        return { status: 409, data: { error: "Plan already executing" } };
+      }
+      await this.startExecutor(plan);
+      return { status: 200, data: { executing: true } };
+    }
+
+    // POST /plans/:id/pause
+    const planPauseMatch = path.match(/^\/plans\/([^/]+)\/pause$/);
+    if (method === "POST" && planPauseMatch) {
+      const executor = this.executors.get(planPauseMatch[1]);
+      if (!executor) return { status: 404, data: { error: "No running executor" } };
+      executor.pause();
+      return { status: 200, data: { paused: true } };
+    }
+
+    // POST /plans/:id/resume
+    const planResumeMatch = path.match(/^\/plans\/([^/]+)\/resume$/);
+    if (method === "POST" && planResumeMatch) {
+      const executor = this.executors.get(planResumeMatch[1]);
+      if (!executor) return { status: 404, data: { error: "No running executor" } };
+      executor.resume();
+      return { status: 200, data: { resumed: true } };
+    }
+
+    // POST /plans/:id/steps/:ticketId/skip
+    const planSkipMatch = path.match(/^\/plans\/([^/]+)\/steps\/([^/]+)\/skip$/);
+    if (method === "POST" && planSkipMatch) {
+      const executor = this.executors.get(planSkipMatch[1]);
+      if (!executor) return { status: 404, data: { error: "No running executor" } };
+      executor.skipStep(planSkipMatch[2]);
+      return { status: 200, data: { skipped: true } };
+    }
+
+    // DELETE /plans/:id
+    const planDeleteMatch = path.match(/^\/plans\/([^/]+)$/);
+    if (method === "DELETE" && planDeleteMatch) {
+      await deletePlan(planDeleteMatch[1]);
+      return { status: 200, data: { deleted: true } };
+    }
+
+    // GET /plans/:id/hygiene
+    const planHygieneMatch = path.match(/^\/plans\/([^/]+)\/hygiene$/);
+    if (method === "GET" && planHygieneMatch) {
+      const ticketSets = await this.loadAllTickets();
+      const report = checkHygiene(ticketSets, this.sessionManager.listSessions());
+      return { status: 200, data: report };
+    }
+
     return { status: 404, data: { error: "Not found" } };
   }
 
@@ -407,7 +531,116 @@ export class Station {
           });
         }
         break;
+
+      case "create_plan": {
+        const ticketSets = await this.loadAllTickets();
+        const plan = computePlan(ticketSets, command.scope ?? {}, command.name, undefined, command.config);
+        await savePlan(plan);
+        this.broadcast({ type: "plan_updated", plan });
+        break;
+      }
+
+      case "execute_plan": {
+        const plan = await loadPlan(command.planId);
+        if (!plan) {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Plan not found" });
+          return;
+        }
+        if (this.executors.has(plan.id)) {
+          this.sendToClient(ws, { type: "error", code: "CONFLICT", message: "Plan already executing" });
+          return;
+        }
+        await this.startExecutor(plan);
+        break;
+      }
+
+      case "pause_plan": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.pause();
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
+      case "resume_plan": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.resume();
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
+      case "skip_step": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.skipStep(command.ticketId);
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
+      case "inject_context": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          await executor.injectContext(command.text);
+          this.broadcast({ type: "plan_updated", plan: executor.getPlan() });
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
+      case "run_hygiene": {
+        const ticketSets = await this.loadAllTickets();
+        const report = checkHygiene(ticketSets, this.sessionManager.listSessions());
+        this.sendToClient(ws, { type: "hygiene_report", report });
+        break;
+      }
     }
+  }
+
+  // --- Executor management ---
+
+  private async startExecutor(plan: Plan): Promise<void> {
+    const executor = new Executor(plan, this.sessionManager);
+    this.executors.set(plan.id, executor);
+
+    // Wire executor events to WebSocket broadcasts
+    executor.on("plan_updated", ({ plan: p }) => this.broadcast({ type: "plan_updated", plan: p }));
+    executor.on("step_started", ({ step, session }) =>
+      this.broadcast({ type: "step_started", step, sessionId: session.id }),
+    );
+    executor.on("step_completed", ({ step }) => this.broadcast({ type: "step_completed", step }));
+    executor.on("step_failed", ({ step, error }) => this.broadcast({ type: "step_failed", step, error }));
+    executor.on("plan_completed", ({ plan: p }) => {
+      this.broadcast({ type: "plan_completed", plan: p });
+      this.executors.delete(p.id);
+    });
+    executor.on("plan_paused", ({ plan: p }) => this.broadcast({ type: "plan_paused", plan: p }));
+
+    // Run in background (don't await — the loop runs until done/stopped)
+    executor.run().catch(() => {
+      this.executors.delete(plan.id);
+    });
+  }
+
+  private async loadAllTickets(): Promise<TicketSet[]> {
+    const projects = await listProjects();
+    const ticketSets: TicketSet[] = [];
+    for (const project of projects) {
+      try {
+        const tickets = await scanTickets(project.path);
+        ticketSets.push({ projectId: project.id, tickets });
+      } catch {
+        // Skip failed scans
+      }
+    }
+    return ticketSets;
   }
 
   // --- Broadcasting ---

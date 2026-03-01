@@ -1,7 +1,7 @@
 ---
 id: global-dashboard-cli-status
 title: "Global Dashboard: CLI Status Enhancements"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
@@ -20,14 +20,14 @@ Enhance `opcom status` CLI output with project filtering and a global work queue
 
 ## Tasks
 
-- [ ] Add `--project` flag to `opcom status` command
+- [x] Add `--project` flag to `opcom status` command
   - Filter `statuses` array to matching project
   - Show full ticket list (not just counts) for single-project view
-- [ ] Add global work queue summary after projects list
+- [x] Add global work queue summary after projects list
   - Priority-sorted work items across all projects
   - Show project name and agent icon per item
   - Same format as TUI work queue but in text output
-- [ ] Update `formatStatusDashboard()` in `packages/cli/src/ui/format.ts`
+- [x] Update `formatStatusDashboard()` in `packages/cli/src/ui/format.ts`
 
 ## Acceptance Criteria
 

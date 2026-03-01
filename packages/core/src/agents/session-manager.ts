@@ -275,8 +275,29 @@ export class SessionManager {
         this.eventStore?.insertEvent(sessionId, event);
         this.emit("agent_event", { sessionId, event });
       }
+
+      // Agent process exited naturally — emit session_stopped so the executor
+      // learns the agent finished (mirrors what stopSession() does).
+      const session = this.sessions.get(sessionId);
+      if (session && session.state === "stopped") {
+        await this.persistSession(session);
+        this.eventStore?.updateSessionState(sessionId, "stopped", session.stoppedAt);
+        this.emit("session_stopped", session);
+        this.adapters.delete(sessionId);
+      }
     } catch (err) {
       log.warn("consumeEvents stream ended", { sessionId, error: String(err) });
+
+      // If stream errored but session exists, still clean up
+      const session = this.sessions.get(sessionId);
+      if (session && session.state !== "stopped") {
+        session.state = "stopped";
+        session.stoppedAt = new Date().toISOString();
+        await this.persistSession(session);
+        this.eventStore?.updateSessionState(sessionId, "stopped", session.stoppedAt);
+        this.emit("session_stopped", session);
+        this.adapters.delete(sessionId);
+      }
     }
   }
 

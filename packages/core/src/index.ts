@@ -51,7 +51,7 @@ export type { ProjectStatus } from "./project/status.js";
 export { createAdapter, ClaudeCodeAdapter, OpenCodeAdapter } from "./agents/adapter.js";
 export { SessionManager } from "./agents/session-manager.js";
 export { EventStore } from "./agents/event-store.js";
-export type { ToolUsageStat, SessionStat, DailyActivity } from "./agents/event-store.js";
+export type { ToolUsageStat, SessionStat, DailyActivity, PlanEventRecord } from "./agents/event-store.js";
 export { buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt } from "./agents/context-builder.js";
 export { MessageRouter } from "./agents/message-router.js";
 
@@ -114,10 +114,33 @@ export type {
 export { GitHubIntegration, issueToWorkItem, mapLabelToPriority, mapLabelToType } from "./integrations/github.js";
 export type { GitHubConfig, CreatePROptions, CreatePRResult, GitHubIssue } from "./integrations/github.js";
 
+// Phase 8: CI/CD
+export {
+  GitHubActionsAdapter,
+  mapRunStatus,
+  mapDeploymentState,
+  parseOwnerRepo,
+  mapGHRun,
+  mapGHJob,
+  mapGHStep,
+  computeDurationMs,
+} from "./integrations/github-actions.js";
+export type {
+  GHWorkflowRun,
+  GHJob,
+  GHStep,
+  GHDeployment,
+  GHDeploymentStatusEntry,
+} from "./integrations/github-actions.js";
+export { CICDPoller } from "./integrations/cicd-poller.js";
+export type { CICDPollerConfig, ProjectCICDState, PollerEventCallback } from "./integrations/cicd-poller.js";
+
 // Orchestrator
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";
 export { Executor, updateTicketStatus } from "./orchestrator/executor.js";
+export { commitStepChanges } from "./orchestrator/git-ops.js";
+export { reconcilePlans } from "./orchestrator/reconcile.js";
 export { checkHygiene } from "./orchestrator/hygiene.js";
 export {
   savePlan,

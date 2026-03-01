@@ -1,7 +1,7 @@
 ---
 id: global-dashboard-project-filter
 title: "Global Dashboard: Project Filter + f/F Keybindings"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

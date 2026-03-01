@@ -1,4 +1,4 @@
-import type { ProjectConfig, StackInfo, WorkSummary, GitInfo, AgentSession } from "@opcom/types";
+import type { StackInfo, GitInfo, AgentSession, WorkItem } from "@opcom/types";
 import type { ProjectStatus, ManagedProcess } from "@opcom/core";
 import type { DetectionResult } from "@opcom/types";
 
@@ -9,6 +9,12 @@ const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const RED = "\x1b[31m";
+
+export interface StatusDashboardOptions {
+  projectTickets?: Map<string, WorkItem[]>;
+  projectFilter?: string | null;
+  processes?: ManagedProcess[];
+}
 
 export function formatDetectionResult(result: DetectionResult): string {
   const lines: string[] = [];
@@ -53,9 +59,14 @@ export function formatStatusDashboard(
   workspaceName: string,
   statuses: ProjectStatus[],
   agents?: AgentSession[],
-  processes?: ManagedProcess[],
+  opts?: StatusDashboardOptions,
 ): string {
   const lines: string[] = [];
+  const projectTickets = opts?.projectTickets;
+  const projectFilter = opts?.projectFilter ?? null;
+  const processes = opts?.processes;
+  const isSingleProject = projectFilter !== null;
+
   lines.push(`${BOLD}opcom${RESET} ${DIM}— ${workspaceName}${RESET}`);
   lines.push("");
   lines.push(`${BOLD}PROJECTS${RESET} (${statuses.length})`);
@@ -79,12 +90,26 @@ export function formatStatusDashboard(
         const stateColor = a.state === "streaming" ? GREEN : a.state === "idle" ? CYAN : a.state === "error" ? RED : YELLOW;
         const elapsed = formatRelativeTime(a.startedAt).replace(" ago", "");
         const ctx = a.contextUsage ? `  ctx: ${a.contextUsage.percentage}%` : "";
-        lines.push(`    ${DIM}→${RESET} ${a.backend}  ${stateColor}${a.state}${RESET}  ${elapsed}${ctx}${a.workItemId ? `  ${DIM}${a.workItemId}${RESET}` : ""}`);
+        lines.push(`    ${DIM}\u2192${RESET} ${a.backend}  ${stateColor}${a.state}${RESET}  ${elapsed}${ctx}${a.workItemId ? `  ${DIM}${a.workItemId}${RESET}` : ""}`);
       }
     }
 
     if (git?.lastCommitAt) {
       lines.push(`    Last commit: ${formatRelativeTime(git.lastCommitAt)}`);
+    }
+
+    // In single-project view, show full ticket list
+    if (isSingleProject && projectTickets) {
+      const tickets = projectTickets.get(project.id) ?? [];
+      if (tickets.length > 0) {
+        lines.push("");
+        lines.push(`    ${BOLD}Tickets${RESET}`);
+        const sorted = [...tickets].sort((a, b) => a.priority - b.priority);
+        for (const t of sorted) {
+          const hasAgent = agents?.some((a) => a.workItemId === t.id && a.state !== "stopped") ?? false;
+          lines.push(`    ${formatWorkItemCli(t, hasAgent)}`);
+        }
+      }
     }
 
     lines.push("");
@@ -113,13 +138,65 @@ export function formatStatusDashboard(
   if (activeProcesses.length > 0) {
     for (const p of activeProcesses) {
       const port = p.port ? `:${p.port}` : "";
-      lines.push(`  ${GREEN}●${RESET} ${p.projectId}/${p.name}${port}  ${DIM}PID ${p.pid}${RESET}`);
+      lines.push(`  ${GREEN}\u25cf${RESET} ${p.projectId}/${p.name}${port}  ${DIM}PID ${p.pid}${RESET}`);
     }
   } else {
     lines.push(`  ${DIM}No running processes${RESET}`);
   }
 
+  // Global work queue (skip in single-project view — tickets shown inline)
+  if (!isSingleProject && projectTickets && projectTickets.size > 0) {
+    lines.push("");
+    lines.push(formatWorkQueueSummary(statuses, projectTickets, agents));
+  }
+
   return lines.join("\n");
+}
+
+export function formatWorkQueueSummary(
+  statuses: ProjectStatus[],
+  projectTickets: Map<string, WorkItem[]>,
+  agents?: AgentSession[],
+): string {
+  const lines: string[] = [];
+
+  // Build items with project names
+  const items: Array<{ item: WorkItem; projectName: string }> = [];
+  for (const [projectId, tickets] of projectTickets) {
+    const status = statuses.find((s) => s.project.id === projectId);
+    const projectName = status?.project.name ?? projectId;
+    for (const t of tickets) {
+      if (t.status === "closed") continue;
+      items.push({ item: t, projectName });
+    }
+  }
+
+  items.sort((a, b) => a.item.priority - b.item.priority);
+
+  lines.push(`${BOLD}WORK QUEUE${RESET} (${items.length})`);
+  if (items.length === 0) {
+    lines.push(`  ${DIM}No open work items${RESET}`);
+  } else {
+    for (const { item, projectName } of items) {
+      const hasAgent = agents?.some((a) => a.workItemId === item.id && a.state !== "stopped") ?? false;
+      const agentStr = hasAgent ? " \ud83e\udd16" : "";
+      const pColor = item.priority <= 1 ? RED : item.priority === 2 ? YELLOW : CYAN;
+      lines.push(`  ${pColor}P${item.priority}${RESET}  ${item.title}${" ".repeat(Math.max(1, 30 - item.title.length))}${DIM}${projectName}${RESET}${agentStr}`);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+function formatWorkItemCli(item: WorkItem, hasAgent: boolean): string {
+  const pColor = item.priority <= 1 ? RED : item.priority === 2 ? YELLOW : CYAN;
+  const priority = `${pColor}P${item.priority}${RESET}`;
+  const statusIcon = item.status === "in-progress" ? `${YELLOW}\u25b6${RESET}` :
+    item.status === "closed" ? `${GREEN}\u2713${RESET}` :
+    item.status === "deferred" ? `${DIM}\u2298${RESET}` :
+    `\u25cb`;
+  const agentStr = hasAgent ? " \ud83e\udd16" : "";
+  return `${priority} ${statusIcon} ${item.title}${agentStr}`;
 }
 
 function formatConfidence(c: string): string {

@@ -1,7 +1,7 @@
 ---
 id: global-dashboard-workitem-wrapper
 title: "Global Dashboard: DashboardWorkItem Wrapper + Project-Aware Aggregation"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:

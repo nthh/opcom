@@ -1,7 +1,7 @@
 ---
 id: add-settings-menu
 title: Add Settings Menu
-status: in-progress
+status: closed
 type: feature
 priority: 3
 deps: []

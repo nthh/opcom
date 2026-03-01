@@ -1,6 +1,7 @@
 // Server API protocol types (Phase 3)
 
 import type { AgentSession, NormalizedEvent, DeliveryMode } from "./agents.js";
+import type { Pipeline, DeploymentStatus } from "./cicd.js";
 import type { GitInfo } from "./project.js";
 import type { WorkSummary } from "./work-items.js";
 
@@ -57,7 +58,11 @@ export type ServerEvent =
   | { type: "step_failed"; step: import("./plan.js").PlanStep; error: string }
   | { type: "plan_completed"; plan: import("./plan.js").Plan }
   | { type: "plan_paused"; plan: import("./plan.js").Plan }
-  | { type: "hygiene_report"; report: import("./plan.js").HygieneReport };
+  | { type: "hygiene_report"; report: import("./plan.js").HygieneReport }
+
+  // CI/CD events
+  | { type: "pipeline_updated"; projectId: string; pipeline: Pipeline }
+  | { type: "deployment_updated"; projectId: string; deployment: DeploymentStatus };
 
 export interface ProjectStatusSnapshot {
   id: string;

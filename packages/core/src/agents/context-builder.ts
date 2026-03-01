@@ -154,6 +154,16 @@ export function contextPacketToMarkdown(packet: ContextPacket): string {
     }
   }
 
+  // Requirements
+  lines.push(`## Requirements`);
+  lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
+  if (packet.project.testing) {
+    const cmd = packet.project.testing.command ?? "npm test";
+    lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
+  }
+  lines.push(`- Do not mark work as complete if tests are failing.`);
+  lines.push("");
+
   // Agent config
   if (packet.agentConfig) {
     lines.push(`## Agent Configuration`);

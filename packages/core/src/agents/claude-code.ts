@@ -48,6 +48,22 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       }
     }
 
+    if (config.disallowedTools) {
+      for (const tool of config.disallowedTools) {
+        args.push("--disallowedTools", tool);
+      }
+    }
+
+    if (config.permissionMode) {
+      args.push("--permission-mode", config.permissionMode);
+    }
+
+    if (config.additionalDirs) {
+      for (const dir of config.additionalDirs) {
+        args.push("--add-dir", dir);
+      }
+    }
+
     // If resuming a conversation, pass the session ID to continue from
     if (config.resumeSessionId) {
       args.push("--resume", config.resumeSessionId);
