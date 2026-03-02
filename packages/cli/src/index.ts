@@ -16,6 +16,7 @@ import { runOracle } from "./commands/oracle.js";
 import { runScheduleList, runScheduleAdd, runScheduleRemove } from "./commands/schedule.js";
 import { runAnalytics } from "./commands/analytics.js";
 import { runCI } from "./commands/ci.js";
+import { runSettingsList, runSettingsGet, runSettingsSet, runSettingsReset } from "./commands/settings.js";
 import {
   runPlanList,
   runPlanCreate,
@@ -234,6 +235,35 @@ async function main(): Promise<void> {
       return runDev(args[1], args[2]);
     }
 
+    case "settings":
+    case "config": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+        case undefined:
+          return runSettingsList();
+        case "get":
+          if (!args[2]) {
+            console.error("  Usage: opcom settings get <key>");
+            process.exit(1);
+          }
+          return runSettingsGet(args[2]);
+        case "set":
+          if (!args[2] || !args[3]) {
+            console.error("  Usage: opcom settings set <key> <value>");
+            process.exit(1);
+          }
+          return runSettingsSet(args[2], args[3]);
+        case "reset":
+          return runSettingsReset(args[2]);
+        default:
+          console.error("  Usage: opcom settings [list|get|set|reset]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -292,6 +322,10 @@ function printHelp(): void {
     schedule remove <id>         Remove a scheduled task
     serve [--port N]             Start station daemon (default: 4700)
     web                          Open web dashboard in browser
+    settings [list]              Show all settings and their values
+    settings get <key>           Get a single setting value
+    settings set <key> <value>   Set a setting value
+    settings reset [key]         Reset one or all settings to defaults
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help

@@ -6,6 +6,7 @@ import {
   saveWorkspace,
   saveProject,
   detectProject,
+  defaultSettings,
 } from "@opcom/core";
 import type { WorkspaceConfig, ProjectConfig } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
@@ -34,7 +35,7 @@ export async function runInit(): Promise<void> {
       createdAt: new Date().toISOString(),
     };
 
-    await saveGlobalConfig({ defaultWorkspace: wsId });
+    await saveGlobalConfig({ defaultWorkspace: wsId, settings: defaultSettings() });
 
     console.log("");
 

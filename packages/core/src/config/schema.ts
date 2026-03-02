@@ -1,9 +1,11 @@
 import type { GlobalConfig, WorkspaceConfig, ProjectConfig, StackInfo } from "@opcom/types";
+import { validateSettings } from "./settings.js";
 
 export function validateGlobalConfig(data: unknown): GlobalConfig {
   const obj = data as Record<string, unknown>;
   return {
     defaultWorkspace: typeof obj?.defaultWorkspace === "string" ? obj.defaultWorkspace : "default",
+    settings: validateSettings(obj?.settings),
   };
 }
 
