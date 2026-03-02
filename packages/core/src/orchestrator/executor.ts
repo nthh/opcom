@@ -1,4 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 import type {
   Plan,
   PlanStep,
@@ -251,14 +255,8 @@ export class Executor {
           step.completedAt = new Date().toISOString();
           if (event.sessionId) this.sessionToStep.delete(event.sessionId);
 
-          // Clean up worktree on failure (leave branch for debugging)
-          if (this.plan.config.worktree && step.worktreePath) {
-            await this.worktreeManager.remove(step.ticketId).catch((err) => {
-              log.warn("worktree cleanup on failure failed", { ticketId: step.ticketId, error: String(err) });
-            });
-            step.worktreePath = undefined;
-            step.worktreeBranch = undefined;
-          }
+          // Keep worktree on failure for inspection/retry
+          // Worktree path and branch stay on the step so the TUI can show them
 
           this.emit("step_failed", { step, error: event.error ?? "unknown" });
           this.logPlanEvent("step_failed", {
@@ -348,12 +346,15 @@ export class Executor {
       step.error = "Agent exited without making any commits";
       step.completedAt = new Date().toISOString();
 
-      // Clean up the empty worktree
-      await this.worktreeManager.remove(step.ticketId).catch(() => {});
-      step.worktreePath = undefined;
-      step.worktreeBranch = undefined;
+      // Keep worktree for inspection — only clear truly empty ones
+      const hasUncommitted = await this.worktreeHasChanges(step.worktreePath);
+      if (!hasUncommitted) {
+        await this.worktreeManager.remove(step.ticketId).catch(() => {});
+        step.worktreePath = undefined;
+        step.worktreeBranch = undefined;
+      }
 
-      log.warn("step failed: no commits in worktree", { ticketId: step.ticketId });
+      log.warn("step failed: no commits in worktree", { ticketId: step.ticketId, keptWorktree: hasUncommitted });
       this.emit("step_failed", { step, error: step.error });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
@@ -445,6 +446,17 @@ export class Executor {
       agentSessionId: event.sessionId,
       detail: { mode: "worktree" },
     });
+  }
+
+  /** Check if a worktree has uncommitted changes (staged or unstaged). */
+  private async worktreeHasChanges(worktreePath?: string): Promise<boolean> {
+    if (!worktreePath) return false;
+    try {
+      const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: worktreePath });
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   /**

@@ -435,7 +435,7 @@ describe("Executor with worktree isolation", () => {
     await runPromise;
   });
 
-  it("cleans up worktree on agent_failed event", async () => {
+  it("keeps worktree on agent_failed event for inspection", async () => {
     const plan = makePlan([
       { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
     ], { worktree: true, pauseOnFailure: false });
@@ -458,8 +458,9 @@ describe("Executor with worktree isolation", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     expect(plan.steps[0].status).toBe("failed");
-    expect(mockRemove).toHaveBeenCalledWith("t1");
-    expect(plan.steps[0].worktreePath).toBeUndefined();
+    // Worktree should be kept for inspection/retry
+    expect(mockRemove).not.toHaveBeenCalled();
+    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.claude/worktrees/t1");
 
     executor.stop();
     await runPromise;
