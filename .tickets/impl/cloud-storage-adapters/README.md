@@ -1,7 +1,7 @@
 ---
 id: cloud-storage-adapters
 title: "Cloud Storage Adapters: R2, GCS"
-status: in-progress
+status: closed
 type: feature
 priority: 3
 deps:
