@@ -326,6 +326,19 @@ export class WorktreeManager {
       log.debug("installed deps in worktree", { worktreePath });
     } catch (err) {
       log.warn("failed to install deps in worktree", { worktreePath, error: String(err) });
+      return;
+    }
+
+    // Build TypeScript packages so dist/ directories exist.
+    // Without this, monorepo project references (e.g. @opcom/types) can't resolve.
+    try {
+      await execFileAsync("npm", ["run", "build"], {
+        cwd: worktreePath,
+        timeout: 120_000,
+      });
+      log.debug("built packages in worktree", { worktreePath });
+    } catch (err) {
+      log.warn("failed to build in worktree", { worktreePath, error: String(err) });
     }
   }
 }
