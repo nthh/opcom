@@ -603,6 +603,7 @@ export class Executor {
         cwd: agentCwd,
         worktree: this.plan.config.worktree,
         permissionMode: "acceptEdits",
+        disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
         additionalDirs: [project.path],
       },
       step.ticketId,
