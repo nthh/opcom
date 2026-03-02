@@ -11,7 +11,10 @@ export interface TicketSet {
 }
 
 export interface HygieneOptions {
+  /** Flag open tickets with no activity in this many days (default: 14) */
   staleDays?: number;
+  /** Override "now" for testing */
+  now?: Date;
 }
 
 /**
@@ -84,6 +87,27 @@ export function checkHygiene(
         message: "Ticket is in-progress but no agent is working on it",
         suggestion: "Assign an agent or move back to open status",
       });
+    }
+
+    // Stale: open ticket created more than N days ago
+    const staleDays = options?.staleDays ?? 14;
+    if (ticket.status === "open" && ticket.created) {
+      const createdDate = new Date(ticket.created);
+      if (!isNaN(createdDate.getTime())) {
+        const now = options?.now ?? new Date();
+        const ageMs = now.getTime() - createdDate.getTime();
+        const ageDays = Math.floor(ageMs / (1000 * 60 * 60 * 24));
+        if (ageDays >= staleDays) {
+          staleTickets.push(ticket.id);
+          issues.push({
+            severity: "warning",
+            category: "stale",
+            ticketId: ticket.id,
+            message: `Open for ${ageDays} days with no progress`,
+            suggestion: "Work on this ticket, update its priority, or defer it",
+          });
+        }
+      }
     }
   }
 

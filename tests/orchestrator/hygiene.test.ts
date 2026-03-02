@@ -124,6 +124,79 @@ describe("checkHygiene", () => {
     expect(report.abandonedTickets).not.toContain("working-1");
   });
 
+  it("detects stale open tickets", () => {
+    const thirtyDaysAgo = new Date("2026-01-01");
+    const now = new Date("2026-02-15");
+
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "old-task", created: thirtyDaysAgo.toISOString() }),
+          makeTicket({ id: "new-task", created: "2026-02-10" }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+
+    expect(report.staleTickets).toContain("old-task");
+    expect(report.staleTickets).not.toContain("new-task");
+    expect(report.issues.some((i) =>
+      i.category === "stale" && i.ticketId === "old-task",
+    )).toBe(true);
+  });
+
+  it("does not flag closed tickets as stale", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "done-task", status: "closed", created: "2025-01-01" }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+    expect(report.staleTickets).not.toContain("done-task");
+  });
+
+  it("respects custom staleDays option", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "recent", created: "2026-02-25" }), // 4 days old
+        ],
+      },
+    ];
+
+    // Default 14 days — not stale
+    const report1 = checkHygiene(ticketSets, [], { now });
+    expect(report1.staleTickets).not.toContain("recent");
+
+    // Custom 3 days — stale
+    const report2 = checkHygiene(ticketSets, [], { now, staleDays: 3 });
+    expect(report2.staleTickets).toContain("recent");
+  });
+
+  it("skips tickets without created date for staleness check", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "no-date" }), // no created field
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+    expect(report.staleTickets).not.toContain("no-date");
+  });
+
   it("reports clean when all tickets are healthy", () => {
     const ticketSets: TicketSet[] = [
       {

@@ -79,6 +79,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     type: String(frontmatter.type ?? "feature"),
     filePath,
     parent: typeof frontmatter.milestone === "string" ? frontmatter.milestone : undefined,
+    created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,
     deps: Array.isArray(frontmatter.deps) ? frontmatter.deps.map(String) : [],
     links: Array.isArray(frontmatter.links) ? frontmatter.links.map(String) : [],
     tags: {

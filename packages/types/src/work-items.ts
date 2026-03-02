@@ -6,6 +6,7 @@ export interface WorkItem {
   type: string;
   filePath: string;
   parent?: string;
+  created?: string;
   deps: string[];
   links: string[];
   tags: Record<string, string[]>;

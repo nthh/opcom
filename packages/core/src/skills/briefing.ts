@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanTickets } from "../detection/tickets.js";
+import type { HygieneIssue } from "@opcom/types";
 
 const exec = promisify(execFile);
 
@@ -24,6 +25,7 @@ export interface BriefingInput {
     }>;
   }>;
   since: string;
+  hygieneIssues?: HygieneIssue[];
 }
 
 export interface Briefing {
@@ -124,6 +126,20 @@ export function formatBriefingPrompt(input: BriefingInput): string {
       for (const session of project.agentSessions) {
         const item = session.workItemId ? ` on ${session.workItemId}` : "";
         sections.push(`- ${session.outcome}${item} (${session.duration})`);
+      }
+    }
+  }
+
+  if (input.hygieneIssues && input.hygieneIssues.length > 0) {
+    sections.push("");
+    sections.push("# Ticket Hygiene");
+    sections.push("");
+    const errors = input.hygieneIssues.filter((i) => i.severity === "error");
+    const warnings = input.hygieneIssues.filter((i) => i.severity === "warning");
+    const infos = input.hygieneIssues.filter((i) => i.severity === "info");
+    for (const group of [errors, warnings, infos]) {
+      for (const issue of group) {
+        sections.push(`- [${issue.severity}] ${issue.ticketId}: ${issue.message}`);
       }
     }
   }

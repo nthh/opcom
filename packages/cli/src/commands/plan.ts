@@ -330,4 +330,7 @@ export async function runPlanHygiene(): Promise<void> {
   if (report.abandonedTickets.length > 0) {
     console.log(`  Abandoned in-progress: ${report.abandonedTickets.length}`);
   }
+  if (report.staleTickets.length > 0) {
+    console.log(`  Stale tickets: ${report.staleTickets.length}`);
+  }
 }

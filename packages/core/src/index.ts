@@ -165,6 +165,7 @@ export type { WorktreeInfo, MergeResult, ExecResult } from "./orchestrator/workt
 export { commitStepChanges } from "./orchestrator/git-ops.js";
 export { reconcilePlans } from "./orchestrator/reconcile.js";
 export { checkHygiene } from "./orchestrator/hygiene.js";
+export type { HygieneOptions } from "./orchestrator/hygiene.js";
 export {
   savePlan,
   loadPlan,

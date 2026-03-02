@@ -108,6 +108,41 @@ describe("formatBriefingPrompt", () => {
     expect(prompt).toContain("## Concerns");
   });
 
+  it("includes hygiene issues when provided", () => {
+    const input = makeBriefingInput({
+      hygieneIssues: [
+        {
+          severity: "error",
+          category: "cycle",
+          ticketId: "task-a",
+          message: "Part of dependency cycle: task-a → task-b → task-a",
+          suggestion: "Break the cycle",
+        },
+        {
+          severity: "warning",
+          category: "stale",
+          ticketId: "old-task",
+          message: "Open for 30 days with no progress",
+          suggestion: "Work on this ticket or defer it",
+        },
+      ],
+    });
+    const prompt = formatBriefingPrompt(input);
+
+    expect(prompt).toContain("# Ticket Hygiene");
+    expect(prompt).toContain("[error] task-a");
+    expect(prompt).toContain("[warning] old-task");
+    expect(prompt).toContain("dependency cycle");
+    expect(prompt).toContain("30 days");
+  });
+
+  it("omits hygiene section when no issues", () => {
+    const input = makeBriefingInput({ hygieneIssues: [] });
+    const prompt = formatBriefingPrompt(input);
+
+    expect(prompt).not.toContain("# Ticket Hygiene");
+  });
+
   it("handles multiple projects", () => {
     const input = makeBriefingInput({
       projects: [
