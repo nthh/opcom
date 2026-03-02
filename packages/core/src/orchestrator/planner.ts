@@ -152,6 +152,8 @@ export function computePlan(
         step.startedAt = existing.startedAt;
         step.completedAt = existing.completedAt;
         step.error = existing.error;
+        step.worktreePath = existing.worktreePath;
+        step.worktreeBranch = existing.worktreeBranch;
       }
     }
   }
@@ -215,7 +217,7 @@ export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
 }
 
 function isSticky(status: StepStatus): boolean {
-  return status === "in-progress" || status === "done" || status === "failed" || status === "skipped";
+  return status === "in-progress" || status === "done" || status === "failed" || status === "skipped" || status === "needs-rebase";
 }
 
 /**

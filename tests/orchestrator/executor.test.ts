@@ -124,6 +124,19 @@ vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
   commitStepChanges: (...args: unknown[]) => mockCommitStepChanges(...args),
 }));
 
+vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
+  return {
+    WorktreeManager: vi.fn().mockImplementation(() => ({
+      create: vi.fn(),
+      remove: vi.fn(),
+      hasCommits: vi.fn(),
+      merge: vi.fn(),
+      getInfo: vi.fn(),
+      restore: vi.fn(),
+    })),
+  };
+});
+
 function makePlan(steps: PlanStep[], configOverrides?: Partial<ReturnType<typeof defaultConfig>>): Plan {
   return {
     id: "test-plan",
@@ -131,7 +144,7 @@ function makePlan(steps: PlanStep[], configOverrides?: Partial<ReturnType<typeof
     status: "planning",
     scope: {},
     steps,
-    config: { ...defaultConfig(), ...configOverrides },
+    config: { ...defaultConfig(), worktree: false, ...configOverrides },
     context: "",
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

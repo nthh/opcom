@@ -2,7 +2,6 @@ import { readFile, writeFile } from "node:fs/promises";
 import type {
   Plan,
   PlanStep,
-  WorkItem,
   AgentSession,
   AgentState,
   NormalizedEvent,
@@ -16,6 +15,7 @@ import { buildContextPacket } from "../agents/context-builder.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges } from "./git-ops.js";
+import { WorktreeManager } from "./worktree.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("executor");
@@ -24,6 +24,7 @@ export interface ExecutorEvents {
   step_started: { step: PlanStep; session: AgentSession };
   step_completed: { step: PlanStep };
   step_failed: { step: PlanStep; error: string };
+  step_needs_rebase: { step: PlanStep; error: string };
   plan_completed: { plan: Plan };
   plan_paused: { plan: Plan };
   plan_updated: { plan: Plan };
@@ -52,6 +53,7 @@ export class Executor {
   private running = false;
   private sessionToStep = new Map<string, string>(); // sessionId → ticketId
   private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
+  private worktreeManager = new WorktreeManager();
 
   constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
     this.plan = plan;
@@ -63,6 +65,11 @@ export class Executor {
     return this.plan;
   }
 
+  /** Exposed for testing. */
+  getWorktreeManager(): WorktreeManager {
+    return this.worktreeManager;
+  }
+
   /**
    * Main execution loop.
    */
@@ -71,6 +78,11 @@ export class Executor {
     this.plan.status = "executing";
     await savePlan(this.plan);
     this.logPlanEvent("plan_started", { detail: { stepCount: this.plan.steps.length } });
+
+    // Clean up orphaned worktrees from previous crashed runs
+    if (this.plan.config.worktree) {
+      await this.cleanupOrphanedWorktrees();
+    }
 
     // Wire SessionManager events
     const onStopped = (session: AgentSession) => {
@@ -88,7 +100,7 @@ export class Executor {
       }
     };
 
-    // Track write activity per agent
+    // Track write activity per agent (used when worktree mode is off)
     const WRITE_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
     const onAgentEvent = ({ sessionId, event: ev }: { sessionId: string; event: NormalizedEvent }) => {
       if (ev.type === "tool_end" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolSuccess !== false) {
@@ -219,61 +231,10 @@ export class Executor {
       case "agent_completed": {
         const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
         if (step) {
-          // Check if the agent actually wrote any files
-          const writes = event.sessionId ? (this.sessionWrites.get(event.sessionId) ?? 0) : 0;
-
-          if (writes === 0) {
-            // Agent exited without making changes — treat as failed
-            step.status = "failed";
-            step.error = "Agent exited without making any file changes";
-            step.completedAt = new Date().toISOString();
-            if (event.sessionId) {
-              this.sessionToStep.delete(event.sessionId);
-              this.sessionWrites.delete(event.sessionId);
-            }
-
-            log.warn("step failed: no writes", { ticketId: step.ticketId });
-            this.emit("step_failed", { step, error: step.error });
-            this.logPlanEvent("step_failed", {
-              stepTicketId: step.ticketId,
-              agentSessionId: event.sessionId,
-              detail: { error: step.error },
-            });
-
-            if (this.plan.config.pauseOnFailure) {
-              this.plan.status = "paused";
-              await savePlan(this.plan);
-              this.emit("plan_paused", { plan: this.plan });
-              this.logPlanEvent("plan_paused", { detail: { reason: "step_failed" } });
-              break;
-            }
+          if (this.plan.config.worktree) {
+            await this.handleWorktreeCompletion(step, event);
           } else {
-            step.status = "done";
-            step.completedAt = new Date().toISOString();
-            if (event.sessionId) {
-              this.sessionToStep.delete(event.sessionId);
-              this.sessionWrites.delete(event.sessionId);
-            }
-
-            // Ticket transition
-            if (this.plan.config.ticketTransitions) {
-              await this.updateTicketStatusSafe(step, "closed");
-            }
-
-            // Auto-commit changes
-            if (this.plan.config.autoCommit) {
-              const project = await loadProject(step.projectId);
-              if (project) {
-                await commitStepChanges(project.path, step.ticketId);
-              }
-            }
-
-            this.emit("step_completed", { step });
-            this.logPlanEvent("step_completed", {
-              stepTicketId: step.ticketId,
-              agentSessionId: event.sessionId,
-              detail: { writes },
-            });
+            await this.handleLegacyCompletion(step, event);
           }
         }
 
@@ -289,6 +250,15 @@ export class Executor {
           step.error = event.error;
           step.completedAt = new Date().toISOString();
           if (event.sessionId) this.sessionToStep.delete(event.sessionId);
+
+          // Clean up worktree on failure (leave branch for debugging)
+          if (this.plan.config.worktree && step.worktreePath) {
+            await this.worktreeManager.remove(step.ticketId).catch((err) => {
+              log.warn("worktree cleanup on failure failed", { ticketId: step.ticketId, error: String(err) });
+            });
+            step.worktreePath = undefined;
+            step.worktreeBranch = undefined;
+          }
 
           this.emit("step_failed", { step, error: event.error ?? "unknown" });
           this.logPlanEvent("step_failed", {
@@ -330,6 +300,13 @@ export class Executor {
           step.status = "skipped";
           step.completedAt = new Date().toISOString();
           this.logPlanEvent("step_skipped", { stepTicketId: step.ticketId });
+
+          // Clean up worktree if skipped while in-progress
+          if (this.plan.config.worktree && step.worktreePath) {
+            await this.worktreeManager.remove(step.ticketId).catch(() => {});
+            step.worktreePath = undefined;
+            step.worktreeBranch = undefined;
+          }
         }
         await this.recomputeAndContinue();
         break;
@@ -341,6 +318,182 @@ export class Executor {
         }
         break;
       }
+    }
+  }
+
+  /**
+   * Handle agent completion in worktree mode.
+   * Uses branch commit detection instead of write-count tracking.
+   */
+  private async handleWorktreeCompletion(step: PlanStep, event: ExecutorEvent): Promise<void> {
+    const hasWork = await this.worktreeManager.hasCommits(step.ticketId);
+
+    if (event.sessionId) {
+      this.sessionToStep.delete(event.sessionId);
+      this.sessionWrites.delete(event.sessionId);
+    }
+
+    if (!hasWork) {
+      step.status = "failed";
+      step.error = "Agent exited without making any commits";
+      step.completedAt = new Date().toISOString();
+
+      // Clean up the empty worktree
+      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      step.worktreePath = undefined;
+      step.worktreeBranch = undefined;
+
+      log.warn("step failed: no commits in worktree", { ticketId: step.ticketId });
+      this.emit("step_failed", { step, error: step.error });
+      this.logPlanEvent("step_failed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: step.error, mode: "worktree" },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "step_failed" } });
+      }
+      return;
+    }
+
+    // Agent has commits — attempt merge into main tree
+    const mergeResult = await this.worktreeManager.merge(step.ticketId);
+
+    if (mergeResult.conflict) {
+      // Merge conflict — mark as needs-rebase
+      step.status = "needs-rebase";
+      step.error = `Merge conflict: ${mergeResult.error}`;
+      step.completedAt = new Date().toISOString();
+      // Keep worktree alive for manual rebase
+
+      log.warn("merge conflict", { ticketId: step.ticketId });
+      this.emit("step_needs_rebase", { step, error: step.error });
+      this.logPlanEvent("step_needs_rebase", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: step.error },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "merge_conflict" } });
+      }
+      return;
+    }
+
+    if (!mergeResult.merged) {
+      // Merge failed for non-conflict reason
+      step.status = "failed";
+      step.error = `Merge failed: ${mergeResult.error}`;
+      step.completedAt = new Date().toISOString();
+      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      step.worktreePath = undefined;
+      step.worktreeBranch = undefined;
+
+      log.error("merge failed", { ticketId: step.ticketId, error: mergeResult.error });
+      this.emit("step_failed", { step, error: step.error });
+      this.logPlanEvent("step_failed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: step.error },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "merge_failed" } });
+      }
+      return;
+    }
+
+    // Merge succeeded — step is done
+    step.status = "done";
+    step.completedAt = new Date().toISOString();
+
+    // Clean up worktree after successful merge
+    await this.worktreeManager.remove(step.ticketId).catch((err) => {
+      log.warn("worktree cleanup after merge failed", { ticketId: step.ticketId, error: String(err) });
+    });
+    step.worktreePath = undefined;
+    step.worktreeBranch = undefined;
+
+    // Ticket transition
+    if (this.plan.config.ticketTransitions) {
+      await this.updateTicketStatusSafe(step, "closed");
+    }
+
+    this.emit("step_completed", { step });
+    this.logPlanEvent("step_completed", {
+      stepTicketId: step.ticketId,
+      agentSessionId: event.sessionId,
+      detail: { mode: "worktree" },
+    });
+  }
+
+  /**
+   * Handle agent completion in legacy (non-worktree) mode.
+   * Uses write-count tracking from tool events.
+   */
+  private async handleLegacyCompletion(step: PlanStep, event: ExecutorEvent): Promise<void> {
+    const writes = event.sessionId ? (this.sessionWrites.get(event.sessionId) ?? 0) : 0;
+
+    if (writes === 0) {
+      step.status = "failed";
+      step.error = "Agent exited without making any file changes";
+      step.completedAt = new Date().toISOString();
+      if (event.sessionId) {
+        this.sessionToStep.delete(event.sessionId);
+        this.sessionWrites.delete(event.sessionId);
+      }
+
+      log.warn("step failed: no writes", { ticketId: step.ticketId });
+      this.emit("step_failed", { step, error: step.error });
+      this.logPlanEvent("step_failed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: step.error },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "step_failed" } });
+      }
+    } else {
+      step.status = "done";
+      step.completedAt = new Date().toISOString();
+      if (event.sessionId) {
+        this.sessionToStep.delete(event.sessionId);
+        this.sessionWrites.delete(event.sessionId);
+      }
+
+      // Ticket transition
+      if (this.plan.config.ticketTransitions) {
+        await this.updateTicketStatusSafe(step, "closed");
+      }
+
+      // Auto-commit changes
+      if (this.plan.config.autoCommit) {
+        const project = await loadProject(step.projectId);
+        if (project) {
+          await commitStepChanges(project.path, step.ticketId);
+        }
+      }
+
+      this.emit("step_completed", { step });
+      this.logPlanEvent("step_completed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { writes },
+      });
     }
   }
 
@@ -405,6 +558,19 @@ export class Executor {
 
     const contextPacket = await buildContextPacket(project, workItem);
 
+    // Create worktree if enabled — agent runs in isolation
+    let agentCwd: string | undefined;
+    if (this.plan.config.worktree) {
+      const wtInfo = await this.worktreeManager.create(
+        project.path,
+        step.ticketId,
+        step.ticketId,
+      );
+      step.worktreePath = wtInfo.worktreePath;
+      step.worktreeBranch = wtInfo.branch;
+      agentCwd = wtInfo.worktreePath;
+    }
+
     const session = await this.sessionManager.startSession(
       step.projectId,
       this.plan.config.backend as "claude-code" | "opencode",
@@ -412,6 +578,7 @@ export class Executor {
         projectPath: project.path,
         workItemId: step.ticketId,
         contextPacket,
+        cwd: agentCwd,
         worktree: this.plan.config.worktree,
         permissionMode: "acceptEdits",
         additionalDirs: [project.path],
@@ -439,7 +606,7 @@ export class Executor {
 
   private isPlanTerminal(): boolean {
     return this.plan.steps.every(
-      (s) => s.status === "done" || s.status === "failed" || s.status === "skipped",
+      (s) => s.status === "done" || s.status === "failed" || s.status === "skipped" || s.status === "needs-rebase",
     );
   }
 
@@ -472,6 +639,26 @@ export class Executor {
       }
     } catch (err) {
       log.warn("failed to update ticket status", { ticketId: step.ticketId, error: String(err) });
+    }
+  }
+
+  /**
+   * Clean up orphaned worktrees from crashed runs.
+   * Scans each project's .claude/worktrees/ directory.
+   */
+  private async cleanupOrphanedWorktrees(): Promise<void> {
+    const projectIds = [...new Set(this.plan.steps.map((s) => s.projectId))];
+    for (const pid of projectIds) {
+      try {
+        const project = await loadProject(pid);
+        if (!project) continue;
+        const cleaned = await WorktreeManager.cleanupOrphaned(project.path);
+        if (cleaned.length > 0) {
+          log.info("cleaned up orphaned worktrees", { projectId: pid, count: cleaned.length });
+        }
+      } catch (err) {
+        log.warn("orphaned worktree cleanup failed", { projectId: pid, error: String(err) });
+      }
     }
   }
 }

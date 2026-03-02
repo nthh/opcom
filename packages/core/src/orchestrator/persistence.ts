@@ -9,7 +9,7 @@ export function defaultConfig(): OrchestratorConfig {
     maxConcurrentAgents: 3,
     autoStart: false,
     backend: "claude-code",
-    worktree: false,
+    worktree: true,
     pauseOnFailure: true,
     ticketTransitions: true,
     autoCommit: true,

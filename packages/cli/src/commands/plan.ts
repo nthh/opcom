@@ -66,6 +66,7 @@ function stepIcon(status: string): string {
     case "done": return "\u2713"; // ✓
     case "failed": return "\u2717"; // ✗
     case "skipped": return "\u2298"; // ⊘
+    case "needs-rebase": return "\u21c4"; // ⇄
     default: return "?";
   }
 }

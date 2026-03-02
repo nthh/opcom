@@ -160,6 +160,8 @@ export type { TursoConfig, NeonConfig, PrismaOverlayConfig, CloudDetectionResult
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";
 export { Executor, updateTicketStatus } from "./orchestrator/executor.js";
+export { WorktreeManager } from "./orchestrator/worktree.js";
+export type { WorktreeInfo, MergeResult, ExecResult } from "./orchestrator/worktree.js";
 export { commitStepChanges } from "./orchestrator/git-ops.js";
 export { reconcilePlans } from "./orchestrator/reconcile.js";
 export { checkHygiene } from "./orchestrator/hygiene.js";

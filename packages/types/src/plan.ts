@@ -1,7 +1,7 @@
 // Orchestrator plan types
 
 export type PlanStatus = "planning" | "executing" | "paused" | "done" | "failed";
-export type StepStatus = "blocked" | "ready" | "in-progress" | "done" | "failed" | "skipped";
+export type StepStatus = "blocked" | "ready" | "in-progress" | "done" | "failed" | "skipped" | "needs-rebase";
 
 export interface Plan {
   id: string;
@@ -32,6 +32,8 @@ export interface PlanStep {
   startedAt?: string;
   completedAt?: string;
   error?: string;
+  worktreePath?: string;
+  worktreeBranch?: string;
 }
 
 export interface VerificationConfig {
