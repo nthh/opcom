@@ -51,6 +51,7 @@ export interface OrchestratorConfig {
   ticketTransitions: boolean;
   autoCommit: boolean;
   verification: VerificationConfig;
+  allowedBashPatterns?: string[];
 }
 
 export interface TestGateResult {

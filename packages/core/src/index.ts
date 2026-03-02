@@ -43,11 +43,21 @@ export {
 } from "./config/paths.js";
 
 export { validateGlobalConfig, validateWorkspaceConfig, validateProjectConfig, emptyStack } from "./config/schema.js";
+export {
+  settingsDefs,
+  defaultSettings,
+  getSetting,
+  setSetting,
+  validateSettings,
+} from "./config/settings.js";
+export type { SettingDef } from "./config/settings.js";
 
 export { refreshProjectStatus } from "./project/status.js";
 export type { ProjectStatus } from "./project/status.js";
 
 // Phase 2: Agents
+export { deriveAllowedBashTools } from "./agents/allowed-bash.js";
+export type { AllowedBashInput } from "./agents/allowed-bash.js";
 export { createAdapter, ClaudeCodeAdapter, OpenCodeAdapter } from "./agents/adapter.js";
 export { SessionManager } from "./agents/session-manager.js";
 export { EventStore } from "./agents/event-store.js";
@@ -155,6 +165,39 @@ export {
   getDatabaseAdapters,
 } from "./cloud/index.js";
 export type { TursoConfig, NeonConfig, PrismaOverlayConfig, CloudDetectionResult } from "./cloud/index.js";
+
+// Cloud Storage Adapters
+export {
+  R2Adapter,
+  detectR2,
+  getR2Status,
+  parseR2Buckets,
+  GCSAdapter,
+  detectGCS,
+  getGCSStatus,
+  parseGsutilSize,
+  parseFirebaseStorageBucket,
+  getStorageAdapters,
+} from "./cloud/index.js";
+export type { R2Config, GCSConfig } from "./cloud/index.js";
+
+// Cloud Serverless Adapters
+export {
+  CloudflareWorkersAdapter,
+  detectWorkers,
+  getWorkersStatus,
+  parseWranglerRoutes,
+  parseWranglerCrons,
+  parseWranglerName,
+  FirebaseFunctionsAdapter,
+  detectFirebaseFunctions,
+  getFirebaseFunctionsStatus,
+  parseFirebaseFunctions,
+  readFirebaseProject,
+  detectScheduledFunctions,
+  getServerlessAdapters,
+} from "./cloud/index.js";
+export type { WorkersConfig, FirebaseFunctionsConfig } from "./cloud/index.js";
 
 // Orchestrator
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";

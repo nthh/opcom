@@ -16,6 +16,7 @@ import type { TicketSet } from "./planner.js";
 import { recomputePlan } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket } from "../agents/context-builder.js";
+import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges } from "./git-ops.js";
@@ -593,6 +594,11 @@ export class Executor {
       agentCwd = wtInfo.worktreePath;
     }
 
+    const allowedTools = deriveAllowedBashTools(
+      { stack: project.stack, testing: project.testing, linting: project.linting },
+      this.plan.config.allowedBashPatterns,
+    );
+
     const session = await this.sessionManager.startSession(
       step.projectId,
       this.plan.config.backend as "claude-code" | "opencode",
@@ -604,6 +610,7 @@ export class Executor {
         worktree: this.plan.config.worktree,
         permissionMode: "acceptEdits",
         disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
+        allowedTools,
         additionalDirs: [project.path],
       },
       step.ticketId,

@@ -11,7 +11,7 @@ type EventHandler<T> = (data: T) => void;
 
 class MockSessionManager {
   private listeners = new Map<string, Set<EventHandler<unknown>>>();
-  startCalls: Array<{ projectId: string; backend: string; ticketId?: string }> = [];
+  startCalls: Array<{ projectId: string; backend: string; config: unknown; ticketId?: string }> = [];
   stopCalls: string[] = [];
   private sessionCounter = 0;
 
@@ -34,10 +34,10 @@ class MockSessionManager {
   async startSession(
     projectId: string,
     backend: string,
-    _config: unknown,
+    config: unknown,
     workItemId?: string,
   ): Promise<AgentSession> {
-    this.startCalls.push({ projectId, backend, ticketId: workItemId });
+    this.startCalls.push({ projectId, backend, config, ticketId: workItemId });
     const id = `session-${++this.sessionCounter}`;
     return {
       id,
@@ -104,7 +104,9 @@ vi.mock("../../packages/core/src/config/loader.js", () => ({
     id,
     name: id,
     path: `/tmp/test-${id}`,
-    stack: { languages: [], frameworks: [], packageManagers: [], infra: [], versionManagers: [] },
+    stack: { languages: [], frameworks: [], packageManagers: [{ name: "npm", sourceFile: "package-lock.json" }], infrastructure: [], versionManagers: [] },
+    testing: { framework: "vitest", command: "npm test" },
+    linting: [{ name: "eslint", sourceFile: ".eslintrc.json" }],
   })),
 }));
 
@@ -417,6 +419,64 @@ describe("Executor auto-commit", () => {
     await new Promise((r) => setTimeout(r, 100));
 
     expect(mockCommitStepChanges).not.toHaveBeenCalled();
+
+    executor.stop();
+    await runPromise;
+  });
+});
+
+describe("Executor allowedTools passthrough", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    mockSM = new MockSessionManager();
+    vi.clearAllMocks();
+  });
+
+  it("passes derived allowedTools to sessionManager.startSession", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mockSM.startCalls).toHaveLength(1);
+    const config = mockSM.startCalls[0].config as { allowedTools?: string[] };
+    expect(config.allowedTools).toBeDefined();
+    expect(Array.isArray(config.allowedTools)).toBe(true);
+
+    // Should include always-safe patterns
+    expect(config.allowedTools).toContain("Bash(git status*)");
+    expect(config.allowedTools).toContain("Bash(git diff*)");
+
+    // Should include npm patterns from the mocked project
+    expect(config.allowedTools).toContain("Bash(npm test*)");
+    expect(config.allowedTools).toContain("Bash(npm run *)");
+    expect(config.allowedTools).toContain("Bash(npx *)");
+
+    // Should include eslint patterns from the mocked project
+    expect(config.allowedTools).toContain("Bash(eslint *)");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("includes user-provided allowedBashPatterns from plan config", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { allowedBashPatterns: ["docker compose*", "make *"] });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const config = mockSM.startCalls[0].config as { allowedTools?: string[] };
+    expect(config.allowedTools).toContain("Bash(docker compose*)");
+    expect(config.allowedTools).toContain("Bash(make *)");
 
     executor.stop();
     await runPromise;

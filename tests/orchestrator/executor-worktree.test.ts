@@ -85,7 +85,9 @@ vi.mock("../../packages/core/src/config/loader.js", () => ({
     id,
     name: id,
     path: `/tmp/test-${id}`,
-    stack: { languages: [], frameworks: [], packageManagers: [], infra: [], versionManagers: [] },
+    stack: { languages: [], frameworks: [], packageManagers: [], infrastructure: [], versionManagers: [] },
+    testing: null,
+    linting: [],
   })),
 }));
 
