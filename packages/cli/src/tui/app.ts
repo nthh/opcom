@@ -43,6 +43,15 @@ import {
   scrollToBottom as ticketScrollToBottom,
   type TicketFocusState,
 } from "./views/ticket-focus.js";
+import {
+  renderPlanStepFocus,
+  createPlanStepFocusState,
+  scrollUp as planStepScrollUp,
+  scrollDown as planStepScrollDown,
+  scrollToTop as planStepScrollToTop,
+  scrollToBottom as planStepScrollToBottom,
+  type PlanStepFocusState,
+} from "./views/plan-step-focus.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -58,6 +67,7 @@ export class TuiApp {
   private projectDetailState: ProjectDetailState | null = null;
   private agentFocusState: AgentFocusState | null = null;
   private ticketFocusState: TicketFocusState | null = null;
+  private planStepFocusState: PlanStepFocusState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -248,6 +258,8 @@ export class TuiApp {
             renderAgentFocus(this.buf, layout.panels[0], this.agentFocusState);
           } else if (this.ticketFocusState) {
             renderTicketFocus(this.buf, layout.panels[0], this.ticketFocusState);
+          } else if (this.planStepFocusState) {
+            renderPlanStepFocus(this.buf, layout.panels[0], this.planStepFocusState);
           }
           break;
       }
@@ -349,6 +361,12 @@ export class TuiApp {
       "  c          Chat about this ticket",
       "  e          Open in $EDITOR",
       "",
+      bold("Level 3: Plan Step Focus"),
+      "  j/k        Scroll up/down",
+      "  w          Start agent (if step ready)",
+      "  a          Jump to assigned agent",
+      "  t          Jump to ticket detail",
+      "",
       dim("Press ? or Esc to close help"),
     ];
 
@@ -430,6 +448,8 @@ export class TuiApp {
           this.handleAgentFocusInput(data);
         } else if (this.ticketFocusState) {
           this.handleTicketFocusInput(data);
+        } else if (this.planStepFocusState) {
+          this.handlePlanStepFocusInput(data);
         }
         break;
     }
@@ -595,11 +615,19 @@ export class TuiApp {
         this.navigateToProject(project);
       }
     } else if (panel === 1) {
-      // Drill into work item
-      const items = getFilteredWorkItems(state);
-      const dw = items[selected];
-      if (dw) {
-        this.navigateToTicket(dw.item, dw.projectId);
+      if (state.planPanel) {
+        // Drill into plan step
+        const step = state.planPanel.plan.steps[selected];
+        if (step) {
+          this.navigateToPlanStep(step, state.planPanel.plan);
+        }
+      } else {
+        // Drill into work item
+        const items = getFilteredWorkItems(state);
+        const dw = items[selected];
+        if (dw) {
+          this.navigateToTicket(dw.item, dw.projectId);
+        }
       }
     } else if (panel === 2) {
       // Drill into agent
@@ -1155,6 +1183,65 @@ export class TuiApp {
     });
   }
 
+  // --- L3: Plan Step Focus Input ---
+
+  private handlePlanStepFocusInput(data: string): void {
+    if (!this.planStepFocusState) return;
+    const state = this.planStepFocusState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 2;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        planStepScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        planStepScrollUp(state, 1);
+        return;
+
+      case "G":
+        planStepScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        planStepScrollToTop(state);
+        return;
+
+      case "w":
+        // Start agent on this step (only if ready)
+        if (state.step.status === "ready") {
+          this.client.send({
+            type: "start_agent",
+            projectId: state.step.projectId,
+            workItemId: state.step.ticketId,
+          });
+        }
+        return;
+
+      case "a":
+        // Jump to agent focus if agent assigned
+        if (state.agent) {
+          this.navigateToAgent(state.agent);
+        }
+        return;
+
+      case "t":
+        // Jump to ticket focus
+        if (state.ticket) {
+          this.navigateToTicket(state.ticket, state.step.projectId);
+        }
+        return;
+    }
+  }
+
   // --- Navigation ---
 
   private navigateToProject(project: ProjectStatusSnapshot): void {
@@ -1205,6 +1292,7 @@ export class TuiApp {
 
     this.agentFocusState = createAgentFocusState(agent, events);
     this.ticketFocusState = null;
+    this.planStepFocusState = null;
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {
@@ -1231,11 +1319,43 @@ export class TuiApp {
 
     this.ticketFocusState = createTicketFocusState(ticket, projectConfig);
     this.agentFocusState = null;
+    this.planStepFocusState = null;
 
     // Load ticket content async
     loadTicketContent(this.ticketFocusState).then(() => {
       this.scheduleRender();
     }).catch(() => {});
+  }
+
+  private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+
+    // Collect all tickets across projects for blocker resolution
+    const allTickets: WorkItem[] = [];
+    for (const [, tickets] of this.client.projectTickets) {
+      allTickets.push(...tickets);
+    }
+
+    const ticket = allTickets.find((t) => t.id === step.ticketId) ?? null;
+    const agent = step.agentSessionId
+      ? this.client.agents.find((a) => a.id === step.agentSessionId) ?? null
+      : null;
+
+    this.planStepFocusState = createPlanStepFocusState(
+      step,
+      plan,
+      ticket,
+      agent,
+      allTickets,
+      this.client.agents,
+    );
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
   }
 
   private navigateBack(): void {
@@ -1246,6 +1366,7 @@ export class TuiApp {
         this.projectDetailState = null;
         this.agentFocusState = null;
         this.ticketFocusState = null;
+        this.planStepFocusState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -1257,6 +1378,7 @@ export class TuiApp {
     if (this.level <= 2) {
       this.agentFocusState = null;
       this.ticketFocusState = null;
+      this.planStepFocusState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;

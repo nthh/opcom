@@ -1,7 +1,7 @@
 ---
 id: tui-agent-sorting
 title: "TUI: Sort Agent List by Plan Activity"
-status: open
+status: in-progress
 type: feature
 priority: 1
 deps: []
@@ -19,13 +19,13 @@ Agent list sorts active-before-stopped but doesn't prioritize plan-active agents
 
 ## Tasks
 
-- [ ] Update `renderAgentsPanel()` sort in `packages/cli/src/tui/views/dashboard.ts` to use four tiers:
+- [x] Update `renderAgentsPanel()` sort in `packages/cli/src/tui/views/dashboard.ts` to use four tiers:
   1. Plan-active (agent running a plan step) — highest
   2. Other-active (running but not on a plan step)
   3. Idle (connected but not running)
   4. Stopped — lowest
-- [ ] Show plan step ticket ID prominently in the agent row when an agent is executing a plan step
-- [ ] Tests: verify sort order with mixed agent states
+- [x] Show plan step ticket ID prominently in the agent row when an agent is executing a plan step
+- [x] Tests: verify sort order with mixed agent states
 
 ## Acceptance Criteria
 
