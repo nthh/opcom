@@ -6,12 +6,28 @@ import type {
 } from "@opcom/types";
 import { TursoAdapter } from "./turso.js";
 import { NeonAdapter } from "./neon.js";
+import { R2Adapter } from "./r2.js";
+import { GCSAdapter } from "./gcs.js";
+import { CloudflareWorkersAdapter } from "./workers.js";
+import { FirebaseFunctionsAdapter } from "./firebase-functions.js";
 import { detectPrisma } from "./prisma.js";
 
 /** All registered database adapters. */
 const DATABASE_ADAPTERS: CloudServiceAdapter[] = [
   new TursoAdapter(),
   new NeonAdapter(),
+];
+
+/** All registered storage adapters. */
+const STORAGE_ADAPTERS: CloudServiceAdapter[] = [
+  new R2Adapter(),
+  new GCSAdapter(),
+];
+
+/** All registered serverless adapters. */
+const SERVERLESS_ADAPTERS: CloudServiceAdapter[] = [
+  new CloudflareWorkersAdapter(),
+  new FirebaseFunctionsAdapter(),
 ];
 
 export interface CloudDetectionResult {
@@ -21,8 +37,8 @@ export interface CloudDetectionResult {
 
 /**
  * Tier 4 cloud service detection.
- * Scans for cloud database configs (Turso, Neon) and migration tools (Prisma).
- * Additive to existing Tier 1-3 detection.
+ * Scans for cloud database configs (Turso, Neon), storage (R2, GCS),
+ * and migration tools (Prisma). Additive to existing Tier 1-3 detection.
  */
 export async function detectCloudServices(
   projectPath: string,
@@ -31,9 +47,11 @@ export async function detectCloudServices(
   const configs: CloudServiceConfig[] = [];
   const evidence: DetectionEvidence[] = [];
 
-  // Run all database adapter detections in parallel
+  const allAdapters = [...DATABASE_ADAPTERS, ...STORAGE_ADAPTERS, ...SERVERLESS_ADAPTERS];
+
+  // Run all adapter detections in parallel
   const detections = await Promise.all(
-    DATABASE_ADAPTERS.map(async (adapter) => {
+    allAdapters.map(async (adapter) => {
       const config = await adapter.detect(projectPath, stack);
       return { adapter, config };
     }),
@@ -69,6 +87,14 @@ function getDetectionSource(provider: string): string {
       return ".env (TURSO_DATABASE_URL)";
     case "neon":
       return ".env (DATABASE_URL → neon.tech)";
+    case "cloudflare-r2":
+      return "wrangler.toml or .env (R2_*)";
+    case "gcs":
+      return ".env (GCS_BUCKET) or firebase.json";
+    case "cloudflare-workers":
+      return "wrangler.toml or wrangler.json";
+    case "firebase-functions":
+      return "firebase.json (functions)";
     default:
       return ".env";
   }
@@ -79,4 +105,18 @@ function getDetectionSource(provider: string): string {
  */
 export function getDatabaseAdapters(): CloudServiceAdapter[] {
   return [...DATABASE_ADAPTERS];
+}
+
+/**
+ * Get all registered storage adapters.
+ */
+export function getStorageAdapters(): CloudServiceAdapter[] {
+  return [...STORAGE_ADAPTERS];
+}
+
+/**
+ * Get all registered serverless adapters.
+ */
+export function getServerlessAdapters(): CloudServiceAdapter[] {
+  return [...SERVERLESS_ADAPTERS];
 }

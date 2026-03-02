@@ -4,6 +4,12 @@ export type { TursoConfig } from "./turso.js";
 export { NeonAdapter, detectNeon, getNeonStatus, parseNeonUrl, isNeonUrl } from "./neon.js";
 export type { NeonConfig } from "./neon.js";
 
+export { R2Adapter, detectR2, getR2Status, parseR2Buckets } from "./r2.js";
+export type { R2Config } from "./r2.js";
+
+export { GCSAdapter, detectGCS, getGCSStatus, parseGsutilSize, parseFirebaseStorageBucket } from "./gcs.js";
+export type { GCSConfig } from "./gcs.js";
+
 export {
   detectPrisma,
   parseMigrateStatus,
@@ -13,5 +19,25 @@ export {
 } from "./prisma.js";
 export type { PrismaOverlayConfig } from "./prisma.js";
 
-export { detectCloudServices, getDatabaseAdapters } from "./detect.js";
+export {
+  CloudflareWorkersAdapter,
+  detectWorkers,
+  getWorkersStatus,
+  parseWranglerRoutes,
+  parseWranglerCrons,
+  parseWranglerName,
+} from "./workers.js";
+export type { WorkersConfig } from "./workers.js";
+
+export {
+  FirebaseFunctionsAdapter,
+  detectFirebaseFunctions,
+  getFirebaseFunctionsStatus,
+  parseFirebaseFunctions,
+  readFirebaseProject,
+  detectScheduledFunctions,
+} from "./firebase-functions.js";
+export type { FirebaseFunctionsConfig } from "./firebase-functions.js";
+
+export { detectCloudServices, getDatabaseAdapters, getStorageAdapters, getServerlessAdapters } from "./detect.js";
 export type { CloudDetectionResult } from "./detect.js";

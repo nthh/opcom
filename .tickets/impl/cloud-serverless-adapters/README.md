@@ -1,7 +1,7 @@
 ---
 id: cloud-serverless-adapters
 title: "Cloud Serverless Adapters: Cloudflare Workers, Firebase Functions"
-status: open
+status: in-progress
 type: feature
 priority: 2
 deps:
