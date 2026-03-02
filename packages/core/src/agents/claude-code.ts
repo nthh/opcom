@@ -369,9 +369,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             const streamedNorm = proc.streamedText.replace(/\s+/g, " ").trim();
             const summaryNorm = textContent.replace(/\s+/g, " ").trim();
             if (streamedNorm.length > 100 && summaryNorm === streamedNorm) {
-              // Already displayed via streaming — skip the summary.
-              // Reset for next turn.
+              // Already displayed via streaming — skip the text summary.
+              // But still track tool_use blocks so tool_end gets the right toolName.
               proc.streamedText = "";
+              if (Array.isArray(content)) {
+                for (const block of content) {
+                  if (block.type === "tool_use") {
+                    proc.pendingToolNames.push(block.name as string);
+                  }
+                }
+              }
               break;
             }
           }
