@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
-import { existsSync, symlinkSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readdir, rm } from "node:fs/promises";
 import { createLogger } from "../logger.js";
 
@@ -89,8 +89,8 @@ export class WorktreeManager {
       { cwd: projectPath },
     );
 
-    // Symlink node_modules for fast setup
-    this.symlinkNodeModules(projectPath, worktreePath);
+    // Install dependencies in the worktree
+    await this.installDeps(worktreePath);
 
     const info: WorktreeInfo = {
       stepId,
@@ -310,41 +310,22 @@ export class WorktreeManager {
   }
 
   /**
-   * Symlink node_modules from the main project into the worktree.
-   * This avoids a full `npm install` (~10s) for each worktree.
+   * Install dependencies in the worktree.
+   * Runs `npm install` instead of symlinking node_modules to avoid
+   * ELOOP errors from circular symlinks in monorepo workspaces.
    */
-  private symlinkNodeModules(projectPath: string, worktreePath: string): void {
-    const mainNodeModules = join(projectPath, "node_modules");
-    const worktreeNodeModules = join(worktreePath, "node_modules");
+  private async installDeps(worktreePath: string): Promise<void> {
+    const pkgJson = join(worktreePath, "package.json");
+    if (!existsSync(pkgJson)) return;
 
-    if (existsSync(mainNodeModules) && !existsSync(worktreeNodeModules)) {
-      try {
-        symlinkSync(mainNodeModules, worktreeNodeModules, "junction");
-        log.debug("symlinked node_modules", { worktreePath });
-      } catch (err) {
-        log.warn("failed to symlink node_modules", { error: String(err) });
-      }
-    }
-
-    // Also symlink workspace package node_modules (monorepo support)
     try {
-      const packagesDir = join(projectPath, "packages");
-      if (existsSync(packagesDir)) {
-        const worktreePackagesDir = join(worktreePath, "packages");
-        if (existsSync(worktreePackagesDir)) {
-          const pkgs = readdirSync(packagesDir, { withFileTypes: true });
-          for (const pkg of pkgs) {
-            if (!pkg.isDirectory()) continue;
-            const pkgNm = join(packagesDir, pkg.name, "node_modules");
-            const worktreePkgNm = join(worktreePackagesDir, pkg.name, "node_modules");
-            if (existsSync(pkgNm) && !existsSync(worktreePkgNm)) {
-              symlinkSync(pkgNm, worktreePkgNm, "junction");
-            }
-          }
-        }
-      }
-    } catch {
-      // Non-fatal — workspace symlinks are best-effort
+      await execFileAsync("npm", ["install", "--ignore-scripts"], {
+        cwd: worktreePath,
+        timeout: 60000,
+      });
+      log.debug("installed deps in worktree", { worktreePath });
+    } catch (err) {
+      log.warn("failed to install deps in worktree", { worktreePath, error: String(err) });
     }
   }
 }

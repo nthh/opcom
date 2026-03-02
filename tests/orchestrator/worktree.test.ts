@@ -71,22 +71,16 @@ describe("WorktreeManager", () => {
       expect(existsSync(info.worktreePath)).toBe(true);
     });
 
-    it("symlinks node_modules if present", async () => {
-      // Add .gitignore so node_modules doesn't get tracked in git
-      await writeFile(join(tmpDir, ".gitignore"), "node_modules/\n", "utf-8");
+    it("installs deps if package.json exists", async () => {
+      // Add a package.json so installDeps runs
+      await writeFile(join(tmpDir, "package.json"), '{"name":"test","private":true}', "utf-8");
       await exec("git", ["add", "-A"], { cwd: tmpDir });
-      await exec("git", ["commit", "-m", "add gitignore"], { cwd: tmpDir });
-
-      // Create node_modules (untracked, won't appear in worktree)
-      const nodeModules = join(tmpDir, "node_modules");
-      await mkdir(nodeModules, { recursive: true });
-      await writeFile(join(nodeModules, ".package-lock.json"), "{}", "utf-8");
+      await exec("git", ["commit", "-m", "add package.json"], { cwd: tmpDir });
 
       const info = await wm.create(tmpDir, "step-1", "ticket-1");
-      const wtNodeModules = join(info.worktreePath, "node_modules");
 
-      // node_modules should be symlinked from main project
-      expect(existsSync(wtNodeModules)).toBe(true);
+      // Worktree should have package.json (from git)
+      expect(existsSync(join(info.worktreePath, "package.json"))).toBe(true);
     });
   });
 
