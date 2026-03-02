@@ -31,14 +31,14 @@ This was observed in practice: 3 agents (cicd-integration, cloud-database-adapte
 
 1. **Step starts** — executor creates a worktree:
    ```
-   git worktree add .claude/worktrees/<step-id> -b work/<ticket-id>
+   git worktree add .opcom/worktrees/<step-id> -b work/<ticket-id>
    ```
 2. **Agent runs** — `AgentStartConfig.cwd` points to the worktree, not the main tree. Agent makes commits on its own branch.
 3. **Step completes** — test gate runs inside the worktree (isolated build + test). Write tracking counts commits on the branch instead of tool events.
 4. **Merge** — executor merges the branch into main (fast-forward or merge commit), then removes the worktree:
    ```
    git merge work/<ticket-id>
-   git worktree remove .claude/worktrees/<step-id>
+   git worktree remove .opcom/worktrees/<step-id>
    ```
 5. **Conflict** — if merge conflicts with main (another step merged first), mark step as `needs-rebase` and either auto-rebase or flag for manual resolution.
 

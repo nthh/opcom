@@ -39,7 +39,7 @@ describe("WorktreeManager", () => {
       expect(info.stepId).toBe("step-1");
       expect(info.ticketId).toBe("ticket-1");
       expect(info.branch).toBe("work/ticket-1");
-      expect(info.worktreePath).toContain(".claude/worktrees/step-1");
+      expect(info.worktreePath).toContain(".opcom/worktrees/step-1");
       expect(existsSync(info.worktreePath)).toBe(true);
 
       // Worktree should have the repo files
@@ -215,7 +215,7 @@ describe("WorktreeManager", () => {
   describe("cleanupOrphaned", () => {
     it("removes worktrees not tracked by any manager", async () => {
       // Create a worktree directly (simulating orphan from crash)
-      const wtPath = join(tmpDir, ".claude/worktrees/orphan-step");
+      const wtPath = join(tmpDir, ".opcom/worktrees/orphan-step");
       await exec("git", ["worktree", "add", wtPath, "-b", "work/orphan"], { cwd: tmpDir });
 
       expect(existsSync(wtPath)).toBe(true);

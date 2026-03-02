@@ -155,7 +155,7 @@ describe("Executor with worktree isolation", () => {
       stepId: "t1",
       ticketId: "t1",
       projectPath: "/tmp/test-p",
-      worktreePath: "/tmp/test-p/.claude/worktrees/t1",
+      worktreePath: "/tmp/test-p/.opcom/worktrees/t1",
       branch: "work/t1",
     });
     mockRemove.mockResolvedValue(undefined);
@@ -181,13 +181,13 @@ describe("Executor with worktree isolation", () => {
 
     // Step should have worktree info
     const step = plan.steps[0];
-    expect(step.worktreePath).toBe("/tmp/test-p/.claude/worktrees/t1");
+    expect(step.worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
     expect(step.worktreeBranch).toBe("work/t1");
 
     // Agent should be started with worktree cwd
     expect(mockSM.startCalls).toHaveLength(1);
     const config = mockSM.startCalls[0].config as Record<string, unknown>;
-    expect(config.cwd).toBe("/tmp/test-p/.claude/worktrees/t1");
+    expect(config.cwd).toBe("/tmp/test-p/.opcom/worktrees/t1");
 
     executor.stop();
     await runPromise;
@@ -446,7 +446,7 @@ describe("Executor with worktree isolation", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     // Step should have worktree info from creation
-    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.claude/worktrees/t1");
+    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
 
     // Simulate error
     const sessionId = plan.steps[0].agentSessionId!;
@@ -460,7 +460,7 @@ describe("Executor with worktree isolation", () => {
     expect(plan.steps[0].status).toBe("failed");
     // Worktree should be kept for inspection/retry
     expect(mockRemove).not.toHaveBeenCalled();
-    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.claude/worktrees/t1");
+    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
 
     executor.stop();
     await runPromise;

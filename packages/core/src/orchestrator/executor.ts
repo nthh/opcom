@@ -666,7 +666,7 @@ export class Executor {
 
   /**
    * Clean up orphaned worktrees from crashed runs.
-   * Scans each project's .claude/worktrees/ directory.
+   * Scans each project's .opcom/worktrees/ directory.
    */
   private async cleanupOrphanedWorktrees(): Promise<void> {
     const projectIds = [...new Set(this.plan.steps.map((s) => s.projectId))];

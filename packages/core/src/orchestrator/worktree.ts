@@ -32,14 +32,14 @@ export interface ExecResult {
  * Manages git worktrees for isolated agent execution.
  *
  * Each agent step gets its own worktree with a dedicated branch.
- * Worktrees are created under `.claude/worktrees/<stepId>` relative
+ * Worktrees are created under `.opcom/worktrees/<stepId>` relative
  * to the project root, with branch names `work/<ticketId>`.
  */
 export class WorktreeManager {
   private worktrees = new Map<string, WorktreeInfo>();
 
   /** Directory name within project for worktrees */
-  private static WORKTREE_DIR = ".claude/worktrees";
+  private static WORKTREE_DIR = ".opcom/worktrees";
 
   /**
    * Create a new worktree for a step.
@@ -270,7 +270,7 @@ export class WorktreeManager {
 
   /**
    * Clean up orphaned worktrees from previous crashed runs.
-   * Scans .claude/worktrees/ and removes any that aren't tracked.
+   * Scans .opcom/worktrees/ and removes any that aren't tracked.
    */
   static async cleanupOrphaned(projectPath: string): Promise<string[]> {
     const worktreeBase = join(projectPath, WorktreeManager.WORKTREE_DIR);
