@@ -326,6 +326,16 @@ export class Executor {
    * Uses branch commit detection instead of write-count tracking.
    */
   private async handleWorktreeCompletion(step: PlanStep, event: ExecutorEvent): Promise<void> {
+    // Auto-commit any uncommitted changes in the worktree before checking for commits.
+    // Agents may write files without committing (e.g. Claude Code in -p mode).
+    if (this.plan.config.autoCommit && step.worktreePath) {
+      try {
+        await commitStepChanges(step.worktreePath, step.ticketId);
+      } catch {
+        // No changes to commit, or commit failed — hasCommits will catch it
+      }
+    }
+
     const hasWork = await this.worktreeManager.hasCommits(step.ticketId);
 
     if (event.sessionId) {

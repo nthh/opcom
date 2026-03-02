@@ -100,8 +100,12 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
   })),
 }));
 
+const { mockCommitStepChanges } = vi.hoisted(() => ({
+  mockCommitStepChanges: vi.fn(async () => true),
+}));
+
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
-  commitStepChanges: vi.fn(async () => true),
+  commitStepChanges: mockCommitStepChanges,
 }));
 
 // Mock WorktreeManager — use vi.hoisted() so these are available when vi.mock is hoisted
@@ -258,6 +262,42 @@ describe("Executor with worktree isolation", () => {
     expect(plan.steps[0].error).toContain("without making any commits");
     // Worktree should have been cleaned up
     expect(mockRemove).toHaveBeenCalledWith("t1");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("auto-commits uncommitted changes before checking hasCommits", async () => {
+    // Simulate: agent wrote files but didn't commit. Auto-commit creates
+    // a commit, so hasCommits returns true on the second call.
+    let commitCalled = false;
+    mockCommitStepChanges.mockImplementation(async () => {
+      commitCalled = true;
+      return true;
+    });
+    mockHasCommits.mockImplementation(async () => commitCalled);
+    mockMerge.mockResolvedValue({ merged: true, conflict: false });
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, autoCommit: true, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const completed: string[] = [];
+    executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // commitStepChanges should have been called with the worktree path
+    expect(mockCommitStepChanges).toHaveBeenCalled();
+    // Step should succeed because auto-commit created a commit
+    expect(completed).toContain("t1");
 
     executor.stop();
     await runPromise;
