@@ -11,6 +11,7 @@ import type {
   Plan,
 } from "@opcom/types";
 import { SessionManager } from "../agents/session-manager.js";
+import { EventStore } from "../agents/event-store.js";
 import { MessageRouter } from "../agents/message-router.js";
 import { buildContextPacket } from "../agents/context-builder.js";
 import { getWebUIHtml } from "./web-ui.js";
@@ -54,6 +55,7 @@ export class Station {
 
   readonly sessionManager = new SessionManager();
   readonly messageRouter = new MessageRouter();
+  private eventStore: EventStore | null = null;
   private projectStatuses = new Map<string, ProjectStatus>();
   private executors = new Map<string, Executor>(); // planId → running Executor
   private cicdPoller: CICDPoller | null = null;
@@ -66,7 +68,13 @@ export class Station {
   }
 
   async start(): Promise<void> {
-    await this.sessionManager.init();
+    try {
+      this.eventStore = new EventStore();
+    } catch {
+      // EventStore is optional — continue without plan event persistence
+    }
+
+    await this.sessionManager.init({ eventStore: this.eventStore ?? undefined });
 
     // Reconcile stale plans from previous runs
     const allSessions = await this.sessionManager.loadAllPersistedSessions();
@@ -151,6 +159,11 @@ export class Station {
     this.executors.clear();
 
     await this.sessionManager.shutdown();
+
+    if (this.eventStore) {
+      this.eventStore.close();
+      this.eventStore = null;
+    }
 
     // Close all WebSocket connections
     for (const client of this.clients) {
@@ -689,7 +702,7 @@ export class Station {
   // --- Executor management ---
 
   private async startExecutor(plan: Plan): Promise<void> {
-    const executor = new Executor(plan, this.sessionManager);
+    const executor = new Executor(plan, this.sessionManager, this.eventStore ?? undefined);
     this.executors.set(plan.id, executor);
 
     // Wire executor events to WebSocket broadcasts

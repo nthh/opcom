@@ -107,6 +107,21 @@ export type { ManagedProcess, ProcessEvent } from "./server/process-manager.js";
 export { MergeCoordinator } from "./server/merge-coordinator.js";
 export type { MergeRequest, MergeEvent, MergeCoordinatorConfig } from "./server/merge-coordinator.js";
 
+// Phase 8: Dev Environments
+export { EnvironmentManager, topologicalSort } from "./server/environment-manager.js";
+export type { EnvironmentEvent } from "./server/environment-manager.js";
+export { defaultHealthCheck, runHealthCheck } from "./server/health-checker.js";
+export {
+  loadPortRegistry,
+  savePortRegistry,
+  findConflict,
+  allocatePort,
+  releasePort,
+  findNextAvailablePort,
+  isPortInReservedRange,
+} from "./config/port-registry.js";
+export { portsPath } from "./config/paths.js";
+
 // Phase 7: Scheduling
 export { Scheduler, parseCron, parseCronField, getNextRunTime } from "./scheduling/scheduler.js";
 export type { ScheduledTask, ParsedCron, CronField } from "./scheduling/scheduler.js";

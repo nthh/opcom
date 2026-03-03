@@ -2,6 +2,7 @@
 
 import type { AgentSession, NormalizedEvent, DeliveryMode } from "./agents.js";
 import type { Pipeline, DeploymentStatus } from "./cicd.js";
+import type { ServiceInstance, EnvironmentStatus, PortAllocation } from "./environments.js";
 import type { GitInfo } from "./project.js";
 import type { WorkSummary } from "./work-items.js";
 
@@ -62,7 +63,16 @@ export type ServerEvent =
 
   // CI/CD events
   | { type: "pipeline_updated"; projectId: string; pipeline: Pipeline }
-  | { type: "deployment_updated"; projectId: string; deployment: DeploymentStatus };
+  | { type: "deployment_updated"; projectId: string; deployment: DeploymentStatus }
+
+  // Cloud service events
+  | { type: "cloud_service_updated"; projectId: string; service: import("./cloud-services.js").CloudService }
+  | { type: "cloud_service_alert"; projectId: string; serviceId: string; message: string }
+
+  // Environment events
+  | { type: "service_status"; projectId: string; service: ServiceInstance }
+  | { type: "port_conflict"; projectId: string; serviceName: string; port: number; conflictsWith: PortAllocation }
+  | { type: "environment_status"; projectId: string; status: EnvironmentStatus };
 
 export interface ProjectStatusSnapshot {
   id: string;
@@ -70,4 +80,13 @@ export interface ProjectStatusSnapshot {
   path: string;
   git: GitInfo | null;
   workSummary: WorkSummary | null;
+  cloudHealthSummary?: CloudHealthSummary;
+}
+
+export interface CloudHealthSummary {
+  total: number;
+  healthy: number;
+  degraded: number;
+  unreachable: number;
+  unknown: number;
 }

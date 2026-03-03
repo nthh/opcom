@@ -1,4 +1,5 @@
 import type { CloudServiceConfig } from "./cloud-services.js";
+import type { HealthCheckConfig } from "./environments.js";
 
 export interface ProjectConfig {
   id: string;
@@ -86,6 +87,10 @@ export interface ServiceDefinition {
   command?: string;
   port?: number;
   cwd?: string;
+  dependsOn?: string[];
+  healthCheck?: HealthCheckConfig;
+  env?: Record<string, string>;
+  readyPattern?: string;
 }
 
 export interface EnvironmentConfig {

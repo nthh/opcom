@@ -38,3 +38,7 @@ export function planPath(id: string): string {
 export function planContextPath(id: string): string {
   return join(plansDir(), `${id}.context.md`);
 }
+
+export function portsPath(): string {
+  return join(opcomRoot(), "ports.yaml");
+}
