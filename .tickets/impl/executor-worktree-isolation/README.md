@@ -1,7 +1,7 @@
 ---
 id: executor-worktree-isolation
 title: "Executor: Run Each Agent in an Isolated Git Worktree"
-status: in-progress
+status: closed
 type: feature
 priority: 1
 deps:
