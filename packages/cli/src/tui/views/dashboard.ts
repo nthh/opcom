@@ -129,8 +129,22 @@ function formatProjectLine(project: ProjectStatusSnapshot, maxWidth: number): st
     ticketStr = dim(` [${ws.open}/${ws.total}]`);
   }
 
-  const line = `${name}${gitStr}${ticketStr}`;
+  let cloudStr = "";
+  if (project.cloudHealthSummary && project.cloudHealthSummary.total > 0) {
+    cloudStr = ` ${formatCloudDots(project.cloudHealthSummary)}`;
+  }
+
+  const line = `${name}${gitStr}${ticketStr}${cloudStr}`;
   return truncate(line, maxWidth);
+}
+
+function formatCloudDots(summary: import("@opcom/types").CloudHealthSummary): string {
+  const dots: string[] = [];
+  for (let i = 0; i < summary.healthy; i++) dots.push(color(ANSI.green, "\u25cf"));
+  for (let i = 0; i < summary.degraded; i++) dots.push(color(ANSI.yellow, "\u25d0"));
+  for (let i = 0; i < summary.unreachable; i++) dots.push(color(ANSI.red, "\u25cb"));
+  for (let i = 0; i < summary.unknown; i++) dots.push(dim("\u25cc"));
+  return dots.join("");
 }
 
 function renderWorkQueuePanel(

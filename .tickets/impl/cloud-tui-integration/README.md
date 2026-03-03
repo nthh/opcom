@@ -1,7 +1,7 @@
 ---
 id: cloud-tui-integration
 title: "TUI Cloud Service Sections: L1 Health, L2 Detail, L3 Drill-down"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

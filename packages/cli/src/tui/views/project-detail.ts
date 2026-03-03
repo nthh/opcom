@@ -1,7 +1,14 @@
 // TUI Project Detail View (Level 2)
-// Tickets panel | Agents panel | Stack panel
+// Tickets panel | Agents panel | Stack panel | Cloud panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, ProjectConfig } from "@opcom/types";
+import type {
+  ProjectStatusSnapshot,
+  AgentSession,
+  WorkItem,
+  ProjectConfig,
+  CloudService,
+  CloudServiceKind,
+} from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -14,13 +21,15 @@ import {
   truncate,
   progressBar,
 } from "../renderer.js";
+import { healthDot } from "./cloud-service-detail.js";
 
 export interface ProjectDetailState {
   project: ProjectStatusSnapshot;
   projectConfig: ProjectConfig | null;
   tickets: WorkItem[];
   agents: AgentSession[];
-  focusedPanel: number; // 0=tickets, 1=agents, 2=stack
+  cloudServices: CloudService[];
+  focusedPanel: number; // 0=tickets, 1=agents, 2=stack, 3=cloud
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
 }
@@ -31,9 +40,10 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     projectConfig: null,
     tickets: [],
     agents: [],
+    cloudServices: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0],
-    scrollOffset: [0, 0, 0],
+    selectedIndex: [0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0],
   };
 }
 
@@ -45,10 +55,12 @@ export function renderProjectDetail(
   const ticketsPanel = panels.find((p) => p.id === "tickets");
   const agentsPanel = panels.find((p) => p.id === "agents");
   const stackPanel = panels.find((p) => p.id === "stack");
+  const cloudPanel = panels.find((p) => p.id === "cloud");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
   if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 1);
   if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 2);
+  if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 3);
 }
 
 // --- Tickets Panel ---
@@ -318,6 +330,213 @@ function renderStackPanel(
   }
 }
 
+// --- Cloud Panel ---
+
+/** Sections shown in cloud panel, organized by kind. Only shown if services exist. */
+interface CloudSection {
+  title: string;
+  kind: CloudServiceKind;
+  services: CloudService[];
+}
+
+/** Build cloud sections from services — only includes kinds with data. */
+export function buildCloudSections(services: CloudService[]): CloudSection[] {
+  const byKind = new Map<CloudServiceKind, CloudService[]>();
+  for (const svc of services) {
+    const list = byKind.get(svc.kind) ?? [];
+    list.push(svc);
+    byKind.set(svc.kind, list);
+  }
+
+  const sections: CloudSection[] = [];
+  const kindOrder: Array<[CloudServiceKind, string]> = [
+    ["database", "DATABASES"],
+    ["storage", "STORAGE"],
+    ["serverless", "SERVERLESS"],
+    ["hosting", "HOSTING"],
+    ["mobile", "MOBILE"],
+  ];
+
+  for (const [kind, title] of kindOrder) {
+    const svcs = byKind.get(kind);
+    if (svcs && svcs.length > 0) {
+      sections.push({ title, kind, services: svcs });
+    }
+  }
+
+  return sections;
+}
+
+/** Flat list of items in the cloud panel for navigation purposes. */
+export function getCloudServicesList(state: ProjectDetailState): CloudService[] {
+  const sections = buildCloudSections(state.cloudServices);
+  const result: CloudService[] = [];
+  for (const section of sections) {
+    result.push(...section.services);
+  }
+  return result;
+}
+
+function renderCloudPanel(
+  buf: ScreenBuffer,
+  panel: Panel,
+  state: ProjectDetailState,
+  focused: boolean,
+): void {
+  const count = state.cloudServices.length;
+  const title = count > 0 ? `Cloud (${count})` : "Cloud";
+  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
+
+  const contentWidth = panel.width - 4;
+  const maxRows = panel.height - 2;
+  const selected = state.selectedIndex[3] ?? 0;
+  const scroll = state.scrollOffset[3] ?? 0;
+
+  if (state.cloudServices.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No cloud services detected"), contentWidth);
+    return;
+  }
+
+  const sections = buildCloudSections(state.cloudServices);
+
+  // Build flat display rows: section headers + service lines
+  interface DisplayRow {
+    type: "header" | "service";
+    text?: string;
+    service?: CloudService;
+    serviceIndex?: number;
+  }
+  const rows: DisplayRow[] = [];
+  let svcIdx = 0;
+  for (const section of sections) {
+    rows.push({ type: "header", text: section.title });
+    for (const svc of section.services) {
+      rows.push({ type: "service", service: svc, serviceIndex: svcIdx++ });
+    }
+  }
+
+  for (let i = 0; i < maxRows && i + scroll < rows.length; i++) {
+    const rowIdx = i + scroll;
+    const row = rows[rowIdx];
+    const y = panel.y + 1 + i;
+
+    if (row.type === "header") {
+      buf.writeLine(y, panel.x + 2, bold(row.text ?? ""), contentWidth);
+    } else if (row.service) {
+      const isSelected = row.serviceIndex === selected && focused;
+      const line = formatCloudServiceLine(row.service, contentWidth);
+      if (isSelected) {
+        buf.writeLine(y, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
+      } else {
+        buf.writeLine(y, panel.x + 2, line, contentWidth);
+      }
+    }
+  }
+}
+
+function formatCloudServiceLine(service: CloudService, maxWidth: number): string {
+  const dot = healthDot(service.status);
+  const providerStr = shortProvider(service.provider);
+  const name = service.name;
+
+  // Kind-specific detail suffix
+  let detail = "";
+  switch (service.detail.kind) {
+    case "database": {
+      const d = service.detail;
+      const parts: string[] = [];
+      if (d.sizeBytes !== undefined) parts.push(formatBytes(d.sizeBytes));
+      if (d.tableCount !== undefined) parts.push(`${d.tableCount} tables`);
+      if (d.migration && d.migration.pending > 0) {
+        parts.push(color(ANSI.yellow, `${d.migration.tool}: ${d.migration.pending} pending`));
+      } else if (d.migration) {
+        parts.push(dim(`${d.migration.tool}: 0 pending`));
+      }
+      detail = parts.join("  ");
+      break;
+    }
+    case "storage": {
+      const d = service.detail;
+      if (d.buckets.length > 0) {
+        const totalSize = d.buckets.reduce((s, b) => s + (b.sizeBytes ?? 0), 0);
+        detail = totalSize > 0 ? formatBytes(totalSize) : `${d.buckets.length} bucket${d.buckets.length > 1 ? "s" : ""}`;
+      }
+      break;
+    }
+    case "serverless": {
+      const d = service.detail;
+      const httpCount = d.functions.filter((f) => f.trigger === "http").length;
+      const schedCount = d.functions.filter((f) => f.trigger === "schedule").length;
+      const parts: string[] = [];
+      if (httpCount > 0) parts.push(`${httpCount} route${httpCount > 1 ? "s" : ""}`);
+      if (schedCount > 0) parts.push(`${schedCount} sched`);
+      detail = parts.join("  ");
+      break;
+    }
+    case "hosting": {
+      const d = service.detail;
+      const primary = d.domains.find((dm) => dm.primary);
+      if (primary) detail = primary.hostname;
+      if (d.lastDeployedAt) {
+        detail += detail ? `  ${dim(formatTimeAgo(d.lastDeployedAt))}` : dim(formatTimeAgo(d.lastDeployedAt));
+      }
+      break;
+    }
+    case "mobile": {
+      const d = service.detail;
+      const parts: string[] = [];
+      if (d.currentVersion) parts.push(`v${d.currentVersion}`);
+      parts.push(`(${d.distribution})`);
+      detail = parts.join(" ");
+      break;
+    }
+  }
+
+  const detailStr = detail ? `  ${detail}` : "";
+  const line = `  ${dot} ${providerStr}: ${name}${detailStr}`;
+  return truncate(line, maxWidth);
+}
+
+function shortProvider(provider: string): string {
+  const labels: Record<string, string> = {
+    "turso": "Turso",
+    "neon": "Neon",
+    "planetscale": "PlanetScale",
+    "supabase": "Supabase",
+    "cloudflare-r2": "R2",
+    "gcs": "GCS",
+    "s3": "S3",
+    "cloudflare-workers": "CF Workers",
+    "firebase-functions": "FB Func",
+    "firebase-hosting": "Firebase",
+    "vercel": "Vercel",
+    "netlify": "Netlify",
+    "cloudflare-pages": "CF Pages",
+    "expo-eas": "EAS",
+    "firebase-app-distribution": "FB App Dist",
+  };
+  return labels[provider] ?? provider;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatTimeAgo(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60_000) return "just now";
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+    return `${Math.floor(diff / 86400_000)}d ago`;
+  } catch {
+    return iso;
+  }
+}
+
 // --- Navigation helpers ---
 
 export function getTicketsList(state: ProjectDetailState): WorkItem[] {
@@ -335,12 +554,16 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
     case 0: return getTicketsList(state).length;
     case 1: return state.agents.filter((a) => a.projectId === state.project.id).length;
     case 2: return 0; // stack is not navigable
+    case 3: return getCloudServicesList(state).length;
     default: return 0;
   }
 }
 
+/** Total number of panels for Tab cycling. */
+export const PANEL_COUNT = 4;
+
 export function clampSelection(state: ProjectDetailState): void {
-  for (let p = 0; p < 3; p++) {
+  for (let p = 0; p < PANEL_COUNT; p++) {
     const count = getPanelItemCount(state, p);
     if (count === 0) {
       state.selectedIndex[p] = 0;

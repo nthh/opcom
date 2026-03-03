@@ -28,7 +28,7 @@ const MIN_PANEL_HEIGHT = 4;
  *
  * Level 2 (Project Detail):
  *   Left column (55%): Tickets
- *   Right column (45%): Agents (top 50%) | Stack Info (bottom 50%)
+ *   Right column (45%): Agents (top 33%) | Stack (mid 33%) | Cloud (bottom 33%)
  *
  * Level 3 (Agent/Ticket Focus):
  *   Full-screen single panel
@@ -87,8 +87,9 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  const rightTopHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.5));
-  const rightBottomHeight = Math.max(MIN_PANEL_HEIGHT, rows - rightTopHeight);
+  const rightTopHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.33));
+  const rightMidHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.33));
+  const rightBottomHeight = Math.max(MIN_PANEL_HEIGHT, rows - rightTopHeight - rightMidHeight);
 
   return {
     panels: [
@@ -113,8 +114,16 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         x: leftWidth,
         y: rightTopHeight,
         width: rightWidth,
-        height: rightBottomHeight,
+        height: rightMidHeight,
         title: "Stack",
+      },
+      {
+        id: "cloud",
+        x: leftWidth,
+        y: rightTopHeight + rightMidHeight,
+        width: rightWidth,
+        height: rightBottomHeight,
+        title: "Cloud",
       },
     ],
     statusBarY,
