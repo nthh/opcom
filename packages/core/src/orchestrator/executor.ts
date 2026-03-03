@@ -592,6 +592,10 @@ export class Executor {
       step.worktreePath = wtInfo.worktreePath;
       step.worktreeBranch = wtInfo.branch;
       agentCwd = wtInfo.worktreePath;
+
+      // Point the context packet at the worktree so the agent uses worktree
+      // paths for all file operations instead of writing to the main tree.
+      contextPacket.project.path = wtInfo.worktreePath;
     }
 
     const allowedTools = deriveAllowedBashTools(
@@ -603,7 +607,7 @@ export class Executor {
       step.projectId,
       this.plan.config.backend as "claude-code" | "opencode",
       {
-        projectPath: project.path,
+        projectPath: agentCwd ?? project.path,
         workItemId: step.ticketId,
         contextPacket,
         cwd: agentCwd,
@@ -611,7 +615,7 @@ export class Executor {
         permissionMode: "acceptEdits",
         disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
         allowedTools,
-        additionalDirs: [project.path],
+        additionalDirs: agentCwd ? [agentCwd] : [project.path],
       },
       step.ticketId,
     );

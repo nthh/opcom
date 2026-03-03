@@ -11,6 +11,10 @@ import type {
   WorkItem,
   ProjectConfig,
   Plan,
+  CloudService,
+  CloudServiceConfig,
+  CloudServiceHealth,
+  CloudHealthSummary,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -54,6 +58,9 @@ export class TuiClient {
   // Direct-loaded data (fallback mode)
   projectConfigs = new Map<string, ProjectConfig>();
   projectTickets = new Map<string, WorkItem[]>();
+
+  // Cloud service status cache per project
+  projectCloudServices = new Map<string, CloudService[]>();
 
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
@@ -219,12 +226,19 @@ export class TuiClient {
         this.projectConfigs.set(pid, project);
 
         const status = await refreshProjectStatus(project);
+
+        // Build cloud health summary from detected cloud configs
+        const cloudHealthSummary = project.cloudServices.length > 0
+          ? { total: project.cloudServices.length, healthy: 0, degraded: 0, unreachable: 0, unknown: project.cloudServices.length }
+          : undefined;
+
         projects.push({
           id: project.id,
           name: project.name,
           path: project.path,
           git: status.gitFresh,
           workSummary: status.workSummary,
+          cloudHealthSummary,
         });
 
         // Load tickets (always scan — tickets may be added after initial detection)
@@ -255,7 +269,7 @@ export class TuiClient {
       const active = plans.find((p) =>
         p.status === "executing" || p.status === "paused" || p.status === "planning",
       );
-      this.activePlan = active ?? null;
+      this.activePlan = active ?? plans[0] ?? null;
     } catch {
       // Plans dir may not exist yet
     }
@@ -323,6 +337,23 @@ export class TuiClient {
       case "plan_paused":
         this.activePlan = event.plan;
         break;
+
+      case "cloud_service_updated": {
+        const existing = this.projectCloudServices.get(event.projectId) ?? [];
+        const idx = existing.findIndex((s) => s.id === event.service.id);
+        if (idx >= 0) {
+          existing[idx] = event.service;
+        } else {
+          existing.push(event.service);
+        }
+        this.projectCloudServices.set(event.projectId, existing);
+        // Update health summary on project snapshot
+        const summary = this.buildHealthSummary(existing);
+        this.projects = this.projects.map((p) =>
+          p.id === event.projectId ? { ...p, cloudHealthSummary: summary } : p,
+        );
+        break;
+      }
     }
 
     // Notify handlers
@@ -548,7 +579,7 @@ export class TuiClient {
       this.send({ type: "execute_plan", planId } as ClientCommand);
     } else if (this.localSessionManager) {
       const { Executor } = await import("@opcom/core");
-      const executor = new Executor(this.activePlan, this.localSessionManager);
+      const executor = new Executor(this.activePlan, this.localSessionManager, this.eventStore ?? undefined);
 
       executor.on("plan_updated", ({ plan }) => {
         this.activePlan = plan;
@@ -614,12 +645,22 @@ export class TuiClient {
         this.projectConfigs.set(pid, project);
 
         const status = await refreshProjectStatus(project);
+
+        // Preserve existing cloud health summary or build from configs
+        const existingCloud = this.projectCloudServices.get(pid);
+        const cloudHealthSummary = existingCloud
+          ? this.buildHealthSummary(existingCloud)
+          : project.cloudServices.length > 0
+            ? { total: project.cloudServices.length, healthy: 0, degraded: 0, unreachable: 0, unknown: project.cloudServices.length }
+            : undefined;
+
         projects.push({
           id: project.id,
           name: project.name,
           path: project.path,
           git: status.gitFresh,
           workSummary: status.workSummary,
+          cloudHealthSummary,
         });
 
         try {
@@ -679,6 +720,90 @@ export class TuiClient {
     } catch {
       return [];
     }
+  }
+
+  /**
+   * Load cloud service statuses for a project using its detected cloud configs.
+   * Uses the adapter registry to check each service's status.
+   */
+  async getCloudServices(projectId: string): Promise<CloudService[]> {
+    const cached = this.projectCloudServices.get(projectId);
+    if (cached) return cached;
+
+    const project = this.projectConfigs.get(projectId);
+    if (!project || project.cloudServices.length === 0) return [];
+
+    try {
+      const { getDatabaseAdapters, getStorageAdapters, getServerlessAdapters } = await import("@opcom/core");
+      const allAdapters = [...getDatabaseAdapters(), ...getStorageAdapters(), ...getServerlessAdapters()];
+
+      const services: CloudService[] = [];
+      for (const config of project.cloudServices) {
+        const adapter = allAdapters.find((a) => a.provider === config.provider);
+        if (adapter) {
+          try {
+            const svc = await adapter.status(config);
+            services.push(svc);
+          } catch {
+            // Adapter status check failed — create an unreachable placeholder
+            services.push(this.buildPlaceholderService(config, projectId, "unreachable"));
+          }
+        } else {
+          // No adapter for this provider — show as unknown
+          services.push(this.buildPlaceholderService(config, projectId, "unknown"));
+        }
+      }
+
+      this.projectCloudServices.set(projectId, services);
+
+      // Update project snapshot with health summary
+      const summary = this.buildHealthSummary(services);
+      this.projects = this.projects.map((p) =>
+        p.id === projectId ? { ...p, cloudHealthSummary: summary } : p,
+      );
+
+      return services;
+    } catch (err) {
+      log.warn("getCloudServices failed", { projectId, error: String(err) });
+      return [];
+    }
+  }
+
+  private buildPlaceholderService(
+    config: CloudServiceConfig,
+    projectId: string,
+    status: CloudServiceHealth,
+  ): CloudService {
+    return {
+      id: `${config.provider}:${config.name}`,
+      projectId,
+      provider: config.provider,
+      kind: config.kind,
+      name: config.name,
+      status,
+      detail: this.buildPlaceholderDetail(config.kind),
+      capabilities: [],
+      lastCheckedAt: new Date().toISOString(),
+    };
+  }
+
+  private buildPlaceholderDetail(kind: string): CloudService["detail"] {
+    switch (kind) {
+      case "database": return { kind: "database", engine: "postgres" };
+      case "storage": return { kind: "storage", buckets: [] };
+      case "serverless": return { kind: "serverless", functions: [] };
+      case "hosting": return { kind: "hosting", domains: [] };
+      case "mobile": return { kind: "mobile", platform: "both", distribution: "ota" };
+      default: return { kind: "database", engine: "postgres" };
+    }
+  }
+
+  private buildHealthSummary(services: CloudService[]): CloudHealthSummary {
+    const summary: CloudHealthSummary = { total: services.length, healthy: 0, degraded: 0, unreachable: 0, unknown: 0 };
+    for (const svc of services) {
+      summary[svc.status]++;
+    }
+    return summary;
   }
 
   private watchTicketDirs(): void {
