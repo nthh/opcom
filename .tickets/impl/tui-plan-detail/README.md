@@ -1,7 +1,7 @@
 ---
 id: tui-plan-detail
 title: "TUI: Plan Step Detail View (L3 Drill-Down)"
-status: in-progress
+status: closed
 type: feature
 priority: 1
 deps: []

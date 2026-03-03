@@ -12,6 +12,7 @@ import {
   checkHygiene,
   Executor,
   SessionManager,
+  EventStore,
   defaultOrchestratorConfig,
 } from "@opcom/core";
 import type { Plan, PlanScope, OrchestratorConfig } from "@opcom/types";
@@ -190,10 +191,17 @@ export async function runPlanExecute(planId?: string): Promise<void> {
   console.log(`  Pause on failure: ${plan.config.pauseOnFailure}`);
   console.log();
 
-  const sessionManager = new SessionManager();
-  await sessionManager.init();
+  let eventStore: EventStore | undefined;
+  try {
+    eventStore = new EventStore();
+  } catch {
+    // EventStore is optional — continue without plan event persistence
+  }
 
-  const executor = new Executor(plan, sessionManager);
+  const sessionManager = new SessionManager();
+  await sessionManager.init({ eventStore });
+
+  const executor = new Executor(plan, sessionManager, eventStore);
 
   executor.on("step_started", ({ step }) => {
     console.log(`  ${stepIcon("in-progress")} Started: ${step.ticketId}  agent:${step.agentSessionId?.slice(0, 8) ?? "?"}`);

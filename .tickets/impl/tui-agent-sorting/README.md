@@ -1,7 +1,7 @@
 ---
 id: tui-agent-sorting
 title: "TUI: Sort Agent List by Plan Activity"
-status: in-progress
+status: closed
 type: feature
 priority: 1
 deps: []
