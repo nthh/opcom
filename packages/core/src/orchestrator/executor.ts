@@ -798,7 +798,11 @@ export class Executor {
     this.sessionToStep.set(session.id, step.ticketId);
 
     // Ticket transition: open → in-progress
-    if (this.plan.config.ticketTransitions) {
+    // In worktree mode, skip this — modifying ticket files on the main tree
+    // creates uncommitted changes that block worktree merges later.
+    // The plan step status already tracks in-progress state; ticket files
+    // are only updated after merge (closed) or on failure (reset to open).
+    if (this.plan.config.ticketTransitions && !this.plan.config.worktree) {
       await this.updateTicketStatusSafe(step, "in-progress");
     }
 
