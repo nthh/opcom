@@ -149,6 +149,15 @@ describe("createLogger", () => {
     log.info("should not appear");
     expect(stderrSpy).not.toHaveBeenCalled();
   });
+
+  it("namespace with special characters is preserved verbatim", () => {
+    process.env.OPCOM_DEBUG = "1";
+    const log = createLogger("@scope/pkg:sub");
+    log.info("test");
+
+    const output = String(stderrSpy.mock.calls[0][0]);
+    expect(output).toMatch(/INFO @scope\/pkg:sub: test/);
+  });
 });
 
 describe("isEnabled", () => {

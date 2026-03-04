@@ -2,6 +2,7 @@
 // Gated by env vars: OPCOM_DEBUG=1 (all levels) or OPCOM_LOG=debug|info|warn|error
 // Silent by default
 
+/** Log severity levels in ascending order of importance. */
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -18,12 +19,19 @@ function getActiveLevel(): LogLevel | null {
   return null;
 }
 
+/**
+ * Returns whether a given log level is currently enabled.
+ *
+ * @param level - The log level to check
+ * @returns `true` if messages at this level would be written to stderr
+ */
 export function isEnabled(level: LogLevel): boolean {
   const active = getActiveLevel();
   if (!active) return false;
   return LEVEL_ORDER[level] >= LEVEL_ORDER[active];
 }
 
+/** Namespaced logger with methods for each {@link LogLevel}. */
 export interface Logger {
   debug(msg: string, data?: Record<string, unknown>): void;
   info(msg: string, data?: Record<string, unknown>): void;
@@ -59,4 +67,3 @@ export function createLogger(namespace: string): Logger {
     error: (msg, data) => write("error", msg, data),
   };
 }
-// test comment
