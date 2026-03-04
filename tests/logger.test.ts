@@ -99,6 +99,30 @@ describe("createLogger", () => {
     expect(calls[0]).toMatch(/INFO detect: scanning/);
     expect(calls[1]).toMatch(/WARN config: missing key/);
   });
+
+  it("namespace appears in output for every log level", () => {
+    process.env.OPCOM_DEBUG = "1";
+    const log = createLogger("orchestrator");
+
+    log.debug("d");
+    log.info("i");
+    log.warn("w");
+    log.error("e");
+
+    const calls = stderrSpy.mock.calls.map((c) => String(c[0]));
+    for (const line of calls) {
+      expect(line).toContain("orchestrator:");
+    }
+  });
+
+  it("preserves namespace with dotted paths", () => {
+    process.env.OPCOM_DEBUG = "1";
+    const log = createLogger("core.detect.stack");
+    log.info("found");
+
+    const output = String(stderrSpy.mock.calls[0][0]);
+    expect(output).toMatch(/INFO core\.detect\.stack: found/);
+  });
 });
 
 describe("isEnabled", () => {
