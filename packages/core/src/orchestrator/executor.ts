@@ -344,7 +344,8 @@ export class Executor {
     }
 
     if (!hasWork) {
-      await this.failStep(step, "Agent exited without making any commits");
+      const reason = "Agent exited without making any commits";
+      await this.failStep(step, reason);
 
       // Keep worktree for inspection — only clear truly empty ones
       const hasUncommitted = await this.worktreeHasChanges(step.worktreePath);
@@ -355,11 +356,11 @@ export class Executor {
       }
 
       log.warn("step failed: no commits in worktree", { ticketId: step.ticketId, keptWorktree: hasUncommitted });
-      this.emit("step_failed", { step, error: step.error });
+      this.emit("step_failed", { step, error: reason });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: step.error, mode: "worktree" },
+        detail: { error: reason, mode: "worktree" },
       });
 
       if (this.plan.config.pauseOnFailure) {
@@ -400,17 +401,18 @@ export class Executor {
 
     if (!mergeResult.merged) {
       // Merge failed for non-conflict reason
-      await this.failStep(step, `Merge failed: ${mergeResult.error}`);
+      const reason = `Merge failed: ${mergeResult.error}`;
+      await this.failStep(step, reason);
       await this.worktreeManager.remove(step.ticketId).catch(() => {});
       step.worktreePath = undefined;
       step.worktreeBranch = undefined;
 
       log.error("merge failed", { ticketId: step.ticketId, error: mergeResult.error });
-      this.emit("step_failed", { step, error: step.error });
+      this.emit("step_failed", { step, error: reason });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: step.error },
+        detail: { error: reason },
       });
 
       if (this.plan.config.pauseOnFailure) {
@@ -426,16 +428,17 @@ export class Executor {
     const verification = await this.runVerification(step, event);
 
     if (verification && !verification.passed) {
-      await this.failStep(step, `Verification failed: ${verification.failureReasons.join("; ")}`);
+      const reason = `Verification failed: ${verification.failureReasons.join("; ")}`;
+      await this.failStep(step, reason);
       step.verification = verification;
 
       // Keep worktree for inspection on verification failure
       log.warn("step verification failed", { ticketId: step.ticketId, reasons: verification.failureReasons });
-      this.emit("step_failed", { step, error: step.error });
+      this.emit("step_failed", { step, error: reason });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: step.error, mode: "worktree", verification },
+        detail: { error: reason, mode: "worktree", verification },
       });
 
       if (this.plan.config.pauseOnFailure) {
@@ -639,18 +642,19 @@ export class Executor {
     const writes = event.sessionId ? (this.sessionWrites.get(event.sessionId) ?? 0) : 0;
 
     if (writes === 0) {
-      await this.failStep(step, "Agent exited without making any file changes");
+      const reason = "Agent exited without making any file changes";
+      await this.failStep(step, reason);
       if (event.sessionId) {
         this.sessionToStep.delete(event.sessionId);
         this.sessionWrites.delete(event.sessionId);
       }
 
       log.warn("step failed: no writes", { ticketId: step.ticketId });
-      this.emit("step_failed", { step, error: step.error });
+      this.emit("step_failed", { step, error: reason });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: step.error },
+        detail: { error: reason },
       });
 
       if (this.plan.config.pauseOnFailure) {
