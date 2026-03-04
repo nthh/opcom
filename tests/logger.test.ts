@@ -123,6 +123,32 @@ describe("createLogger", () => {
     const output = String(stderrSpy.mock.calls[0][0]);
     expect(output).toMatch(/INFO core\.detect\.stack: found/);
   });
+
+  it("handles empty namespace", () => {
+    process.env.OPCOM_DEBUG = "1";
+    const log = createLogger("");
+    log.info("msg");
+
+    const output = String(stderrSpy.mock.calls[0][0]);
+    expect(output).toMatch(/INFO : msg/);
+  });
+
+  it("OPCOM_DEBUG takes precedence over OPCOM_LOG", () => {
+    process.env.OPCOM_DEBUG = "1";
+    process.env.OPCOM_LOG = "error";
+    const log = createLogger("prec");
+
+    log.debug("visible");
+    expect(stderrSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores invalid OPCOM_LOG values", () => {
+    process.env.OPCOM_LOG = "verbose";
+    const log = createLogger("inv");
+
+    log.info("should not appear");
+    expect(stderrSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("isEnabled", () => {
