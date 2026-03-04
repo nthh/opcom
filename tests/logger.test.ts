@@ -86,6 +86,19 @@ describe("createLogger", () => {
     const output = String(stderrSpy.mock.calls[0][0]);
     expect(output).toMatch(/^\[.+\] ERROR fmt: boom\n$/);
   });
+
+  it("separate loggers use their own namespace", () => {
+    process.env.OPCOM_DEBUG = "1";
+    const logA = createLogger("detect");
+    const logB = createLogger("config");
+
+    logA.info("scanning");
+    logB.warn("missing key");
+
+    const calls = stderrSpy.mock.calls.map((c) => String(c[0]));
+    expect(calls[0]).toMatch(/INFO detect: scanning/);
+    expect(calls[1]).toMatch(/WARN config: missing key/);
+  });
 });
 
 describe("isEnabled", () => {
