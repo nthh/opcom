@@ -37,6 +37,15 @@ function formatLine(level: LogLevel, namespace: string, msg: string, data?: Reco
   return `[${ts}] ${level.toUpperCase()} ${namespace}: ${msg}${suffix}\n`;
 }
 
+/**
+ * Creates a namespaced logger that writes to stderr.
+ *
+ * Output is silent by default. Set `OPCOM_DEBUG=1` to enable all levels,
+ * or `OPCOM_LOG=debug|info|warn|error` to set a minimum level.
+ *
+ * @param namespace - Label prefixed to every log line (e.g. `"detect"`, `"config"`)
+ * @returns A {@link Logger} with `debug`, `info`, `warn`, and `error` methods
+ */
 export function createLogger(namespace: string): Logger {
   const write = (level: LogLevel, msg: string, data?: Record<string, unknown>) => {
     if (!isEnabled(level)) return;
