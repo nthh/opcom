@@ -396,7 +396,8 @@ describe("Executor with worktree isolation", () => {
 
     expect(plan.steps[0].status).toBe("failed");
     expect(plan.steps[0].error).toContain("Merge failed");
-    expect(mockRemove).toHaveBeenCalledWith("t1");
+    // Worktree should NOT be removed — kept for retry
+    expect(mockRemove).not.toHaveBeenCalled();
 
     executor.stop();
     await runPromise;

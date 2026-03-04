@@ -229,6 +229,23 @@ describe("WorktreeManager", () => {
       const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
       expect(cleaned).toHaveLength(0);
     });
+
+    it("preserves worktrees with unmerged commits", async () => {
+      // Create a worktree and make a commit on its branch
+      const wtPath = join(tmpDir, ".opcom/worktrees/has-work");
+      await exec("git", ["worktree", "add", wtPath, "-b", "work/has-work"], { cwd: tmpDir });
+      await writeFile(join(wtPath, "agent-output.ts"), "export const x = 1;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: wtPath });
+      await exec("git", ["commit", "-m", "agent work"], { cwd: wtPath });
+
+      const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
+      expect(cleaned).not.toContain("has-work");
+      expect(existsSync(wtPath)).toBe(true);
+
+      // Clean up
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "work/has-work"], { cwd: tmpDir });
+    });
   });
 
   describe("full lifecycle", () => {
@@ -291,6 +308,29 @@ describe("WorktreeManager", () => {
       // Cleanup
       await wm.remove("step-1");
       await wm.remove("step-2");
+    });
+
+    it("reuses branch with unmerged commits on create", async () => {
+      // 1. Create worktree, agent makes a commit
+      const info = await wm.create(tmpDir, "ticket-1", "ticket-1");
+      await writeFile(join(info.worktreePath, "feature.ts"), "const x = 1;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: info.worktreePath });
+      await exec("git", ["commit", "-m", "agent work"], { cwd: info.worktreePath });
+
+      // 2. Remove worktree (simulating failure cleanup that preserves branch)
+      await exec("git", ["worktree", "remove", info.worktreePath, "--force"], { cwd: tmpDir });
+      wm = new WorktreeManager(); // fresh manager (simulating new plan)
+
+      // 3. Create again for same ticket — should reuse the branch
+      const info2 = await wm.create(tmpDir, "ticket-1", "ticket-1");
+      expect(existsSync(info2.worktreePath)).toBe(true);
+
+      // 4. The previous agent's commit should be present
+      expect(await wm.hasCommits("ticket-1")).toBe(true);
+      expect(existsSync(join(info2.worktreePath, "feature.ts"))).toBe(true);
+
+      // Cleanup
+      await wm.remove("ticket-1");
     });
   });
 });

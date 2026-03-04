@@ -400,12 +400,10 @@ export class Executor {
     }
 
     if (!mergeResult.merged) {
-      // Merge failed for non-conflict reason
+      // Merge failed for non-conflict reason — keep worktree + branch
+      // so the agent's work can be retried without redoing everything.
       const reason = `Merge failed: ${mergeResult.error}`;
       await this.failStep(step, reason);
-      await this.worktreeManager.remove(step.ticketId).catch(() => {});
-      step.worktreePath = undefined;
-      step.worktreeBranch = undefined;
 
       log.error("merge failed", { ticketId: step.ticketId, error: mergeResult.error });
       this.emit("step_failed", { step, error: reason });

@@ -57,7 +57,25 @@ export class WorktreeManager {
     // Ensure the parent directory exists
     mkdirSync(worktreeBase, { recursive: true });
 
-    // Remove existing worktree at this path if it exists (from a crash).
+    // Check if the branch already exists with unmerged commits from a previous run.
+    // If so, reuse it so the next agent picks up where the last one left off.
+    let reusing = false;
+    try {
+      const { stdout: mainHead } = await execFileAsync(
+        "git", ["rev-parse", "HEAD"], { cwd: projectPath },
+      );
+      const { stdout: branchLog } = await execFileAsync(
+        "git", ["log", `${mainHead.trim()}..${branch}`, "--oneline"], { cwd: projectPath },
+      );
+      if (branchLog.trim().length > 0) {
+        reusing = true;
+        log.info("reusing branch with unmerged commits", { branch, commits: branchLog.trim().split("\n").length });
+      }
+    } catch {
+      // Branch doesn't exist — will create fresh
+    }
+
+    // Remove existing worktree directory if it exists (from a crash).
     // Must happen before branch deletion — git won't delete a checked-out branch.
     if (existsSync(worktreePath)) {
       try {
@@ -66,28 +84,36 @@ export class WorktreeManager {
         });
       } catch {
         await rm(worktreePath, { recursive: true, force: true });
-        // Also prune worktree metadata after manual removal
         try {
           await execFileAsync("git", ["worktree", "prune"], { cwd: projectPath });
         } catch { /* ignore */ }
       }
     }
 
-    // Delete the branch if it already exists from a previous run
-    try {
-      await execFileAsync("git", ["branch", "-D", branch], { cwd: projectPath });
-      log.debug("deleted existing branch", { branch });
-    } catch {
-      // Branch doesn't exist, fine
-    }
+    if (reusing) {
+      // Re-attach worktree to the existing branch (preserves commits)
+      await execFileAsync(
+        "git",
+        ["worktree", "add", worktreePath, branch],
+        { cwd: projectPath },
+      );
+    } else {
+      // Delete the branch if it exists but has no unmerged commits
+      try {
+        await execFileAsync("git", ["branch", "-D", branch], { cwd: projectPath });
+        log.debug("deleted existing branch", { branch });
+      } catch {
+        // Branch doesn't exist, fine
+      }
 
-    // Create worktree with new branch
-    const base = baseBranch ?? "HEAD";
-    await execFileAsync(
-      "git",
-      ["worktree", "add", worktreePath, "-b", branch, base],
-      { cwd: projectPath },
-    );
+      // Create worktree with new branch
+      const base = baseBranch ?? "HEAD";
+      await execFileAsync(
+        "git",
+        ["worktree", "add", worktreePath, "-b", branch, base],
+        { cwd: projectPath },
+      );
+    }
 
     // Install dependencies in the worktree
     await this.installDeps(worktreePath);
@@ -271,12 +297,24 @@ export class WorktreeManager {
   /**
    * Clean up orphaned worktrees from previous crashed runs.
    * Scans .opcom/worktrees/ and removes any not in the `keep` set.
+   * Worktrees with unmerged commits are never removed — they contain
+   * agent work that would be lost.
    */
   static async cleanupOrphaned(projectPath: string, keep?: Set<string>): Promise<string[]> {
     const worktreeBase = join(projectPath, WorktreeManager.WORKTREE_DIR);
     if (!existsSync(worktreeBase)) return [];
 
     const cleaned: string[] = [];
+
+    // Get main HEAD for commit comparison
+    let mainHead: string;
+    try {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: projectPath });
+      mainHead = stdout.trim();
+    } catch {
+      log.warn("cleanupOrphaned: cannot determine HEAD", { projectPath });
+      return [];
+    }
 
     try {
       const entries = await readdir(worktreeBase);
@@ -285,6 +323,23 @@ export class WorktreeManager {
           log.debug("skipping active worktree", { entry });
           continue;
         }
+
+        // Check if the worktree branch has unmerged commits
+        const branch = `work/${entry}`;
+        try {
+          const { stdout } = await execFileAsync(
+            "git",
+            ["log", `${mainHead}..${branch}`, "--oneline"],
+            { cwd: projectPath },
+          );
+          if (stdout.trim().length > 0) {
+            log.info("skipping worktree with unmerged commits", { entry, branch });
+            continue;
+          }
+        } catch {
+          // Branch doesn't exist or other error — safe to clean up
+        }
+
         const worktreePath = join(worktreeBase, entry);
         try {
           await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {
@@ -295,6 +350,14 @@ export class WorktreeManager {
           await rm(worktreePath, { recursive: true, force: true });
           log.info("force-removed orphaned worktree", { worktreePath });
         }
+
+        // Delete the branch (only reached if no unmerged commits)
+        try {
+          await execFileAsync("git", ["branch", "-D", branch], { cwd: projectPath });
+        } catch {
+          // Branch may already be gone
+        }
+
         cleaned.push(entry);
       }
 
