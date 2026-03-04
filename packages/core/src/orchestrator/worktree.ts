@@ -270,9 +270,9 @@ export class WorktreeManager {
 
   /**
    * Clean up orphaned worktrees from previous crashed runs.
-   * Scans .opcom/worktrees/ and removes any that aren't tracked.
+   * Scans .opcom/worktrees/ and removes any not in the `keep` set.
    */
-  static async cleanupOrphaned(projectPath: string): Promise<string[]> {
+  static async cleanupOrphaned(projectPath: string, keep?: Set<string>): Promise<string[]> {
     const worktreeBase = join(projectPath, WorktreeManager.WORKTREE_DIR);
     if (!existsSync(worktreeBase)) return [];
 
@@ -281,6 +281,10 @@ export class WorktreeManager {
     try {
       const entries = await readdir(worktreeBase);
       for (const entry of entries) {
+        if (keep?.has(entry)) {
+          log.debug("skipping active worktree", { entry });
+          continue;
+        }
         const worktreePath = join(worktreeBase, entry);
         try {
           await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {

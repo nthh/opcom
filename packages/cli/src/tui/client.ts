@@ -65,6 +65,7 @@ export class TuiClient {
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
+  private activeExecutorPlanId: string | null = null;
 
   // File watchers for .tickets/ directories
   private ticketWatchers: FSWatcher[] = [];
@@ -570,6 +571,10 @@ export class TuiClient {
 
   async executePlan(planId: string): Promise<void> {
     if (!this.activePlan || this.activePlan.id !== planId) return;
+    if (this.activeExecutorPlanId) {
+      log.warn("executor already running", { activePlanId: this.activeExecutorPlanId, requestedPlanId: planId });
+      return;
+    }
 
     this.activePlan.status = "executing";
     await savePlan(this.activePlan);
@@ -578,6 +583,7 @@ export class TuiClient {
     if (this.ws && this._connected) {
       this.send({ type: "execute_plan", planId } as ClientCommand);
     } else if (this.localSessionManager) {
+      this.activeExecutorPlanId = planId;
       const { Executor } = await import("@opcom/core");
       const executor = new Executor(this.activePlan, this.localSessionManager, this.eventStore ?? undefined);
 
@@ -595,9 +601,13 @@ export class TuiClient {
       });
 
       // Run in background — don't block the TUI
-      executor.run().catch((err) => {
-        log.error("executor run failed", { error: String(err) });
-      });
+      executor.run()
+        .catch((err) => {
+          log.error("executor run failed", { error: String(err) });
+        })
+        .finally(() => {
+          this.activeExecutorPlanId = null;
+        });
     }
   }
 

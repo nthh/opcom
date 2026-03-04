@@ -34,6 +34,7 @@ export interface PlanStep {
   error?: string;
   worktreePath?: string;
   worktreeBranch?: string;
+  verification?: VerificationResult;
 }
 
 export interface VerificationConfig {

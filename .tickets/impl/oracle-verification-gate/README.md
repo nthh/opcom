@@ -1,7 +1,7 @@
 ---
 id: oracle-verification-gate
 title: "Executor: Oracle Verification After Step Completion"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

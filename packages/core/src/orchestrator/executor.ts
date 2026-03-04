@@ -9,6 +9,8 @@ import type {
   AgentSession,
   AgentState,
   NormalizedEvent,
+  VerificationResult,
+  TestGateResult,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
@@ -21,6 +23,7 @@ import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
+import { collectOracleInputs, runOracle } from "../skills/oracle.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("executor");
@@ -251,9 +254,7 @@ export class Executor {
       case "agent_failed": {
         const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
         if (step) {
-          step.status = "failed";
-          step.error = event.error;
-          step.completedAt = new Date().toISOString();
+          await this.failStep(step, event.error ?? "unknown");
           if (event.sessionId) this.sessionToStep.delete(event.sessionId);
 
           // Keep worktree on failure for inspection/retry
@@ -343,9 +344,7 @@ export class Executor {
     }
 
     if (!hasWork) {
-      step.status = "failed";
-      step.error = "Agent exited without making any commits";
-      step.completedAt = new Date().toISOString();
+      await this.failStep(step, "Agent exited without making any commits");
 
       // Keep worktree for inspection — only clear truly empty ones
       const hasUncommitted = await this.worktreeHasChanges(step.worktreePath);
@@ -401,9 +400,7 @@ export class Executor {
 
     if (!mergeResult.merged) {
       // Merge failed for non-conflict reason
-      step.status = "failed";
-      step.error = `Merge failed: ${mergeResult.error}`;
-      step.completedAt = new Date().toISOString();
+      await this.failStep(step, `Merge failed: ${mergeResult.error}`);
       await this.worktreeManager.remove(step.ticketId).catch(() => {});
       step.worktreePath = undefined;
       step.worktreeBranch = undefined;
@@ -425,11 +422,37 @@ export class Executor {
       return;
     }
 
-    // Merge succeeded — step is done
+    // Merge succeeded — run verification before marking done
+    const verification = await this.runVerification(step, event);
+
+    if (verification && !verification.passed) {
+      await this.failStep(step, `Verification failed: ${verification.failureReasons.join("; ")}`);
+      step.verification = verification;
+
+      // Keep worktree for inspection on verification failure
+      log.warn("step verification failed", { ticketId: step.ticketId, reasons: verification.failureReasons });
+      this.emit("step_failed", { step, error: step.error });
+      this.logPlanEvent("step_failed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: step.error, mode: "worktree", verification },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "verification_failed" } });
+      }
+      return;
+    }
+
+    // Verification passed (or skipped) — step is done
     step.status = "done";
     step.completedAt = new Date().toISOString();
+    if (verification) step.verification = verification;
 
-    // Clean up worktree after successful merge
+    // Clean up worktree after successful merge + verification
     await this.worktreeManager.remove(step.ticketId).catch((err) => {
       log.warn("worktree cleanup after merge failed", { ticketId: step.ticketId, error: String(err) });
     });
@@ -445,7 +468,7 @@ export class Executor {
     this.logPlanEvent("step_completed", {
       stepTicketId: step.ticketId,
       agentSessionId: event.sessionId,
-      detail: { mode: "worktree" },
+      detail: { mode: "worktree", verification },
     });
   }
 
@@ -461,6 +484,154 @@ export class Executor {
   }
 
   /**
+   * Run verification (test gate + oracle) after merge succeeds.
+   * Returns null if both are disabled, a result object otherwise.
+   */
+  private async runVerification(step: PlanStep, event: ExecutorEvent): Promise<VerificationResult | null> {
+    const { verification } = this.plan.config;
+    if (!verification.runTests && !verification.runOracle) return null;
+
+    const project = await loadProject(step.projectId);
+    if (!project) return null;
+
+    const result: VerificationResult = {
+      stepTicketId: step.ticketId,
+      passed: true,
+      failureReasons: [],
+    };
+
+    // --- Test gate ---
+    if (verification.runTests && project.testing?.command) {
+      const testResult = await this.runTestGate(project.path, project.testing.command);
+      result.testGate = testResult;
+      if (!testResult.passed) {
+        result.passed = false;
+        result.failureReasons.push(
+          `Tests failed: ${testResult.failedTests}/${testResult.totalTests} failed`,
+        );
+      }
+      log.info("test gate result", {
+        ticketId: step.ticketId,
+        passed: testResult.passed,
+        total: testResult.totalTests,
+        failed: testResult.failedTests,
+      });
+    }
+
+    // --- Oracle ---
+    if (verification.runOracle) {
+      try {
+        const tickets = await scanTickets(project.path);
+        const workItem = tickets.find((t) => t.id === step.ticketId);
+        if (workItem) {
+          const oracleInput = await collectOracleInputs(
+            project.path,
+            event.sessionId ?? "",
+            workItem,
+          );
+          // Feed test results into oracle context
+          if (result.testGate) {
+            oracleInput.testResults = result.testGate.output;
+          }
+          const oracleResult = await runOracle(oracleInput, (prompt) =>
+            this.llmCall(prompt, verification.oracleModel),
+          );
+          result.oracle = oracleResult;
+          if (!oracleResult.passed) {
+            result.passed = false;
+            const unmet = oracleResult.criteria
+              .filter((c) => !c.met)
+              .map((c) => c.criterion);
+            result.failureReasons.push(
+              `Oracle: ${unmet.length} criteria unmet`,
+            );
+          }
+          log.info("oracle result", {
+            ticketId: step.ticketId,
+            passed: oracleResult.passed,
+            criteriaCount: oracleResult.criteria.length,
+            concerns: oracleResult.concerns.length,
+          });
+        }
+      } catch (err) {
+        log.warn("oracle evaluation failed", { ticketId: step.ticketId, error: String(err) });
+        // Oracle failure is non-fatal — don't block the step
+      }
+    }
+
+    this.logPlanEvent("step_verified", {
+      stepTicketId: step.ticketId,
+      agentSessionId: event.sessionId,
+      detail: { verification: result },
+    });
+
+    return result;
+  }
+
+  /**
+   * Run the project's test command and parse results.
+   */
+  private async runTestGate(projectPath: string, testCommand: string): Promise<TestGateResult> {
+    const start = Date.now();
+    try {
+      const parts = testCommand.split(/\s+/);
+      const { stdout, stderr } = await execFileAsync(parts[0], parts.slice(1), {
+        cwd: projectPath,
+        timeout: 300_000, // 5 min timeout for tests
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      const output = stdout + stderr;
+      const { total, passed, failed } = parseTestOutput(output);
+      return {
+        passed: true,
+        testCommand,
+        totalTests: total,
+        passedTests: passed,
+        failedTests: failed,
+        output: output.slice(-5000), // Keep last 5KB
+        durationMs: Date.now() - start,
+      };
+    } catch (err: unknown) {
+      const output = (err as { stdout?: string; stderr?: string }).stdout
+        ?? (err as { stderr?: string }).stderr
+        ?? String(err);
+      const { total, passed, failed } = parseTestOutput(output);
+      return {
+        passed: false,
+        testCommand,
+        totalTests: total,
+        passedTests: passed,
+        failedTests: failed,
+        output: output.slice(-5000),
+        durationMs: Date.now() - start,
+      };
+    }
+  }
+
+  /**
+   * Make an LLM call via Claude Code CLI for oracle evaluation.
+   */
+  private async llmCall(prompt: string, model?: string): Promise<string> {
+    const args = ["-p", prompt, "--output-format", "text"];
+    if (model) args.push("--model", model);
+
+    // Strip Claude env vars to avoid nested session detection
+    const childEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (!k.startsWith("CLAUDE") && v !== undefined) {
+        childEnv[k] = v;
+      }
+    }
+
+    const { stdout } = await execFileAsync("claude", args, {
+      timeout: 120_000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: childEnv,
+    });
+    return stdout;
+  }
+
+  /**
    * Handle agent completion in legacy (non-worktree) mode.
    * Uses write-count tracking from tool events.
    */
@@ -468,9 +639,7 @@ export class Executor {
     const writes = event.sessionId ? (this.sessionWrites.get(event.sessionId) ?? 0) : 0;
 
     if (writes === 0) {
-      step.status = "failed";
-      step.error = "Agent exited without making any file changes";
-      step.completedAt = new Date().toISOString();
+      await this.failStep(step, "Agent exited without making any file changes");
       if (event.sessionId) {
         this.sessionToStep.delete(event.sessionId);
         this.sessionWrites.delete(event.sessionId);
@@ -564,8 +733,7 @@ export class Executor {
         await this.startStep(step);
       } catch (err) {
         log.error("failed to start step", { ticketId: step.ticketId, error: String(err) });
-        step.status = "failed";
-        step.error = String(err);
+        await this.failStep(step, String(err));
       }
     }
   }
@@ -662,6 +830,19 @@ export class Executor {
     return ticketSets;
   }
 
+  /**
+   * Mark a step as failed and reset the ticket back to open so the planner
+   * picks it up on the next run.
+   */
+  private async failStep(step: PlanStep, error: string): Promise<void> {
+    step.status = "failed";
+    step.error = error;
+    step.completedAt = new Date().toISOString();
+    if (this.plan.config.ticketTransitions) {
+      await this.updateTicketStatusSafe(step, "open");
+    }
+  }
+
   private async updateTicketStatusSafe(step: PlanStep, newStatus: string): Promise<void> {
     try {
       const project = await loadProject(step.projectId);
@@ -681,12 +862,16 @@ export class Executor {
    * Scans each project's .opcom/worktrees/ directory.
    */
   private async cleanupOrphanedWorktrees(): Promise<void> {
+    // Collect step IDs that are currently in-progress — their worktrees must be preserved
+    const activeStepIds = new Set(
+      this.plan.steps.filter((s) => s.status === "in-progress").map((s) => s.ticketId),
+    );
     const projectIds = [...new Set(this.plan.steps.map((s) => s.projectId))];
     for (const pid of projectIds) {
       try {
         const project = await loadProject(pid);
         if (!project) continue;
-        const cleaned = await WorktreeManager.cleanupOrphaned(project.path);
+        const cleaned = await WorktreeManager.cleanupOrphaned(project.path, activeStepIds);
         if (cleaned.length > 0) {
           log.info("cleaned up orphaned worktrees", { projectId: pid, count: cleaned.length });
         }
@@ -700,6 +885,41 @@ export class Executor {
 /**
  * Update ticket status in YAML frontmatter.
  */
+/**
+ * Parse test runner output for pass/fail counts.
+ * Supports vitest, jest, and mocha output formats.
+ */
+export function parseTestOutput(output: string): { total: number; passed: number; failed: number } {
+  // Vitest: "Tests  857 passed (857)" or "Tests  3 failed | 854 passed (857)"
+  const vitestMatch = output.match(/Tests\s+(?:(\d+)\s+failed\s+\|\s+)?(\d+)\s+passed\s+\((\d+)\)/);
+  if (vitestMatch) {
+    const failed = parseInt(vitestMatch[1] ?? "0", 10);
+    const passed = parseInt(vitestMatch[2], 10);
+    const total = parseInt(vitestMatch[3], 10);
+    return { total, passed, failed };
+  }
+
+  // Jest: "Tests:  3 failed, 854 passed, 857 total"
+  const jestMatch = output.match(/Tests:\s+(?:(\d+)\s+failed,\s+)?(\d+)\s+passed,\s+(\d+)\s+total/);
+  if (jestMatch) {
+    const failed = parseInt(jestMatch[1] ?? "0", 10);
+    const passed = parseInt(jestMatch[2], 10);
+    const total = parseInt(jestMatch[3], 10);
+    return { total, passed, failed };
+  }
+
+  // Mocha: "3 passing" / "1 failing"
+  const mochaPass = output.match(/(\d+)\s+passing/);
+  const mochaFail = output.match(/(\d+)\s+failing/);
+  if (mochaPass) {
+    const passed = parseInt(mochaPass[1], 10);
+    const failed = mochaFail ? parseInt(mochaFail[1], 10) : 0;
+    return { total: passed + failed, passed, failed };
+  }
+
+  return { total: 0, passed: 0, failed: 0 };
+}
+
 export async function updateTicketStatus(ticketPath: string, newStatus: string): Promise<void> {
   const content = await readFile(ticketPath, "utf-8");
   const updated = content.replace(

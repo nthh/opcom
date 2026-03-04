@@ -92,7 +92,12 @@ vi.mock("../../packages/core/src/config/loader.js", () => ({
 }));
 
 vi.mock("../../packages/core/src/detection/tickets.js", () => ({
-  scanTickets: vi.fn(async () => []),
+  scanTickets: mockScanTickets,
+}));
+
+vi.mock("node:fs/promises", () => ({
+  readFile: mockReadFile,
+  writeFile: mockWriteFile,
 }));
 
 vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
@@ -102,8 +107,11 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
   })),
 }));
 
-const { mockCommitStepChanges } = vi.hoisted(() => ({
+const { mockCommitStepChanges, mockScanTickets, mockWriteFile, mockReadFile } = vi.hoisted(() => ({
   mockCommitStepChanges: vi.fn(async () => true),
+  mockScanTickets: vi.fn(async () => []),
+  mockWriteFile: vi.fn(async () => {}),
+  mockReadFile: vi.fn(async () => "---\nstatus: in-progress\n---\n"),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
@@ -162,6 +170,8 @@ describe("Executor with worktree isolation", () => {
     });
     mockRemove.mockResolvedValue(undefined);
     mockCleanupOrphaned.mockResolvedValue([]);
+    mockScanTickets.mockResolvedValue([]);
+    mockReadFile.mockResolvedValue("---\nstatus: in-progress\n---\n");
   });
 
   it("creates worktree before starting agent when worktree=true", async () => {
@@ -404,7 +414,7 @@ describe("Executor with worktree isolation", () => {
     const runPromise = executor.run();
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(mockCleanupOrphaned).toHaveBeenCalledWith("/tmp/test-p");
+    expect(mockCleanupOrphaned).toHaveBeenCalledWith("/tmp/test-p", expect.any(Set));
 
     executor.stop();
     await runPromise;
@@ -463,6 +473,98 @@ describe("Executor with worktree isolation", () => {
     // Worktree should be kept for inspection/retry
     expect(mockRemove).not.toHaveBeenCalled();
     expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("resets ticket to open when step fails with ticketTransitions enabled", async () => {
+    mockHasCommits.mockResolvedValue(false);
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, ticketTransitions: true, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(plan.steps[0].status).toBe("failed");
+    // updateTicketStatus should have written "open" back to the ticket file
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/test-p/.tickets/impl/t1/README.md",
+      expect.stringContaining("status: open"),
+      "utf-8",
+    );
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("resets ticket to open on agent_failed event with ticketTransitions", async () => {
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, ticketTransitions: true, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Simulate agent error
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.emit("state_change", {
+      sessionId,
+      oldState: "streaming" as AgentState,
+      newState: "error" as AgentState,
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(plan.steps[0].status).toBe("failed");
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/test-p/.tickets/impl/t1/README.md",
+      expect.stringContaining("status: open"),
+      "utf-8",
+    );
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("does NOT reset ticket when ticketTransitions is disabled", async () => {
+    mockHasCommits.mockResolvedValue(false);
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, ticketTransitions: false, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(plan.steps[0].status).toBe("failed");
+    // writeFile should NOT have been called since ticketTransitions is off
+    expect(mockWriteFile).not.toHaveBeenCalled();
 
     executor.stop();
     await runPromise;
