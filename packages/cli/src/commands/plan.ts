@@ -94,6 +94,7 @@ export async function runPlanList(): Promise<void> {
 export async function runPlanCreate(options: {
   name?: string;
   scope?: string;
+  ticketIds?: string[];
   projectIds?: string[];
   config?: Partial<OrchestratorConfig>;
 }): Promise<void> {
@@ -102,6 +103,9 @@ export async function runPlanCreate(options: {
   const scope: PlanScope = {};
   if (options.projectIds?.length) {
     scope.projectIds = options.projectIds;
+  }
+  if (options.ticketIds?.length) {
+    scope.ticketIds = options.ticketIds;
   }
   if (options.scope) {
     scope.query = options.scope;

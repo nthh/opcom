@@ -177,10 +177,14 @@ async function main(): Promise<void> {
         case "ls":
           return runPlanList();
         case "create": {
-          const planOpts: { name?: string; scope?: string; projectIds?: string[] } = {};
+          const planOpts: { name?: string; scope?: string; ticketIds?: string[]; projectIds?: string[] } = {};
           for (let i = 2; i < args.length; i++) {
             if (args[i] === "--name" && args[i + 1]) { planOpts.name = args[++i]; }
             else if (args[i] === "--scope" && args[i + 1]) { planOpts.scope = args[++i]; }
+            else if (args[i] === "--ticket" && args[i + 1]) {
+              if (!planOpts.ticketIds) planOpts.ticketIds = [];
+              planOpts.ticketIds.push(args[++i]);
+            }
             else if (args[i] === "--project" && args[i + 1]) {
               if (!planOpts.projectIds) planOpts.projectIds = [];
               planOpts.projectIds.push(args[++i]);
