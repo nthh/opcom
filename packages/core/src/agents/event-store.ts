@@ -2,7 +2,7 @@
 
 import { join } from "node:path";
 import { createRequire } from "node:module";
-import type { AgentSession, NormalizedEvent } from "@opcom/types";
+import type { AgentSession, NormalizedEvent, Changeset, ChangesetQuery } from "@opcom/types";
 import { opcomRoot } from "../config/paths.js";
 import { createLogger } from "../logger.js";
 
@@ -74,6 +74,9 @@ export class EventStore {
   private stmtLoadSessionsByProjectAndState!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtInsertPlanEvent!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtLoadPlanEvents!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtInsertChangeset!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadChangesetsByTicket!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtLoadChangesetsBySession!: ReturnType<BetterSqlite3Database["prepare"]>;
 
   constructor(dbPath?: string) {
     const Database = require("better-sqlite3");
@@ -137,6 +140,21 @@ export class EventStore {
       );
 
       CREATE INDEX IF NOT EXISTS idx_plan_events_plan_id ON plan_events(plan_id, timestamp);
+
+      CREATE TABLE IF NOT EXISTS changesets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        commit_shas TEXT NOT NULL,
+        files_json TEXT NOT NULL,
+        total_insertions INTEGER NOT NULL,
+        total_deletions INTEGER NOT NULL,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_changesets_ticket_id ON changesets(ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_changesets_session_id ON changesets(session_id);
     `);
   }
 
@@ -190,6 +208,19 @@ export class EventStore {
 
     this.stmtLoadPlanEvents = this.db.prepare(`
       SELECT * FROM plan_events WHERE plan_id = ? ORDER BY id ASC LIMIT ? OFFSET ?
+    `);
+
+    this.stmtInsertChangeset = this.db.prepare(`
+      INSERT INTO changesets (session_id, ticket_id, project_id, commit_shas, files_json, total_insertions, total_deletions, timestamp)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    this.stmtLoadChangesetsByTicket = this.db.prepare(`
+      SELECT * FROM changesets WHERE ticket_id = ? ORDER BY id ASC
+    `);
+
+    this.stmtLoadChangesetsBySession = this.db.prepare(`
+      SELECT * FROM changesets WHERE session_id = ? ORDER BY id ASC
     `);
   }
 
@@ -532,6 +563,64 @@ export class EventStore {
       eventType: row.event_type,
       agentSessionId: row.agent_session_id,
       detailJson: row.detail_json,
+      timestamp: row.timestamp,
+    }));
+  }
+
+  // --- Changesets ---
+
+  insertChangeset(changeset: Changeset): void {
+    try {
+      this.stmtInsertChangeset.run(
+        changeset.sessionId,
+        changeset.ticketId,
+        changeset.projectId,
+        JSON.stringify(changeset.commitShas),
+        JSON.stringify(changeset.files),
+        changeset.totalInsertions,
+        changeset.totalDeletions,
+        changeset.timestamp,
+      );
+    } catch (err) {
+      log.warn("failed to insert changeset", { ticketId: changeset.ticketId, error: String(err) });
+    }
+  }
+
+  loadChangesets(query: ChangesetQuery): Changeset[] {
+    let rows: unknown[];
+
+    if (query.sessionId) {
+      rows = this.stmtLoadChangesetsBySession.all(query.sessionId);
+    } else if (query.ticketId) {
+      rows = this.stmtLoadChangesetsByTicket.all(query.ticketId);
+    } else {
+      // Fallback: load all (filtered by projectId if given)
+      const q = query.projectId
+        ? `SELECT * FROM changesets WHERE project_id = ? ORDER BY id ASC`
+        : `SELECT * FROM changesets ORDER BY id ASC`;
+      rows = query.projectId
+        ? this.db.prepare(q).all(query.projectId)
+        : this.db.prepare(q).all();
+    }
+
+    return (rows as Array<{
+      id: number;
+      session_id: string;
+      ticket_id: string;
+      project_id: string;
+      commit_shas: string;
+      files_json: string;
+      total_insertions: number;
+      total_deletions: number;
+      timestamp: string;
+    }>).map((row) => ({
+      sessionId: row.session_id,
+      ticketId: row.ticket_id,
+      projectId: row.project_id,
+      commitShas: JSON.parse(row.commit_shas),
+      files: JSON.parse(row.files_json),
+      totalInsertions: row.total_insertions,
+      totalDeletions: row.total_deletions,
       timestamp: row.timestamp,
     }));
   }
