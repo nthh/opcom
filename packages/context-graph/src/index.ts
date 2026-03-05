@@ -1,0 +1,29 @@
+// Core
+export { GraphDatabase } from "./core/database.js";
+export { GraphBuilder } from "./core/builder.js";
+export { SCHEMA, type GraphNode, type GraphEdge, type NodeType, type EdgeRelation } from "./core/schema.js";
+export { type Analyzer, type AnalyzerContext, type AnalyzerResult } from "./core/analyzer.js";
+
+// Analyzers
+export { TypeScriptImportAnalyzer } from "./analyzers/typescript-imports.js";
+export { PythonImportAnalyzer } from "./analyzers/python-imports.js";
+export { MarkdownDocAnalyzer } from "./analyzers/markdown-docs.js";
+export { TicketAnalyzer } from "./analyzers/tickets.js";
+
+// Utility
+export { minimatch } from "./util/minimatch.js";
+
+/**
+ * Create a GraphBuilder with all built-in analyzers registered.
+ *
+ * This is the main entry point for building a context graph.
+ * Analyzers auto-detect which ones apply to the project.
+ */
+export function createBuilder(projectName: string, projectPath: string, contextDir?: string): GraphBuilder {
+  const builder = new GraphBuilder(projectName, projectPath, contextDir);
+  builder.register(new TypeScriptImportAnalyzer());
+  builder.register(new PythonImportAnalyzer());
+  builder.register(new MarkdownDocAnalyzer());
+  builder.register(new TicketAnalyzer());
+  return builder;
+}

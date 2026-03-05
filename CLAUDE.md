@@ -11,7 +11,8 @@ Two control planes: project (what needs doing?) + agent (who's doing it?).
 - **packages/types/** — Pure type definitions, zero runtime deps
 - **packages/core/** — Runtime logic: config persistence, project detection, ticket scanning, status
 - **packages/cli/** — Command-line interface using core
-- **docs/spec/** — Specifications for detection, config, adapters, server API, TUI, normalized events
+- **packages/context-graph/** — Queryable knowledge graph of codebases (SQLite, pluggable analyzers)
+- **docs/spec/** — Specifications for detection, config, adapters, server API, TUI, normalized events, context-graph
 
 ## Conventions
 
@@ -32,7 +33,7 @@ Two control planes: project (what needs doing?) + agent (who's doing it?).
 
 ## Current State
 
-Phase 1 complete (44 tests, clean build). See docs/ROADMAP.md for what's next.
+Phase 1 complete (44 tests, clean build). Phases 2-8 built (876 tests passing). context-graph Phase 1 complete (8 tests). See docs/ROADMAP.md for what's next.
 
 ## Commands
 
