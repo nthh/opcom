@@ -21,7 +21,7 @@ import { buildContextPacket } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
-import { commitStepChanges } from "./git-ops.js";
+import { commitStepChanges, captureChangeset } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
 import { collectOracleInputs, runOracle } from "../skills/oracle.js";
 import { createLogger } from "../logger.js";
@@ -453,6 +453,31 @@ export class Executor {
     step.completedAt = new Date().toISOString();
     if (verification) step.verification = verification;
 
+    // Capture changeset before worktree cleanup
+    if (event.sessionId) {
+      const project = await loadProject(step.projectId);
+      if (project) {
+        const changeset = await captureChangeset(project.path, {
+          sessionId: event.sessionId,
+          ticketId: step.ticketId,
+          projectId: step.projectId,
+          branch: step.worktreeBranch,
+        });
+        if (changeset) {
+          this.eventStore?.insertChangeset(changeset);
+          this.logPlanEvent("changeset_recorded", {
+            stepTicketId: step.ticketId,
+            agentSessionId: event.sessionId,
+            detail: {
+              files: changeset.files.length,
+              insertions: changeset.totalInsertions,
+              deletions: changeset.totalDeletions,
+            },
+          });
+        }
+      }
+    }
+
     // Clean up worktree after successful merge + verification
     await this.worktreeManager.remove(step.ticketId).catch((err) => {
       log.warn("worktree cleanup after merge failed", { ticketId: step.ticketId, error: String(err) });
@@ -674,11 +699,31 @@ export class Executor {
         await this.updateTicketStatusSafe(step, "closed");
       }
 
-      // Auto-commit changes
-      if (this.plan.config.autoCommit) {
-        const project = await loadProject(step.projectId);
-        if (project) {
+      // Auto-commit changes and capture changeset
+      const project = await loadProject(step.projectId);
+      if (project) {
+        if (this.plan.config.autoCommit) {
           await commitStepChanges(project.path, step.ticketId);
+        }
+
+        if (event.sessionId) {
+          const changeset = await captureChangeset(project.path, {
+            sessionId: event.sessionId,
+            ticketId: step.ticketId,
+            projectId: step.projectId,
+          });
+          if (changeset) {
+            this.eventStore?.insertChangeset(changeset);
+            this.logPlanEvent("changeset_recorded", {
+              stepTicketId: step.ticketId,
+              agentSessionId: event.sessionId,
+              detail: {
+                files: changeset.files.length,
+                insertions: changeset.totalInsertions,
+                deletions: changeset.totalDeletions,
+              },
+            });
+          }
         }
       }
 
