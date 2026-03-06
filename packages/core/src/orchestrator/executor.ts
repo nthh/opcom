@@ -326,6 +326,21 @@ export class Executor {
    * Uses branch commit detection instead of write-count tracking.
    */
   private async handleWorktreeCompletion(step: PlanStep, event: ExecutorEvent): Promise<void> {
+    // Recover any stashed changes — agents may stash work and forget to pop.
+    if (step.worktreePath) {
+      try {
+        const { stdout } = await execFileAsync(
+          "git", ["stash", "list"], { cwd: step.worktreePath },
+        );
+        if (stdout.trim().length > 0) {
+          log.info("recovering stashed changes", { ticketId: step.ticketId });
+          await execFileAsync("git", ["stash", "pop"], { cwd: step.worktreePath });
+        }
+      } catch {
+        // No stash or pop failed — continue
+      }
+    }
+
     // Auto-commit any uncommitted changes in the worktree before checking for commits.
     // Agents may write files without committing (e.g. Claude Code in -p mode).
     if (this.plan.config.autoCommit && step.worktreePath) {

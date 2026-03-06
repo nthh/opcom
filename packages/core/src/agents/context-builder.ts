@@ -191,6 +191,7 @@ export function contextPacketToMarkdown(packet: ContextPacket): string {
     lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
   }
   lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
+  lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);
   lines.push(`- Do not mark work as complete if tests are failing.`);
   lines.push("");
 
