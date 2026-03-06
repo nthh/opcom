@@ -528,4 +528,88 @@ priority: 2
 
     await rm(tmpDir, { recursive: true });
   });
+
+  it("preserves all other frontmatter fields", async () => {
+    const filePath = join(tmpDir, "ticket.md");
+    const content = `---
+id: test-ticket
+title: "My Important Ticket"
+status: open
+priority: 1
+type: feature
+deps:
+  - dep-1
+  - dep-2
+links:
+  - docs/spec/foo.md
+---
+
+# Content stays intact
+`;
+    await writeFile(filePath, content, "utf-8");
+    await updateTicketStatus(filePath, "closed");
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toContain("status: closed");
+    expect(updated).toContain('title: "My Important Ticket"');
+    expect(updated).toContain("priority: 1");
+    expect(updated).toContain("type: feature");
+    expect(updated).toContain("- dep-1");
+    expect(updated).toContain("- dep-2");
+    expect(updated).toContain("# Content stays intact");
+
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("does not write file when status is already the target", async () => {
+    const filePath = join(tmpDir, "ticket.md");
+    const content = `---
+id: test-ticket
+status: closed
+---
+`;
+    await writeFile(filePath, content, "utf-8");
+    await updateTicketStatus(filePath, "closed");
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toBe(content);
+
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("handles status with extra whitespace", async () => {
+    const filePath = join(tmpDir, "ticket.md");
+    const content = `---
+id: test-ticket
+status:   open
+---
+`;
+    await writeFile(filePath, content, "utf-8");
+    await updateTicketStatus(filePath, "in-progress");
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toContain("status:   in-progress");
+
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("transitions from closed back to open", async () => {
+    const filePath = join(tmpDir, "ticket.md");
+    const content = `---
+id: reopen-ticket
+status: closed
+priority: 2
+---
+
+# Reopened
+`;
+    await writeFile(filePath, content, "utf-8");
+    await updateTicketStatus(filePath, "open");
+
+    const updated = await readFile(filePath, "utf-8");
+    expect(updated).toContain("status: open");
+    expect(updated).not.toContain("status: closed");
+
+    await rm(tmpDir, { recursive: true });
+  });
 });

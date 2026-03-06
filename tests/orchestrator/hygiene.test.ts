@@ -217,4 +217,421 @@ describe("checkHygiene", () => {
     expect(report.unblockedTickets).toHaveLength(0);
     expect(report.abandonedTickets).toHaveLength(0);
   });
+
+  // --- Dep Validation Edge Cases ---
+
+  it("detects self-referential dependency as a cycle", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "self-dep", deps: ["self-dep"] })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    expect(report.cycles.length).toBe(1);
+    expect(report.cycles[0]).toContain("self-dep");
+    expect(report.issues.some((i) =>
+      i.category === "cycle" && i.ticketId === "self-dep",
+    )).toBe(true);
+  });
+
+  it("detects 3-node cycle", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "a", deps: ["b"] }),
+          makeTicket({ id: "b", deps: ["c"] }),
+          makeTicket({ id: "c", deps: ["a"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    expect(report.cycles.length).toBeGreaterThan(0);
+    const flat = report.cycles.flat();
+    expect(flat).toContain("a");
+    expect(flat).toContain("b");
+    expect(flat).toContain("c");
+  });
+
+  it("detects two disjoint cycles", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "a", deps: ["b"] }),
+          makeTicket({ id: "b", deps: ["a"] }),
+          makeTicket({ id: "x", deps: ["y"] }),
+          makeTicket({ id: "y", deps: ["x"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    expect(report.cycles.length).toBe(2);
+  });
+
+  it("reports multiple orphan deps on the same ticket", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "task-1", deps: ["ghost-1", "ghost-2"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    // Should have two orphan-dep issues for the same ticket
+    const orphanIssues = report.issues.filter(
+      (i) => i.category === "orphan-dep" && i.ticketId === "task-1",
+    );
+    expect(orphanIssues).toHaveLength(2);
+    expect(orphanIssues[0].message).toContain("ghost-1");
+    expect(orphanIssues[1].message).toContain("ghost-2");
+  });
+
+  it("does not flag unblocked when some deps are orphans", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "dep-1", status: "closed" }),
+          makeTicket({ id: "task-1", deps: ["dep-1", "nonexistent"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    // Has orphan dep, so should NOT be flagged as unblocked
+    expect(report.unblockedTickets).not.toContain("task-1");
+    // But should have orphan dep issue
+    expect(report.orphanDeps).toContain("task-1");
+  });
+
+  // --- Cross-Project ---
+
+  it("validates deps across multiple projects", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "a-task", deps: ["b-task"] })],
+      },
+      {
+        projectId: "proj-b",
+        tickets: [makeTicket({ id: "b-task" })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    // b-task exists in proj-b, so no orphan dep
+    expect(report.orphanDeps).not.toContain("a-task");
+    expect(report.issues.filter((i) => i.category === "orphan-dep")).toHaveLength(0);
+  });
+
+  it("detects cross-project unblocked tickets", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "a-task", deps: ["b-dep"] })],
+      },
+      {
+        projectId: "proj-b",
+        tickets: [makeTicket({ id: "b-dep", status: "closed" })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    expect(report.unblockedTickets).toContain("a-task");
+  });
+
+  it("detects cross-project cycles", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "a", deps: ["b"] })],
+      },
+      {
+        projectId: "proj-b",
+        tickets: [makeTicket({ id: "b", deps: ["a"] })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    expect(report.cycles.length).toBeGreaterThan(0);
+  });
+
+  // --- Status Handling ---
+
+  it("does not flag deferred tickets as stale", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "deferred-1", status: "deferred", created: "2025-01-01" }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+    expect(report.staleTickets).not.toContain("deferred-1");
+  });
+
+  it("does not flag in-progress tickets as stale", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "wip", status: "in-progress", created: "2025-01-01" }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+    expect(report.staleTickets).not.toContain("wip");
+  });
+
+  it("does not flag closed ticket with open deps as unblocked", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "dep-1", status: "open" }),
+          makeTicket({ id: "task-1", status: "closed", deps: ["dep-1"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+    expect(report.unblockedTickets).not.toContain("task-1");
+  });
+
+  it("does not flag ticket with no deps as unblocked", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "standalone" })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+    expect(report.unblockedTickets).not.toContain("standalone");
+  });
+
+  // --- Session Handling ---
+
+  it("treats stopped sessions as inactive for abandonment check", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "t1", status: "in-progress" })],
+      },
+    ];
+
+    const sessions: AgentSession[] = [
+      makeSession({ id: "s1", state: "stopped", workItemId: "t1" }),
+    ];
+
+    const report = checkHygiene(ticketSets, sessions);
+    expect(report.abandonedTickets).toContain("t1");
+  });
+
+  it("recognizes various active agent states", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "t1", status: "in-progress" }),
+          makeTicket({ id: "t2", status: "in-progress" }),
+          makeTicket({ id: "t3", status: "in-progress" }),
+        ],
+      },
+    ];
+
+    const sessions: AgentSession[] = [
+      makeSession({ id: "s1", state: "idle", workItemId: "t1" }),
+      makeSession({ id: "s2", state: "waiting", workItemId: "t2" }),
+      makeSession({ id: "s3", state: "error", workItemId: "t3" }),
+    ];
+
+    const report = checkHygiene(ticketSets, sessions);
+    // All have active (non-stopped) sessions, none should be abandoned
+    expect(report.abandonedTickets).toHaveLength(0);
+  });
+
+  // --- Edge Cases ---
+
+  it("handles empty ticket sets", () => {
+    const report = checkHygiene([], []);
+
+    expect(report.issues).toHaveLength(0);
+    expect(report.cycles).toHaveLength(0);
+    expect(report.orphanDeps).toHaveLength(0);
+    expect(report.staleTickets).toHaveLength(0);
+    expect(report.unblockedTickets).toHaveLength(0);
+    expect(report.abandonedTickets).toHaveLength(0);
+  });
+
+  it("handles ticket set with empty tickets array", () => {
+    const ticketSets: TicketSet[] = [
+      { projectId: "proj-a", tickets: [] },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+    expect(report.issues).toHaveLength(0);
+  });
+
+  it("a ticket can have multiple issue categories simultaneously", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          // This ticket is stale AND has an orphan dep
+          makeTicket({
+            id: "multi-issue",
+            created: "2025-01-01",
+            deps: ["nonexistent"],
+          }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+
+    expect(report.staleTickets).toContain("multi-issue");
+    expect(report.orphanDeps).toContain("multi-issue");
+    const categories = report.issues
+      .filter((i) => i.ticketId === "multi-issue")
+      .map((i) => i.category);
+    expect(categories).toContain("stale");
+    expect(categories).toContain("orphan-dep");
+  });
+
+  it("cycle issues have error severity", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "a", deps: ["b"] }),
+          makeTicket({ id: "b", deps: ["a"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    const cycleIssues = report.issues.filter((i) => i.category === "cycle");
+    expect(cycleIssues.length).toBeGreaterThan(0);
+    for (const issue of cycleIssues) {
+      expect(issue.severity).toBe("error");
+    }
+  });
+
+  it("orphan dep issues have warning severity", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [makeTicket({ id: "t1", deps: ["missing"] })],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    const orphanIssues = report.issues.filter((i) => i.category === "orphan-dep");
+    expect(orphanIssues).toHaveLength(1);
+    expect(orphanIssues[0].severity).toBe("warning");
+  });
+
+  it("unblocked issues have info severity", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "dep-1", status: "closed" }),
+          makeTicket({ id: "t1", deps: ["dep-1"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    const unblockedIssues = report.issues.filter((i) => i.category === "unblocked");
+    expect(unblockedIssues).toHaveLength(1);
+    expect(unblockedIssues[0].severity).toBe("info");
+  });
+
+  it("issues include actionable suggestions", () => {
+    const now = new Date("2026-03-01");
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "orphan-t", deps: ["missing"] }),
+          makeTicket({ id: "dep-closed", status: "closed" }),
+          makeTicket({ id: "unblocked-t", deps: ["dep-closed"] }),
+          makeTicket({ id: "abandoned-t", status: "in-progress" }),
+          makeTicket({ id: "stale-t", created: "2025-01-01" }),
+          makeTicket({ id: "cycle-a", deps: ["cycle-b"] }),
+          makeTicket({ id: "cycle-b", deps: ["cycle-a"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, [], { now });
+
+    // Every issue should have a non-empty suggestion
+    for (const issue of report.issues) {
+      expect(issue.suggestion).toBeTruthy();
+      expect(issue.suggestion.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("handles diamond dependency pattern without false positives", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "root" }),
+          makeTicket({ id: "left", deps: ["root"] }),
+          makeTicket({ id: "right", deps: ["root"] }),
+          makeTicket({ id: "bottom", deps: ["left", "right"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+
+    // No cycles in a diamond
+    expect(report.cycles).toHaveLength(0);
+    expect(report.orphanDeps).toHaveLength(0);
+  });
+
+  it("does not flag unblocked when some deps are still open", () => {
+    const ticketSets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "dep-done", status: "closed" }),
+          makeTicket({ id: "dep-pending", status: "open" }),
+          makeTicket({ id: "task-1", deps: ["dep-done", "dep-pending"] }),
+        ],
+      },
+    ];
+
+    const report = checkHygiene(ticketSets, []);
+    expect(report.unblockedTickets).not.toContain("task-1");
+  });
 });

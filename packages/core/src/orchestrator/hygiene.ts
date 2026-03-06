@@ -4,11 +4,8 @@ import type {
   HygieneReport,
   HygieneIssue,
 } from "@opcom/types";
-
-export interface TicketSet {
-  projectId: string;
-  tickets: WorkItem[];
-}
+import type { TicketSet } from "./planner.js";
+export type { TicketSet } from "./planner.js";
 
 export interface HygieneOptions {
   /** Flag open tickets with no activity in this many days (default: 14) */
