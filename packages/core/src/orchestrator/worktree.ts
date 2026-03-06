@@ -91,6 +91,21 @@ export class WorktreeManager {
     // Remove existing worktree directory if it exists (from a crash).
     // Must happen before branch deletion — git won't delete a checked-out branch.
     if (existsSync(worktreePath)) {
+      // Check lock file — refuse to destroy a worktree with a live agent
+      const lockPath = join(worktreePath, LOCK_FILE);
+      if (existsSync(lockPath)) {
+        try {
+          const pidStr = await readFile(lockPath, "utf-8");
+          const pid = parseInt(pidStr.trim(), 10);
+          if (!isNaN(pid) && isProcessAlive(pid)) {
+            throw new Error(`Worktree ${stepId} is in use by process ${pid}`);
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith("Worktree ")) throw err;
+          // Can't read lock — treat as stale
+        }
+      }
+
       try {
         await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {
           cwd: projectPath,
@@ -140,6 +155,16 @@ export class WorktreeManager {
     };
 
     this.worktrees.set(stepId, info);
+
+    // Write an initial lock with the executor PID so cleanupOrphaned() won't
+    // remove this worktree before the agent's PID is known.  The executor
+    // updates the lock with the real agent PID via writeLock() after spawn.
+    try {
+      await writeFile(join(worktreePath, LOCK_FILE), String(process.pid), "utf-8");
+    } catch {
+      // Best effort — writeLock() will retry with the agent PID later
+    }
+
     log.info("created worktree", { stepId, ticketId, worktreePath, branch });
 
     return info;

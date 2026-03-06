@@ -61,7 +61,10 @@ describe("WorktreeManager", () => {
 
     it("cleans up existing worktree at same path from a crash", async () => {
       // Create first worktree
-      await wm.create(tmpDir, "step-1", "ticket-1");
+      const info1 = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      // Overwrite the initial lock with a dead PID to simulate a crashed agent
+      await writeFile(join(info1.worktreePath, ".opcom-lock"), "999999", "utf-8");
 
       // Create another manager simulating restart
       const wm2 = new WorktreeManager();
@@ -294,6 +297,43 @@ describe("WorktreeManager", () => {
       const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
       expect(cleaned).toContain("dead-step");
       expect(existsSync(wtPath)).toBe(false);
+    });
+
+    it("create refuses to destroy worktree with live agent lock", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      // Write a lock with the current PID (simulates a live agent)
+      await writeFile(join(info.worktreePath, ".opcom-lock"), String(process.pid), "utf-8");
+
+      // A second manager tries to create the same worktree
+      const wm2 = new WorktreeManager();
+      await expect(wm2.create(tmpDir, "step-1", "ticket-1")).rejects.toThrow(
+        /in use by process/,
+      );
+
+      // Original worktree should still exist
+      expect(existsSync(info.worktreePath)).toBe(true);
+    });
+
+    it("create removes worktree with dead agent lock", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      // Write a lock with a dead PID
+      await writeFile(join(info.worktreePath, ".opcom-lock"), "999999", "utf-8");
+
+      // A second manager should be able to recreate it
+      const wm2 = new WorktreeManager();
+      const info2 = await wm2.create(tmpDir, "step-1", "ticket-1");
+      expect(existsSync(info2.worktreePath)).toBe(true);
+    });
+
+    it("create writes initial lock file with executor PID", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      const lockPath = join(info.worktreePath, ".opcom-lock");
+      expect(existsSync(lockPath)).toBe(true);
+      const content = await readFile(lockPath, "utf-8");
+      expect(content).toBe(String(process.pid));
     });
 
     it("cleanupOrphaned removes worktree with no lock file", async () => {
