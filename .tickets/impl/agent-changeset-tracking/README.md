@@ -1,7 +1,7 @@
 ---
 id: agent-changeset-tracking
 title: "Track and view file changes per agent/ticket"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-03
@@ -22,13 +22,13 @@ The executor already auto-commits with messages like `opcom: complete <ticketId>
 
 ## Tasks
 
-- [ ] Record changeset metadata when agent sessions complete (files changed, insertions, deletions, commit SHAs)
-- [ ] Store changesets in EventStore events (e.g. `agent.changeset` event type)
-- [ ] Add `opcom diff <ticket-id>` CLI command — shows combined diff of all changes for a ticket
-- [ ] Add `opcom changes <ticket-id>` CLI command — shows file list with stats (like `git diff --stat`)
-- [ ] TUI: add a "Changes" tab/section to the ticket detail (L3) view showing files + diff
-- [ ] Support filtering by agent session ID when multiple agents worked on the same ticket
-- [ ] Tests for changeset capture and retrieval
+- [x] Record changeset metadata when agent sessions complete (files changed, insertions, deletions, commit SHAs)
+- [x] Store changesets in EventStore events (e.g. `agent.changeset` event type)
+- [x] Add `opcom diff <ticket-id>` CLI command — shows combined diff of all changes for a ticket
+- [x] Add `opcom changes <ticket-id>` CLI command — shows file list with stats (like `git diff --stat`)
+- [x] TUI: add a "Changes" tab/section to the ticket detail (L3) view showing files + diff
+- [x] Support filtering by agent session ID when multiple agents worked on the same ticket
+- [x] Tests for changeset capture and retrieval
 
 ## Acceptance Criteria
 
