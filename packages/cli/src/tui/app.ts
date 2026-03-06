@@ -1416,6 +1416,7 @@ export class TuiApp {
       agent,
       allTickets,
       this.client.agents,
+      step.verification,
     );
     this.agentFocusState = null;
     this.ticketFocusState = null;
