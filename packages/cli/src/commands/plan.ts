@@ -190,6 +190,11 @@ export async function runPlanExecute(planId?: string): Promise<void> {
     return;
   }
 
+  if (plan.status === "executing") {
+    console.error("  Plan is already executing. Use 'opcom plan pause' first to stop the current run.");
+    return;
+  }
+
   console.log(`  Executing plan: ${plan.name} [${plan.id.slice(0, 8)}]`);
   console.log(`  Max concurrent agents: ${plan.config.maxConcurrentAgents}`);
   console.log(`  Pause on failure: ${plan.config.pauseOnFailure}`);
