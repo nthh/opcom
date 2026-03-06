@@ -372,7 +372,34 @@ export class Executor {
       return;
     }
 
-    // Agent has commits — attempt merge into main tree
+    // Agent has commits — run verification IN the worktree before merging.
+    // This prevents bad code from landing on main if tests fail.
+    const verification = await this.runVerification(step, event);
+
+    if (verification && !verification.passed) {
+      const reason = `Verification failed: ${verification.failureReasons.join("; ")}`;
+      await this.failStep(step, reason);
+      step.verification = verification;
+
+      // Keep worktree for inspection on verification failure
+      log.warn("step verification failed", { ticketId: step.ticketId, reasons: verification.failureReasons });
+      this.emit("step_failed", { step, error: reason });
+      this.logPlanEvent("step_failed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { error: reason, mode: "worktree", verification },
+      });
+
+      if (this.plan.config.pauseOnFailure) {
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason: "verification_failed" } });
+      }
+      return;
+    }
+
+    // Verification passed (or skipped) — merge into main tree
     const mergeResult = await this.worktreeManager.merge(step.ticketId);
 
     if (mergeResult.conflict) {
@@ -380,6 +407,7 @@ export class Executor {
       step.status = "needs-rebase";
       step.error = `Merge conflict: ${mergeResult.error}`;
       step.completedAt = new Date().toISOString();
+      if (verification) step.verification = verification;
       // Keep worktree alive for manual rebase
 
       log.warn("merge conflict", { ticketId: step.ticketId });
@@ -422,33 +450,7 @@ export class Executor {
       return;
     }
 
-    // Merge succeeded — run verification before marking done
-    const verification = await this.runVerification(step, event);
-
-    if (verification && !verification.passed) {
-      const reason = `Verification failed: ${verification.failureReasons.join("; ")}`;
-      await this.failStep(step, reason);
-      step.verification = verification;
-
-      // Keep worktree for inspection on verification failure
-      log.warn("step verification failed", { ticketId: step.ticketId, reasons: verification.failureReasons });
-      this.emit("step_failed", { step, error: reason });
-      this.logPlanEvent("step_failed", {
-        stepTicketId: step.ticketId,
-        agentSessionId: event.sessionId,
-        detail: { error: reason, mode: "worktree", verification },
-      });
-
-      if (this.plan.config.pauseOnFailure) {
-        this.plan.status = "paused";
-        await savePlan(this.plan);
-        this.emit("plan_paused", { plan: this.plan });
-        this.logPlanEvent("plan_paused", { detail: { reason: "verification_failed" } });
-      }
-      return;
-    }
-
-    // Verification passed (or skipped) — step is done
+    // Merge succeeded — step is done
     step.status = "done";
     step.completedAt = new Date().toISOString();
     if (verification) step.verification = verification;
@@ -527,8 +529,10 @@ export class Executor {
     };
 
     // --- Test gate ---
+    // Run tests in the worktree if available (verification runs before merge)
+    const testPath = step.worktreePath ?? project.path;
     if (verification.runTests && project.testing?.command) {
-      const testResult = await this.runTestGate(project.path, project.testing.command);
+      const testResult = await this.runTestGate(testPath, project.testing.command);
       result.testGate = testResult;
       if (!testResult.passed) {
         result.passed = false;
