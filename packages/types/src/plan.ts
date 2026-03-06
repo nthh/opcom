@@ -97,3 +97,50 @@ export interface HygieneIssue {
   message: string;
   suggestion: string;
 }
+
+// --- Planning Session Types ---
+
+export interface PlanningInput {
+  projects: Array<{
+    name: string;
+    projectId: string;
+    stack: import("./project.js").StackInfo;
+    tickets: import("./work-items.js").WorkItem[];
+    ticketCount: number;
+    cloudServices?: import("./cloud-services.js").CloudServiceConfig[];
+  }>;
+  currentPlan?: Plan;
+  userPrompt: string;
+}
+
+export interface ProposedTicket {
+  id: string;
+  title: string;
+  type: string;
+  priority: number;
+  deps: string[];
+  parent?: string;
+  description: string;
+}
+
+export interface TicketDecomposition {
+  parentTicketId: string;
+  reason: string;
+  subTickets: ProposedTicket[];
+}
+
+export interface PlanningProposal {
+  name: string;
+  scope: PlanScope;
+  newTickets: ProposedTicket[];
+  decompositions: TicketDecomposition[];
+  ordering: string[];
+  reasoning: string;
+}
+
+export interface DecompositionAssessment {
+  ticketId: string;
+  needsDecomposition: boolean;
+  reason: string;
+  criteria: string[];
+}

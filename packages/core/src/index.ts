@@ -102,6 +102,16 @@ export {
 } from "./skills/oracle.js";
 export type { OracleInput, OracleResult } from "./skills/oracle.js";
 
+export {
+  assessDecomposition,
+  formatPlanningPrompt,
+  formatDecompositionPrompt,
+  parsePlanningResponse,
+  parseDecompositionResponse,
+  generatePlanningSession,
+  generateDecomposition,
+} from "./skills/planning.js";
+
 // Phase 3: Server
 export { Station } from "./server/station.js";
 export { getWebUIHtml } from "./server/web-ui.js";
