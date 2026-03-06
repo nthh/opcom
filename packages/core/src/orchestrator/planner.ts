@@ -110,11 +110,20 @@ export function computePlan(
     }
   }
 
+  // Identify parent tickets (tickets that have children in scope).
+  // Parents are excluded from plan steps — their children are the steps.
+  const parentIds = findParentTicketIds(allTickets);
+
   // Build steps
   const steps: PlanStep[] = [];
   for (const [ticketId, { ticket, projectId }] of allTickets) {
-    // Only include deps that are in our scope
-    const blockedBy = ticket.deps.filter((d) => allTickets.has(d));
+    // Skip parent tickets — children are the executable steps
+    if (parentIds.has(ticketId)) continue;
+
+    // Only include deps that are in our scope and are not parent tickets
+    const blockedBy = ticket.deps.filter(
+      (d) => allTickets.has(d) && !parentIds.has(d),
+    );
 
     const status: StepStatus = blockedBy.length > 0 ? "blocked" : "ready";
 
@@ -176,6 +185,8 @@ export function computePlan(
 
 /**
  * Recompute plan statuses from current ticket state, preserving sticky statuses.
+ * Handles parent-child rollup: a dep on a parent ticket is resolved when all
+ * of that parent's children are done/skipped.
  */
 export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
   // Build lookup of current ticket states
@@ -183,6 +194,16 @@ export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
   for (const ts of ticketSets) {
     for (const t of ts.tickets) {
       ticketStates.set(t.id, t);
+    }
+  }
+
+  // Build parent→children map for rollup
+  const parentChildren = new Map<string, string[]>();
+  for (const [, ticket] of ticketStates) {
+    if (ticket.parent) {
+      const children = parentChildren.get(ticket.parent) ?? [];
+      children.push(ticket.id);
+      parentChildren.set(ticket.parent, children);
     }
   }
 
@@ -203,6 +224,11 @@ export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
       const depStep = plan.steps.find((s) => s.ticketId === depId);
       if (depStep && (depStep.status === "done" || depStep.status === "skipped")) return false;
 
+      // 3. The dep is a parent ticket and all its children are done/skipped
+      if (isParentResolved(depId, parentChildren, plan.steps, ticketStates)) {
+        return false;
+      }
+
       return true;
     });
 
@@ -215,6 +241,26 @@ export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
     steps: updatedSteps,
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * Check if a parent ticket is resolved (all children done/skipped/closed).
+ */
+function isParentResolved(
+  ticketId: string,
+  parentChildren: Map<string, string[]>,
+  steps: PlanStep[],
+  ticketStates: Map<string, WorkItem>,
+): boolean {
+  const children = parentChildren.get(ticketId);
+  if (!children || children.length === 0) return false;
+
+  return children.every((childId) => {
+    const childTicket = ticketStates.get(childId);
+    if (childTicket?.status === "closed") return true;
+    const childStep = steps.find((s) => s.ticketId === childId);
+    return childStep && (childStep.status === "done" || childStep.status === "skipped");
+  });
 }
 
 function isSticky(status: StepStatus): boolean {
@@ -292,6 +338,22 @@ function computeTrackName(ticketIds: string[]): string | null {
   }
 
   return common.length > 0 ? common.join("-") : null;
+}
+
+/**
+ * Identify tickets that have children in the ticket set.
+ * These are "epic" tickets that should be excluded from plan steps.
+ */
+export function findParentTicketIds(
+  allTickets: Map<string, { ticket: WorkItem; projectId: string }>,
+): Set<string> {
+  const parentIds = new Set<string>();
+  for (const [, { ticket }] of allTickets) {
+    if (ticket.parent && allTickets.has(ticket.parent)) {
+      parentIds.add(ticket.parent);
+    }
+  }
+  return parentIds;
 }
 
 /**
