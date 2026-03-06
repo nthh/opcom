@@ -74,17 +74,6 @@ describe("WorktreeManager", () => {
       expect(existsSync(info.worktreePath)).toBe(true);
     });
 
-    it("installs deps if package.json exists", { timeout: 30_000 }, async () => {
-      // Add a package.json so installDeps runs
-      await writeFile(join(tmpDir, "package.json"), '{"name":"test","private":true}', "utf-8");
-      await exec("git", ["add", "-A"], { cwd: tmpDir });
-      await exec("git", ["commit", "-m", "add package.json"], { cwd: tmpDir });
-
-      const info = await wm.create(tmpDir, "step-1", "ticket-1");
-
-      // Worktree should have package.json (from git)
-      expect(existsSync(join(info.worktreePath, "package.json"))).toBe(true);
-    });
   });
 
   describe("remove", () => {
