@@ -233,6 +233,29 @@ export {
 } from "./cloud/index.js";
 export type { WorkersConfig, FirebaseFunctionsConfig } from "./cloud/index.js";
 
+// Cloud Hosting Adapters
+export {
+  FirebaseHostingAdapter,
+  detectFirebaseHosting,
+  getFirebaseHostingStatus,
+  parseFirebaseHosting,
+  detectHostingFramework,
+  getHostingAdapters,
+} from "./cloud/index.js";
+export type { FirebaseHostingConfig } from "./cloud/index.js";
+
+// Cloud Mobile Adapters
+export {
+  ExpoEASAdapter,
+  detectExpoEAS,
+  getExpoEASStatus,
+  parseAppJson,
+  parseEasJson,
+  detectPublishCommand,
+  getMobileAdapters,
+} from "./cloud/index.js";
+export type { ExpoEASConfig } from "./cloud/index.js";
+
 // Context Graph Integration
 export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
 

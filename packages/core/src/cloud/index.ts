@@ -39,5 +39,31 @@ export {
 } from "./firebase-functions.js";
 export type { FirebaseFunctionsConfig } from "./firebase-functions.js";
 
-export { detectCloudServices, getDatabaseAdapters, getStorageAdapters, getServerlessAdapters } from "./detect.js";
+export {
+  FirebaseHostingAdapter,
+  detectFirebaseHosting,
+  getFirebaseHostingStatus,
+  parseFirebaseHosting,
+  detectHostingFramework,
+} from "./firebase-hosting.js";
+export type { FirebaseHostingConfig } from "./firebase-hosting.js";
+
+export {
+  ExpoEASAdapter,
+  detectExpoEAS,
+  getExpoEASStatus,
+  parseAppJson,
+  parseEasJson,
+  detectPublishCommand,
+} from "./expo-eas.js";
+export type { ExpoEASConfig } from "./expo-eas.js";
+
+export {
+  detectCloudServices,
+  getDatabaseAdapters,
+  getStorageAdapters,
+  getServerlessAdapters,
+  getHostingAdapters,
+  getMobileAdapters,
+} from "./detect.js";
 export type { CloudDetectionResult } from "./detect.js";

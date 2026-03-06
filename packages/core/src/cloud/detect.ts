@@ -10,6 +10,8 @@ import { R2Adapter } from "./r2.js";
 import { GCSAdapter } from "./gcs.js";
 import { CloudflareWorkersAdapter } from "./workers.js";
 import { FirebaseFunctionsAdapter } from "./firebase-functions.js";
+import { FirebaseHostingAdapter } from "./firebase-hosting.js";
+import { ExpoEASAdapter } from "./expo-eas.js";
 import { detectPrisma } from "./prisma.js";
 
 /** All registered database adapters. */
@@ -30,6 +32,16 @@ const SERVERLESS_ADAPTERS: CloudServiceAdapter[] = [
   new FirebaseFunctionsAdapter(),
 ];
 
+/** All registered hosting adapters. */
+const HOSTING_ADAPTERS: CloudServiceAdapter[] = [
+  new FirebaseHostingAdapter(),
+];
+
+/** All registered mobile adapters. */
+const MOBILE_ADAPTERS: CloudServiceAdapter[] = [
+  new ExpoEASAdapter(),
+];
+
 export interface CloudDetectionResult {
   configs: CloudServiceConfig[];
   evidence: DetectionEvidence[];
@@ -47,7 +59,13 @@ export async function detectCloudServices(
   const configs: CloudServiceConfig[] = [];
   const evidence: DetectionEvidence[] = [];
 
-  const allAdapters = [...DATABASE_ADAPTERS, ...STORAGE_ADAPTERS, ...SERVERLESS_ADAPTERS];
+  const allAdapters = [
+    ...DATABASE_ADAPTERS,
+    ...STORAGE_ADAPTERS,
+    ...SERVERLESS_ADAPTERS,
+    ...HOSTING_ADAPTERS,
+    ...MOBILE_ADAPTERS,
+  ];
 
   // Run all adapter detections in parallel
   const detections = await Promise.all(
@@ -95,6 +113,10 @@ function getDetectionSource(provider: string): string {
       return "wrangler.toml or wrangler.json";
     case "firebase-functions":
       return "firebase.json (functions)";
+    case "firebase-hosting":
+      return "firebase.json (hosting)";
+    case "expo-eas":
+      return "app.json or eas.json";
     default:
       return ".env";
   }
@@ -119,4 +141,18 @@ export function getStorageAdapters(): CloudServiceAdapter[] {
  */
 export function getServerlessAdapters(): CloudServiceAdapter[] {
   return [...SERVERLESS_ADAPTERS];
+}
+
+/**
+ * Get all registered hosting adapters.
+ */
+export function getHostingAdapters(): CloudServiceAdapter[] {
+  return [...HOSTING_ADAPTERS];
+}
+
+/**
+ * Get all registered mobile adapters.
+ */
+export function getMobileAdapters(): CloudServiceAdapter[] {
+  return [...MOBILE_ADAPTERS];
 }
