@@ -141,6 +141,12 @@ export type { ScheduledTask, ParsedCron, CronField } from "./scheduling/schedule
 export { HeartbeatMonitor } from "./scheduling/heartbeat.js";
 export type { HeartbeatConfig, HeartbeatStatus, HeartbeatResult } from "./scheduling/heartbeat.js";
 
+// Integration Registry
+export { IntegrationRegistry } from "./integrations/registry.js";
+export type { IntegrationInfo } from "./integrations/registry.js";
+export { builtinModules, defaultIntegrationsConfig } from "./integrations/builtins.js";
+export { validateIntegrationsConfig } from "./config/schema.js";
+
 // Phase 7: Integrations
 export { NotificationManager } from "./integrations/notifications.js";
 export type {

@@ -1,11 +1,26 @@
-import type { GlobalConfig, WorkspaceConfig, ProjectConfig, StackInfo } from "@opcom/types";
+import type { GlobalConfig, WorkspaceConfig, ProjectConfig, StackInfo, IntegrationsConfig } from "@opcom/types";
 import { validateSettings } from "./settings.js";
+
+export function validateIntegrationsConfig(data: unknown): IntegrationsConfig | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const obj = data as Record<string, unknown>;
+  const result: IntegrationsConfig = {};
+  const keys: (keyof IntegrationsConfig)[] = ["work-sources", "notifications", "cicd", "agent-backends", "features"];
+  for (const key of keys) {
+    const val = obj[key];
+    if (Array.isArray(val)) {
+      result[key] = val.filter((v): v is string => typeof v === "string");
+    }
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
+}
 
 export function validateGlobalConfig(data: unknown): GlobalConfig {
   const obj = data as Record<string, unknown>;
   return {
     defaultWorkspace: typeof obj?.defaultWorkspace === "string" ? obj.defaultWorkspace : "default",
     settings: validateSettings(obj?.settings),
+    integrations: validateIntegrationsConfig(obj?.integrations),
   };
 }
 
