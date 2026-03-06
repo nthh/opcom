@@ -19,6 +19,7 @@ import { execSync } from "node:child_process";
 import { createBuilder, GraphDatabase } from "./index.js";
 import { parseTestResults, detectFramework, type Framework } from "./parsers/index.js";
 import { DriftEngine, type DriftSignalType, type TestType } from "./core/drift.js";
+import { TriageEngine, type LLMProvider, type TriageResult } from "./core/triage.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -40,6 +41,13 @@ Commands:
     --min-severity <N>        Only show signals with severity >= N
     --test-type <unit|e2e|api>  Filter by test type
     --context                 Attach source/spec/test content
+  triage [path] [options]     LLM triage of drift signals
+    --json                    Output as JSON
+    --model <model>           LLM model (default: claude-haiku-4-5-20251001)
+    --test-type <type>        Only triage signals of a specific test type
+    --max <N>                 Max signals to triage (default: 20)
+    --min-severity <N>        Only triage signals with severity >= N
+    --stored                  Show previously stored triage results
   search <term> [path]        Full-text search across entities
   ingest <file> [path]        Ingest test results (pytest/vitest/junit)
   churn [path] [--since Nd]   Files ranked by change frequency
@@ -71,6 +79,9 @@ Output: ~/.context/<project>/graph.db
       break;
     case "drift":
       await cmdDrift();
+      break;
+    case "triage":
+      await cmdTriage();
       break;
     case "search":
       cmdSearch();
@@ -252,6 +263,153 @@ async function cmdDrift(): Promise<void> {
   }
 
   db.close();
+}
+
+/** LLM provider using the Anthropic API via fetch. */
+class AnthropicProvider implements LLMProvider {
+  private apiKey: string;
+
+  constructor() {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) {
+      throw new Error("ANTHROPIC_API_KEY environment variable is required for triage");
+    }
+    this.apiKey = key;
+  }
+
+  async complete(prompt: string, model: string): Promise<string> {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": this.apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Anthropic API error ${response.status}: ${body}`);
+    }
+
+    const data = (await response.json()) as { content: Array<{ type: string; text: string }> };
+    const textBlock = data.content.find((b) => b.type === "text");
+    return textBlock?.text ?? "";
+  }
+}
+
+async function cmdTriage(): Promise<void> {
+  const path = getProjectPath();
+  const name = getProjectName(path);
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+
+  if (!existsSync(dbPath)) {
+    console.error(`No graph found at ${dbPath}. Run 'context-graph build' first.`);
+    process.exit(1);
+  }
+
+  const jsonOutput = args.includes("--json");
+  const showStored = args.includes("--stored");
+  const modelIdx = args.indexOf("--model");
+  const model = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const testTypeIdx = args.indexOf("--test-type");
+  const testTypeFilter = testTypeIdx >= 0 ? (args[testTypeIdx + 1] as TestType) : undefined;
+  const maxIdx = args.indexOf("--max");
+  const maxSignals = maxIdx >= 0 ? parseInt(args[maxIdx + 1], 10) : undefined;
+  const minSevIdx = args.indexOf("--min-severity");
+  const minSeverity = minSevIdx >= 0 ? parseFloat(args[minSevIdx + 1]) : undefined;
+
+  const db = GraphDatabase.open(dbPath);
+
+  if (showStored) {
+    // Just show stored results, no LLM call
+    const engine = new TriageEngine(db, { complete: async () => "" }, {});
+    const stored = engine.getStoredResults();
+    if (jsonOutput) {
+      console.log(JSON.stringify(stored, null, 2));
+    } else {
+      printTriageResults(stored);
+    }
+    db.close();
+    return;
+  }
+
+  // First, detect drift signals with context attached
+  const driftEngine = new DriftEngine(db, {
+    attachContext: true,
+    projectPath: path,
+  });
+  const signals = await driftEngine.detect();
+
+  if (signals.length === 0) {
+    console.log("No drift signals to triage.");
+    db.close();
+    return;
+  }
+
+  const llm = new AnthropicProvider();
+  const triageEngine = new TriageEngine(db, llm, {
+    model,
+    testType: testTypeFilter,
+    maxSignals,
+    minSeverity,
+  });
+
+  const results = await triageEngine.triage(signals);
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(results, null, 2));
+  } else {
+    printTriageResults(results);
+  }
+
+  db.close();
+}
+
+function printTriageResults(results: TriageResult[]): void {
+  if (results.length === 0) {
+    console.log("No triage results.");
+    return;
+  }
+
+  const actionable = results.filter((r) => r.verdict === "actionable");
+  const expected = results.filter((r) => r.verdict === "expected");
+  const deferred = results.filter((r) => r.verdict === "deferred");
+  const duplicate = results.filter((r) => r.verdict === "duplicate");
+
+  console.log(`TRIAGE RESULTS (${results.length} signals)`);
+  console.log(`  Actionable: ${actionable.length}  Expected: ${expected.length}  Deferred: ${deferred.length}  Duplicate: ${duplicate.length}`);
+  console.log();
+
+  if (actionable.length > 0) {
+    console.log("ACTIONABLE:");
+    console.log(`${"pri".padEnd(4)}  ${"action".padEnd(12)}  ${"test".padEnd(6)}  ${"signal".padEnd(25)}  reasoning`);
+    console.log(`${"---".padEnd(4)}  ${"------".padEnd(12)}  ${"----".padEnd(6)}  ${"------".padEnd(25)}  ---------`);
+    for (const r of actionable) {
+      console.log(
+        `${r.priority.padEnd(4)}  ${r.action.padEnd(12)}  ${r.testHints.testType.padEnd(6)}  ${r.signalType.padEnd(25)}  ${r.reasoning}`,
+      );
+      if (r.testHints.behaviors.length > 0) {
+        for (const b of r.testHints.behaviors) {
+          console.log(`      → ${b}`);
+        }
+      }
+      if (r.testHints.userActions && r.testHints.userActions.length > 0) {
+        console.log(`      🖱 ${r.testHints.userActions.join(" → ")}`);
+      }
+      if (r.testHints.apiContract) {
+        const c = r.testHints.apiContract;
+        console.log(`      🌐 ${c.method} ${c.path} → [${c.expectedStatuses.join(", ")}]`);
+      }
+    }
+  }
+
+  console.log(`\nTotal: ${results.length} signals triaged`);
 }
 
 function cmdSearch(): void {

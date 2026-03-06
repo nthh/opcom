@@ -532,6 +532,11 @@ export class GraphDatabase {
     return { totalNodes, totalEdges, byType, byRelation };
   }
 
+  /** Execute a SQL statement that doesn't return rows (CREATE, INSERT, UPDATE, DELETE). */
+  exec(sql: string): void {
+    this.db.exec(sql);
+  }
+
   // --- Query ---
 
   query(sql: string): { columns: string[]; rows: unknown[][] } {
