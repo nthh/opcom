@@ -122,8 +122,10 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
 }));
 
 const mockCommitStepChanges = vi.fn(async () => true);
+const mockCaptureChangeset = vi.fn(async () => null);
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
   commitStepChanges: (...args: unknown[]) => mockCommitStepChanges(...args),
+  captureChangeset: (...args: unknown[]) => mockCaptureChangeset(...args),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
