@@ -487,7 +487,8 @@ describe("Executor with worktree isolation", () => {
     await runPromise;
   });
 
-  it("keeps worktree on agent_failed event for inspection", async () => {
+  it("cleans up empty worktree on agent failure, keeps worktree with commits", async () => {
+    mockHasCommits.mockResolvedValue(false);
     const plan = makePlan([
       { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
     ], { worktree: true, pauseOnFailure: false });
@@ -500,19 +501,22 @@ describe("Executor with worktree isolation", () => {
     // Step should have worktree info from creation
     expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
 
-    // Simulate error
+    // Simulate error then stop — error state is non-fatal, agent stops after
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.emit("state_change", {
       sessionId,
       oldState: "streaming" as AgentState,
       newState: "error" as AgentState,
     });
+    mockSM.emit("session_stopped", {
+      id: sessionId, backend: "claude-code", projectId: "test",
+      state: "stopped", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
+    });
     await new Promise((r) => setTimeout(r, 100));
 
     expect(plan.steps[0].status).toBe("failed");
-    // Worktree should be kept for inspection/retry
-    expect(mockRemove).not.toHaveBeenCalled();
-    expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
+    // Empty worktree (no commits, no uncommitted changes) gets cleaned up
+    expect(mockRemove).toHaveBeenCalledWith("t1");
 
     executor.stop();
     await runPromise;
@@ -563,12 +567,16 @@ describe("Executor with worktree isolation", () => {
     const runPromise = executor.run();
     await new Promise((r) => setTimeout(r, 50));
 
-    // Simulate agent error
+    // Simulate agent error then stop
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.emit("state_change", {
       sessionId,
       oldState: "streaming" as AgentState,
       newState: "error" as AgentState,
+    });
+    mockSM.emit("session_stopped", {
+      id: sessionId, backend: "claude-code", projectId: "test",
+      state: "stopped", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
     });
     await new Promise((r) => setTimeout(r, 100));
 

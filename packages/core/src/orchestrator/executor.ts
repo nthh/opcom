@@ -104,9 +104,12 @@ export class Executor {
     };
     const onStateChange = ({ sessionId, newState }: { sessionId: string; oldState: AgentState; newState: AgentState }) => {
       if (newState === "error") {
+        // Log but don't fail — error state is often transient (e.g., stall detection
+        // warning). The agent may recover and continue producing output. Only
+        // agent_end / session stopped should trigger step completion.
         const ticketId = this.sessionToStep.get(sessionId);
         if (ticketId) {
-          this.pushEvent({ type: "agent_failed", sessionId, ticketId, error: "Agent entered error state" });
+          log.warn("agent entered error state (non-fatal)", { sessionId, ticketId });
         }
       }
     };

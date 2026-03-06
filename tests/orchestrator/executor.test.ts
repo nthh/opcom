@@ -79,13 +79,23 @@ class MockSessionManager {
     this.emit("session_stopped", session);
   }
 
-  // Simulate an agent error
+  // Simulate an agent error — emits state_change then session_stopped
   simulateError(sessionId: string): void {
     this.emit("state_change", {
       sessionId,
       oldState: "streaming" as AgentState,
       newState: "error" as AgentState,
     });
+    // Error state is non-fatal; the agent stops shortly after
+    const session: AgentSession = {
+      id: sessionId,
+      backend: "claude-code",
+      projectId: "test",
+      state: "stopped",
+      startedAt: new Date().toISOString(),
+      stoppedAt: new Date().toISOString(),
+    };
+    this.emit("session_stopped", session);
   }
 }
 
