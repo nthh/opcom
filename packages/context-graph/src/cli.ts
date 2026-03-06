@@ -18,6 +18,7 @@ import { writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { createBuilder, GraphDatabase } from "./index.js";
 import { parseTestResults, detectFramework, type Framework } from "./parsers/index.js";
+import { DriftEngine, type DriftSignalType, type TestType } from "./core/drift.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -33,7 +34,12 @@ Commands:
   replay [path] [--since Nm]  Replay commit history (N = months)
   stats [path]                Show graph statistics
   query <sql> [path]          Run SQL query against the graph
-  drift [path]                Detect spec/test/code drift
+  drift [path] [options]      Detect spec/test/code drift
+    --json                    Output as JSON (for LLM consumption)
+    --type <type>             Filter by signal type
+    --min-severity <N>        Only show signals with severity >= N
+    --test-type <unit|e2e|api>  Filter by test type
+    --context                 Attach source/spec/test content
   search <term> [path]        Full-text search across entities
   ingest <file> [path]        Ingest test results (pytest/vitest/junit)
   churn [path] [--since Nd]   Files ranked by change frequency
@@ -64,7 +70,7 @@ Output: ~/.context/<project>/graph.db
       cmdQuery();
       break;
     case "drift":
-      cmdDrift();
+      await cmdDrift();
       break;
     case "search":
       cmdSearch();
@@ -192,7 +198,7 @@ function cmdQuery(): void {
   db.close();
 }
 
-function cmdDrift(): void {
+async function cmdDrift(): Promise<void> {
   const path = getProjectPath();
   const name = getProjectName(path);
   const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
@@ -202,42 +208,49 @@ function cmdDrift(): void {
     process.exit(1);
   }
 
+  // Parse flags
+  const jsonOutput = args.includes("--json");
+  const typeIdx = args.indexOf("--type");
+  const typeFilter = typeIdx >= 0 ? (args[typeIdx + 1] as DriftSignalType) : undefined;
+  const minSevIdx = args.indexOf("--min-severity");
+  const minSeverity = minSevIdx >= 0 ? parseFloat(args[minSevIdx + 1]) : undefined;
+  const testTypeIdx = args.indexOf("--test-type");
+  const testTypeFilter = testTypeIdx >= 0 ? (args[testTypeIdx + 1] as TestType) : undefined;
+  const attachContext = args.includes("--context");
+
   const db = GraphDatabase.open(dbPath);
+  const engine = new DriftEngine(db, {
+    type: typeFilter,
+    testType: testTypeFilter,
+    minSeverity,
+    attachContext,
+    projectPath: path,
+  });
 
-  // Specs without test coverage
-  const uncoveredSpecs = db.query(`
-    SELECT id, title FROM nodes WHERE type = 'spec'
-    AND id NOT IN (SELECT target FROM edges WHERE relation = 'asserts')
-    AND id NOT IN (SELECT target FROM edges WHERE relation = 'implements' AND source LIKE 'ticket:%')
-  `);
+  const signals = await engine.detect();
 
-  // Files without tests
-  const untestedFiles = db.query(`
-    SELECT path FROM nodes WHERE type = 'file'
-    AND path NOT LIKE '%/__init__.py'
-    AND path NOT LIKE '%/index.ts'
-    AND id NOT IN (SELECT target FROM edges WHERE relation = 'tests')
-  `);
+  if (jsonOutput) {
+    console.log(JSON.stringify(signals, null, 2));
+  } else {
+    if (signals.length === 0) {
+      console.log("No drift signals detected.");
+    } else {
+      console.log(`DRIFT SIGNALS (${signals.length})`);
+      console.log(`${"severity".padStart(9)}  ${"type".padEnd(20)}  ${"test".padEnd(6)}  ${"action".padEnd(12)}  subject`);
+      console.log(`${"--------".padStart(9)}  ${"----".padEnd(20)}  ${"----".padEnd(6)}  ${"------".padEnd(12)}  -------`);
 
-  if (uncoveredSpecs.rows.length > 0) {
-    console.log(`SPECS WITHOUT COVERAGE (${uncoveredSpecs.rows.length})`);
-    for (const row of uncoveredSpecs.rows) {
-      console.log(`  ${row[1]} (${row[0]})`);
+      for (const s of signals) {
+        const sev = s.severity.toFixed(2).padStart(9);
+        const type = s.type.padEnd(20);
+        const test = s.testType.padEnd(6);
+        const action = s.action.padEnd(12);
+        const subject = s.subject.title ?? s.subject.path ?? s.subject.nodeId;
+        console.log(`${sev}  ${type}  ${test}  ${action}  ${subject}`);
+      }
     }
+    console.log(`\nTotal: ${signals.length} drift signals`);
   }
 
-  if (untestedFiles.rows.length > 0) {
-    console.log(`\nUNTESTED FILES (${untestedFiles.rows.length})`);
-    for (const row of untestedFiles.rows.slice(0, 30)) {
-      console.log(`  ${row[0]}`);
-    }
-    if (untestedFiles.rows.length > 30) {
-      console.log(`  ... and ${untestedFiles.rows.length - 30} more`);
-    }
-  }
-
-  const total = uncoveredSpecs.rows.length + untestedFiles.rows.length;
-  console.log(`\nTotal drift signals: ${total}`);
   db.close();
 }
 
