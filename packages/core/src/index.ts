@@ -220,7 +220,7 @@ export type { TicketSet } from "./orchestrator/planner.js";
 export { Executor, updateTicketStatus } from "./orchestrator/executor.js";
 export { WorktreeManager } from "./orchestrator/worktree.js";
 export type { WorktreeInfo, MergeResult, ExecResult } from "./orchestrator/worktree.js";
-export { commitStepChanges } from "./orchestrator/git-ops.js";
+export { commitStepChanges, captureChangeset, getTicketDiff, parseNumstat } from "./orchestrator/git-ops.js";
 export { reconcilePlans } from "./orchestrator/reconcile.js";
 export { checkHygiene } from "./orchestrator/hygiene.js";
 export type { HygieneOptions } from "./orchestrator/hygiene.js";

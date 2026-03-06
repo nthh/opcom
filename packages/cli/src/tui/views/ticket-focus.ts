@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkItem, ProjectConfig } from "@opcom/types";
+import type { WorkItem, ProjectConfig, Changeset } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -21,6 +21,7 @@ export interface TicketFocusState {
   projectConfig: ProjectConfig | null;
   specContent: string | null;
   ticketContent: string | null;
+  changesets: Changeset[] | null;
   scrollOffset: number;
   displayLines: string[];
   wrapWidth: number;
@@ -33,6 +34,7 @@ export function createTicketFocusState(ticket: WorkItem, projectConfig: ProjectC
     projectConfig,
     specContent: null,
     ticketContent: null,
+    changesets: null,
     scrollOffset: 0,
     displayLines: [],
     wrapWidth: 0,
@@ -85,6 +87,16 @@ export async function loadTicketContent(state: TicketFocusState): Promise<void> 
         // Ignore
       }
     }
+  }
+
+  // Load changesets from event store
+  try {
+    const { EventStore } = await import("@opcom/core");
+    const es = new EventStore();
+    state.changesets = es.loadChangesets({ ticketId: ticket.id });
+    es.close();
+  } catch {
+    state.changesets = null;
   }
 
   state.loaded = true;
@@ -158,6 +170,34 @@ function rebuildDisplayLines(state: TicketFocusState, width = 80): void {
     const specLines = state.specContent.split("\n");
     for (const sl of specLines) {
       lines.push(...wrapText(sl, width));
+    }
+  }
+
+  // Changeset section
+  if (state.changesets && state.changesets.length > 0) {
+    lines.push("");
+    lines.push(bold("--- Changes ---"));
+    lines.push("");
+
+    for (const cs of state.changesets) {
+      lines.push(
+        `${dim("Session:")} ${cs.sessionId.slice(0, 10)}..  ` +
+        `${dim("Time:")} ${cs.timestamp}`,
+      );
+      lines.push(
+        `${dim("Commits:")} ${cs.commitShas.length}  ` +
+        `${dim("Total:")} +${cs.totalInsertions}/-${cs.totalDeletions}`,
+      );
+      lines.push("");
+
+      for (const f of cs.files) {
+        const icon = f.status === "added" ? "+" : f.status === "deleted" ? "-" : f.status === "renamed" ? "R" : "M";
+        const display = f.status === "renamed" && f.oldPath
+          ? `${f.oldPath} → ${f.path}`
+          : f.path;
+        lines.push(`  ${icon} ${display}  +${f.insertions}/-${f.deletions}`);
+      }
+      lines.push("");
     }
   }
 
