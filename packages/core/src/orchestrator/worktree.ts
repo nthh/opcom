@@ -465,7 +465,7 @@ export class WorktreeManager {
     if (!existsSync(pkgJson)) return;
 
     try {
-      await execFileAsync("npm", ["install", "--ignore-scripts"], {
+      await execFileAsync("npm", ["install"], {
         cwd: worktreePath,
         timeout: 60000,
       });
