@@ -12,6 +12,7 @@ import {
   clampSelection as clampDashboard,
   getFilteredWorkItems,
   getPanelItemCount as getDashboardItemCount,
+  getPlanStepsInDisplayOrder,
   type DashboardState,
   type DashboardWorkItem,
 } from "./views/dashboard.js";
@@ -651,8 +652,9 @@ export class TuiApp {
       }
     } else if (panel === 1) {
       if (state.planPanel) {
-        // Drill into plan step
-        const step = state.planPanel.plan.steps[selected];
+        // Drill into plan step — use display order (grouped by track) to match rendering
+        const orderedSteps = getPlanStepsInDisplayOrder(state.planPanel.plan);
+        const step = orderedSteps[selected];
         if (step) {
           this.navigateToPlanStep(step, state.planPanel.plan);
         }

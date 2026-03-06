@@ -468,10 +468,30 @@ export function getFilteredWorkItems(state: DashboardState): DashboardWorkItem[]
 export function getPanelItemCount(state: DashboardState, panelIndex: number): number {
   switch (panelIndex) {
     case 0: return state.projects.length;
-    case 1: return getFilteredWorkItems(state).length;
+    case 1:
+      if (state.planPanel) return state.planPanel.plan.steps.length;
+      return getFilteredWorkItems(state).length;
     case 2: return state.agents.length;
     default: return 0;
   }
+}
+
+/**
+ * Get plan steps in display order (grouped by track).
+ * Used by both rendering and drill-down to ensure consistent indexing.
+ */
+export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
+  const tracks = new Map<string, PlanStep[]>();
+  for (const step of plan.steps) {
+    const track = step.track ?? "unassigned";
+    if (!tracks.has(track)) tracks.set(track, []);
+    tracks.get(track)!.push(step);
+  }
+  const ordered: PlanStep[] = [];
+  for (const steps of tracks.values()) {
+    ordered.push(...steps);
+  }
+  return ordered;
 }
 
 export function clampSelection(state: DashboardState): void {
