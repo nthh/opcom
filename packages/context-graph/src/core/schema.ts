@@ -55,8 +55,37 @@ CREATE INDEX IF NOT EXISTS idx_edges_source ON edges(source);
 CREATE INDEX IF NOT EXISTS idx_edges_target ON edges(target);
 CREATE INDEX IF NOT EXISTS idx_edges_relation ON edges(relation);
 CREATE INDEX IF NOT EXISTS idx_nodes_type ON nodes(type);
+CREATE TABLE IF NOT EXISTS test_results (
+    test_id     TEXT NOT NULL,
+    commit_hash TEXT NOT NULL,
+    run_id      TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    duration_ms INTEGER,
+    error_msg   TEXT,
+    timestamp   TEXT NOT NULL,
+    PRIMARY KEY (test_id, commit_hash, run_id)
+);
+
+CREATE TABLE IF NOT EXISTS run_summary (
+    run_id      TEXT PRIMARY KEY,
+    commit_hash TEXT NOT NULL,
+    timestamp   TEXT NOT NULL,
+    framework   TEXT,
+    total       INTEGER,
+    passed      INTEGER,
+    failed      INTEGER,
+    skipped     INTEGER,
+    duration_ms INTEGER,
+    meta        TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_file_history_path ON file_history(file_path);
 CREATE INDEX IF NOT EXISTS idx_file_history_commit ON file_history(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_test_results_test ON test_results(test_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_commit ON test_results(commit_hash);
+CREATE INDEX IF NOT EXISTS idx_test_results_run ON test_results(run_id);
+CREATE INDEX IF NOT EXISTS idx_test_results_status ON test_results(status);
+CREATE INDEX IF NOT EXISTS idx_run_summary_commit ON run_summary(commit_hash);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(id, title, path, content=nodes, content_rowid=rowid);
 
@@ -120,4 +149,36 @@ export interface GraphEdge {
   meta?: Record<string, unknown>;
   firstSeen?: string;
   lastSeen?: string;
+}
+
+/** A single test result from a CI or local run. */
+export interface TestResult {
+  testId: string;
+  commitHash: string;
+  runId: string;
+  status: "pass" | "fail" | "skip" | "error";
+  durationMs?: number;
+  errorMsg?: string;
+  timestamp: string;
+}
+
+/** Summary of an entire test run. */
+export interface RunSummary {
+  runId: string;
+  commitHash: string;
+  timestamp: string;
+  framework?: string;
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  durationMs?: number;
+  meta?: Record<string, unknown>;
+}
+
+/** Normalized output from a test result parser. */
+export interface ParsedTestRun {
+  framework: string;
+  results: TestResult[];
+  summary: Omit<RunSummary, "runId" | "commitHash" | "timestamp">;
 }

@@ -1,7 +1,7 @@
 // Core
 export { GraphDatabase } from "./core/database.js";
 export { GraphBuilder } from "./core/builder.js";
-export { SCHEMA, type GraphNode, type GraphEdge, type NodeType, type EdgeRelation } from "./core/schema.js";
+export { SCHEMA, type GraphNode, type GraphEdge, type NodeType, type EdgeRelation, type TestResult, type RunSummary, type ParsedTestRun } from "./core/schema.js";
 export { type Analyzer, type AnalyzerContext, type AnalyzerResult } from "./core/analyzer.js";
 
 // Analyzers
@@ -9,6 +9,9 @@ export { TypeScriptImportAnalyzer } from "./analyzers/typescript-imports.js";
 export { PythonImportAnalyzer } from "./analyzers/python-imports.js";
 export { MarkdownDocAnalyzer } from "./analyzers/markdown-docs.js";
 export { TicketAnalyzer } from "./analyzers/tickets.js";
+
+// Parsers
+export { parseTestResults, detectFramework, parsePytest, parseVitest, parseJunit, type Framework } from "./parsers/index.js";
 
 // Utility
 export { minimatch } from "./util/minimatch.js";
