@@ -60,9 +60,9 @@ export class Station {
   private executors = new Map<string, Executor>(); // planId → running Executor
   private cicdPoller: CICDPoller | null = null;
   private port: number;
-  private options?: { skipCICD?: boolean };
+  private options?: { skipCICD?: boolean; skipReconcile?: boolean };
 
-  constructor(port = 4700, options?: { skipCICD?: boolean }) {
+  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean }) {
     this.port = port;
     this.options = options;
   }
@@ -77,10 +77,12 @@ export class Station {
     await this.sessionManager.init({ eventStore: this.eventStore ?? undefined });
 
     // Reconcile stale plans from previous runs
-    const allSessions = await this.sessionManager.loadAllPersistedSessions();
-    const reconciled = await reconcilePlans(allSessions);
-    if (reconciled > 0) {
-      console.log(`  Reconciled ${reconciled} stale plan(s) from previous run`);
+    if (!this.options?.skipReconcile) {
+      const allSessions = await this.sessionManager.loadAllPersistedSessions();
+      const reconciled = await reconcilePlans(allSessions);
+      if (reconciled > 0) {
+        console.log(`  Reconciled ${reconciled} stale plan(s) from previous run`);
+      }
     }
 
     // Load project statuses

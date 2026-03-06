@@ -21,7 +21,7 @@ describe("Station HTTP API", () => {
 
   beforeAll(async () => {
     port = 14700 + Math.floor(Math.random() * 1000);
-    station = new Station(port, { skipCICD: true });
+    station = new Station(port, { skipCICD: true, skipReconcile: true });
     await station.start();
   }, 10000);
 

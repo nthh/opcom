@@ -58,12 +58,27 @@ export async function reconcilePlans(allSessions: AgentSession[]): Promise<numbe
             // Check if the agent left commits on its branch
             const hasWork = await wm.hasCommits(step.ticketId);
 
-            if (hasWork) {
+            // Check for uncommitted changes too — agents may write files without committing
+            let hasUncommitted = false;
+            if (!hasWork && step.worktreePath) {
+              try {
+                const { stdout } = await execFileAsync(
+                  "git", ["status", "--porcelain"], { cwd: step.worktreePath },
+                );
+                hasUncommitted = stdout.trim().length > 0;
+              } catch {
+                // Worktree may be gone already
+              }
+            }
+
+            if (hasWork || hasUncommitted) {
               // Don't auto-merge — leave the step for the executor to handle
               // with proper verification. Just mark it so the user knows there's
               // work to review.
               step.status = "ready";
-              step.error = "Reconciled: agent has commits, awaiting verification + merge";
+              step.error = hasWork
+                ? "Reconciled: agent has commits, awaiting verification + merge"
+                : "Reconciled: agent has uncommitted changes, awaiting review";
               step.agentSessionId = undefined;
               log.info("reconciled worktree step as ready for re-run", { ticketId: step.ticketId, planId: plan.id });
             } else {
