@@ -15,6 +15,8 @@ import { runTriage } from "./commands/triage.js";
 import { runOracle } from "./commands/oracle.js";
 import { runScheduleList, runScheduleAdd, runScheduleRemove } from "./commands/schedule.js";
 import { runAnalytics } from "./commands/analytics.js";
+import { runChanges } from "./commands/changes.js";
+import { runDiff } from "./commands/diff.js";
 import { runCI } from "./commands/ci.js";
 import { runSettingsList, runSettingsGet, runSettingsSet, runSettingsReset } from "./commands/settings.js";
 import {
@@ -170,6 +172,31 @@ async function main(): Promise<void> {
       return runAnalytics(sub, analyticsOpts);
     }
 
+    case "changes": {
+      if (!args[1]) {
+        console.error("  Usage: opcom changes <ticket-id> [--session <id>] [--project <id>]");
+        process.exit(1);
+      }
+      const changesOpts: { session?: string; project?: string } = {};
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === "--session" && args[i + 1]) { changesOpts.session = args[++i]; }
+        else if (args[i] === "--project" && args[i + 1]) { changesOpts.project = args[++i]; }
+      }
+      return runChanges(args[1], changesOpts);
+    }
+
+    case "diff": {
+      if (!args[1]) {
+        console.error("  Usage: opcom diff <ticket-id> [--session <id>]");
+        process.exit(1);
+      }
+      const diffOpts: { session?: string } = {};
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === "--session" && args[i + 1]) { diffOpts.session = args[++i]; }
+      }
+      return runDiff(args[1], diffOpts);
+    }
+
     case "plan": {
       const subcommand = args[1];
       switch (subcommand) {
@@ -307,6 +334,8 @@ function printHelp(): void {
     briefing [--since DATE] [--project NAME]  Generate activity briefing
     triage                       Recommend next actions based on workspace state
     oracle <session-id>          Verify agent work against acceptance criteria
+    changes <ticket-id>             Show file changes for a ticket
+    diff <ticket-id>                Show unified diff for a ticket's changes
     analytics tools [--project X]    Tool usage frequency + success rates
     analytics sessions [--project X] Session durations and event counts
     analytics daily [--project X] [--days N] Daily activity summary

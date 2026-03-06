@@ -696,6 +696,20 @@ export class Station {
         this.sendToClient(ws, { type: "hygiene_report", report });
         break;
       }
+
+      case "get_changesets": {
+        if (this.eventStore) {
+          const changesets = this.eventStore.loadChangesets({
+            ticketId: command.ticketId,
+            sessionId: command.sessionId,
+            projectId: command.projectId,
+          });
+          this.sendToClient(ws, { type: "changesets", changesets });
+        } else {
+          this.sendToClient(ws, { type: "changesets", changesets: [] });
+        }
+        break;
+      }
     }
   }
 

@@ -24,7 +24,9 @@ export type ClientCommand =
   | { type: "resume_plan"; planId: string }
   | { type: "skip_step"; planId: string; ticketId: string }
   | { type: "inject_context"; planId: string; text: string }
-  | { type: "run_hygiene" };
+  | { type: "run_hygiene" }
+  // Changeset queries
+  | { type: "get_changesets"; ticketId?: string; sessionId?: string; projectId?: string };
 
 // --- WebSocket: Server → Client ---
 
@@ -72,7 +74,10 @@ export type ServerEvent =
   // Environment events
   | { type: "service_status"; projectId: string; service: ServiceInstance }
   | { type: "port_conflict"; projectId: string; serviceName: string; port: number; conflictsWith: PortAllocation }
-  | { type: "environment_status"; projectId: string; status: EnvironmentStatus };
+  | { type: "environment_status"; projectId: string; status: EnvironmentStatus }
+
+  // Changeset responses
+  | { type: "changesets"; changesets: import("./changeset.js").Changeset[] };
 
 export interface ProjectStatusSnapshot {
   id: string;
