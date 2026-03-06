@@ -403,8 +403,24 @@ export class WorktreeManager {
           // Branch doesn't exist or other error — safe to clean up
         }
 
-        // Check for lock file — if the agent process is still alive, skip
+        // Check for uncommitted changes (edits the agent wrote but never committed)
         const worktreePath = join(worktreeBase, entry);
+        try {
+          const { stdout } = await execFileAsync(
+            "git", ["status", "--porcelain"], { cwd: worktreePath },
+          );
+          // Filter out the opcom lock file — it's internal, not agent work
+          const realChanges = stdout.trim().split("\n")
+            .filter((l) => l.length > 0 && !l.endsWith(LOCK_FILE));
+          if (realChanges.length > 0) {
+            log.info("skipping worktree with uncommitted changes", { entry });
+            continue;
+          }
+        } catch {
+          // Can't check status — fall through to other checks
+        }
+
+        // Check for lock file — if the agent process is still alive, skip
         const lockPath = join(worktreePath, LOCK_FILE);
         if (existsSync(lockPath)) {
           try {

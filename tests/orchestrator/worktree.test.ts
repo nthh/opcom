@@ -249,6 +249,21 @@ describe("WorktreeManager", () => {
       await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
       await exec("git", ["branch", "-D", "work/has-work"], { cwd: tmpDir });
     });
+
+    it("preserves worktrees with uncommitted changes", async () => {
+      // Create a worktree and write files without committing (simulating agent that edited but didn't commit)
+      const wtPath = join(tmpDir, ".opcom/worktrees/uncommitted-work");
+      await exec("git", ["worktree", "add", wtPath, "-b", "work/uncommitted-work"], { cwd: tmpDir });
+      await writeFile(join(wtPath, "agent-output.ts"), "export const x = 1;", "utf-8");
+
+      const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
+      expect(cleaned).not.toContain("uncommitted-work");
+      expect(existsSync(wtPath)).toBe(true);
+
+      // Clean up
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "work/uncommitted-work"], { cwd: tmpDir });
+    });
   });
 
   describe("lock file", () => {
