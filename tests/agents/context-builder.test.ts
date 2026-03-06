@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt } from "@opcom/core";
-import type { ProjectConfig, WorkItem } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ResolvedRoleConfig } from "@opcom/types";
 
 function makeProject(overrides?: Partial<ProjectConfig>): ProjectConfig {
   return {
@@ -121,6 +121,65 @@ describe("contextPacketToMarkdown", () => {
 
     expect(md).toContain("# Project: test-project");
     expect(md).not.toContain("## Task");
+  });
+
+  it("injects role instructions when roleConfig provided", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const roleConfig: ResolvedRoleConfig = {
+      roleId: "reviewer",
+      name: "Reviewer",
+      permissionMode: "default",
+      allowedTools: [],
+      disallowedTools: ["Edit", "Write"],
+      allowedBashPatterns: [],
+      instructions: "- Review code for correctness.\n- Do NOT modify any files.",
+      doneCriteria: "Review report written to stdout.",
+      runTests: false,
+      runOracle: false,
+    };
+
+    const md = contextPacketToMarkdown(packet, roleConfig);
+
+    expect(md).toContain("## Role: Reviewer");
+    expect(md).toContain("Review code for correctness");
+    expect(md).toContain("Do NOT modify any files");
+    expect(md).toContain("## Done Criteria");
+    expect(md).toContain("Review report written to stdout");
+    // Should NOT contain the default engineer instructions
+    expect(md).not.toContain("All changes MUST include tests");
+  });
+
+  it("uses default requirements when no roleConfig provided", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("All changes MUST include tests");
+    expect(md).not.toContain("## Role:");
+    expect(md).not.toContain("## Done Criteria");
+  });
+
+  it("always includes git stash warning even with role instructions", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const roleConfig: ResolvedRoleConfig = {
+      roleId: "qa",
+      name: "QA Tester",
+      permissionMode: "acceptEdits",
+      allowedTools: [],
+      disallowedTools: [],
+      allowedBashPatterns: [],
+      instructions: "- Write tests only.",
+      doneCriteria: "Tests passing.",
+      runTests: true,
+      runOracle: false,
+    };
+
+    const md = contextPacketToMarkdown(packet, roleConfig);
+
+    expect(md).toContain("git stash");
+    expect(md).toContain("Write tests only");
   });
 });
 

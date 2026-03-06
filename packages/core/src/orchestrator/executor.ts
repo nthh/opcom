@@ -17,13 +17,14 @@ import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
 import { recomputePlan } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
-import { buildContextPacket } from "../agents/context-builder.js";
+import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges, captureChangeset } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
 import { collectOracleInputs, runOracle } from "../skills/oracle.js";
+import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("executor");
@@ -61,6 +62,7 @@ export class Executor {
   private running = false;
   private sessionToStep = new Map<string, string>(); // sessionId → ticketId
   private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
+  private stepVerification = new Map<string, { runTests: boolean; runOracle: boolean }>(); // ticketId → role verification
   private worktreeManager = new WorktreeManager();
 
   constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
@@ -389,7 +391,8 @@ export class Executor {
 
     // Agent has commits — run verification IN the worktree before merging.
     // This prevents bad code from landing on main if tests fail.
-    const verification = await this.runVerification(step, event);
+    const roleVerify = this.stepVerification.get(step.ticketId);
+    const verification = await this.runVerification(step, event, roleVerify);
 
     if (verification && !verification.passed) {
       const reason = `Verification failed: ${verification.failureReasons.join("; ")}`;
@@ -530,8 +533,12 @@ export class Executor {
    * Run verification (test gate + oracle) after merge succeeds.
    * Returns null if both are disabled, a result object otherwise.
    */
-  private async runVerification(step: PlanStep, event: ExecutorEvent): Promise<VerificationResult | null> {
-    const { verification } = this.plan.config;
+  private async runVerification(
+    step: PlanStep,
+    event: ExecutorEvent,
+    roleVerification?: { runTests: boolean; runOracle: boolean },
+  ): Promise<VerificationResult | null> {
+    const verification = roleVerification ?? this.plan.config.verification;
     if (!verification.runTests && !verification.runOracle) return null;
 
     const project = await loadProject(step.projectId);
@@ -578,8 +585,11 @@ export class Executor {
           if (result.testGate) {
             oracleInput.testResults = result.testGate.output;
           }
+          const oracleModel = "oracleModel" in verification
+            ? (verification as { oracleModel?: string }).oracleModel
+            : this.plan.config.verification.oracleModel;
           const oracleResult = await runOracle(oracleInput, (prompt) =>
-            this.llmCall(prompt, verification.oracleModel),
+            this.llmCall(prompt, oracleModel),
           );
           result.oracle = oracleResult;
           if (!oracleResult.passed) {
@@ -832,10 +842,20 @@ export class Executor {
       contextPacket.project.path = wtInfo.worktreePath;
     }
 
-    const allowedTools = deriveAllowedBashTools(
+    // Resolve role config: role definition → stack tools → plan overrides
+    const roleId = step.role ?? workItem?.role ?? "engineer";
+    const roleDef = await loadRole(roleId);
+    const stackBashPatterns = deriveAllowedBashTools(
       { stack: project.stack, testing: project.testing, linting: project.linting },
-      this.plan.config.allowedBashPatterns,
-    );
+    ).map((t) => t.replace(/^Bash\(/, "").replace(/\)$/, ""));
+    const resolved = resolveRoleConfig(roleDef, stackBashPatterns, this.plan.config);
+
+    // Build allowed tools: merge role bash patterns into Bash() format + role allowedTools
+    const allowedBashTools = resolved.allowedBashPatterns.map((p) => `Bash(${p})`);
+    const allowedTools = [...allowedBashTools, ...resolved.allowedTools];
+
+    // Build system prompt with role-aware context
+    const systemPrompt = contextPacketToMarkdown(contextPacket, resolved);
 
     const session = await this.sessionManager.startSession(
       step.projectId,
@@ -846,10 +866,11 @@ export class Executor {
         contextPacket,
         cwd: agentCwd,
         worktree: this.plan.config.worktree,
-        permissionMode: "acceptEdits",
-        disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
+        permissionMode: resolved.permissionMode as "default" | "acceptEdits" | "bypassPermissions" | "plan",
+        disallowedTools: resolved.disallowedTools,
         allowedTools,
         additionalDirs: agentCwd ? [agentCwd] : [project.path],
+        systemPrompt,
       },
       step.ticketId,
     );
@@ -858,6 +879,7 @@ export class Executor {
     step.agentSessionId = session.id;
     step.startedAt = new Date().toISOString();
     this.sessionToStep.set(session.id, step.ticketId);
+    this.stepVerification.set(step.ticketId, { runTests: resolved.runTests, runOracle: resolved.runOracle });
 
     // Write lock file so cleanupOrphaned() won't remove this worktree
     if (this.plan.config.worktree && session.pid) {

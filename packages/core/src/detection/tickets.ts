@@ -86,6 +86,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
       ...(Array.isArray(frontmatter.services) ? { services: frontmatter.services.map(String) } : {}),
       ...(Array.isArray(frontmatter.domains) ? { domains: frontmatter.domains.map(String) } : {}),
     },
+    role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
   };
 }
 

@@ -10,6 +10,7 @@ export interface WorkItem {
   deps: string[];
   links: string[];
   tags: Record<string, string[]>;
+  role?: string;
 }
 
 export interface WorkSummary {
@@ -33,4 +34,5 @@ export interface TicketFrontmatter {
   links?: string[];
   deps?: string[];
   assignee?: string;
+  role?: string;
 }
