@@ -58,6 +58,7 @@ import {
 import {
   renderPlanStepFocus,
   createPlanStepFocusState,
+  toggleTestOutput,
   scrollUp as planStepScrollUp,
   scrollDown as planStepScrollDown,
   scrollToTop as planStepScrollToTop,
@@ -1283,6 +1284,11 @@ export class TuiApp {
         if (state.agent) {
           this.navigateToAgent(state.agent);
         }
+        return;
+
+      case "o":
+        // Toggle test output display
+        toggleTestOutput(state);
         return;
 
       case "t":

@@ -255,7 +255,17 @@ function renderPlanPanel(
     plan.status === "paused" ? "\u25cc" :
     plan.status === "done" ? "\u2713" : "\u25cb";
 
-  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}`;
+  const verifiedCount = plan.steps.filter((s) => s.verification?.passed).length;
+  const failedVerifyCount = plan.steps.filter((s) => s.verification && !s.verification.passed).length;
+  let verifyStr = "";
+  if (verifiedCount > 0 || failedVerifyCount > 0) {
+    const parts: string[] = [];
+    if (verifiedCount > 0) parts.push(color(ANSI.green, `\u2713${verifiedCount}`));
+    if (failedVerifyCount > 0) parts.push(color(ANSI.red, `\u2717${failedVerifyCount}`));
+    verifyStr = ` [${parts.join(" ")}]`;
+  }
+
+  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -299,7 +309,8 @@ function renderPlanPanel(
       const icon = planStepIcon(step.status);
       const sColor = planStatusColor(step.status);
       const statusStr = color(sColor, `${icon} ${step.status}`);
-      const text = `  ${statusStr} ${step.ticketId}`;
+      const verifyBadge = formatStepVerificationBadge(step);
+      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}`;
       const isSelected = line.index === selected && focused;
 
       if (isSelected) {
@@ -309,6 +320,26 @@ function renderPlanPanel(
       }
     }
   }
+}
+
+/** Format a compact verification badge for a plan step in the dashboard list */
+export function formatStepVerificationBadge(step: PlanStep): string {
+  if (!step.verification) return "";
+  const v = step.verification;
+  if (v.passed) {
+    if (v.testGate) {
+      return ` ${color(ANSI.green, `\u2713 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}`;
+    }
+    return ` ${color(ANSI.green, "\u2713 verified")}`;
+  }
+  // Failed
+  if (v.testGate && !v.testGate.passed) {
+    return ` ${color(ANSI.red, `\u2717 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}`;
+  }
+  if (v.oracle && !v.oracle.passed) {
+    return ` ${color(ANSI.red, "\u2717 oracle")}`;
+  }
+  return ` ${color(ANSI.red, "\u2717 verify")}`;
 }
 
 function renderAgentsPanel(
