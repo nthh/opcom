@@ -14,8 +14,10 @@
  */
 
 import { resolve, basename } from "node:path";
-import { writeFileSync, chmodSync, existsSync } from "node:fs";
+import { writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { createBuilder, GraphDatabase } from "./index.js";
+import { parseTestResults, detectFramework, type Framework } from "./parsers/index.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -33,6 +35,7 @@ Commands:
   query <sql> [path]          Run SQL query against the graph
   drift [path]                Detect spec/test/code drift
   search <term> [path]        Full-text search across entities
+  ingest <file> [path]        Ingest test results (pytest/vitest/junit)
   install-hooks [path]        Install git post-commit/pre-push hooks
 
 [path] defaults to the current directory.
@@ -62,6 +65,9 @@ Output: ~/.context/<project>/graph.db
       break;
     case "search":
       cmdSearch();
+      break;
+    case "ingest":
+      cmdIngest();
       break;
     case "install-hooks":
       cmdInstallHooks();
@@ -250,6 +256,83 @@ function cmdSearch(): void {
       console.log(`  [${node.type}] ${node.title ?? node.id} — ${node.path ?? ""}`);
     }
   }
+  db.close();
+}
+
+function cmdIngest(): void {
+  const file = args[1];
+  if (!file) {
+    console.error("Usage: context-graph ingest <results-file> [path] [--framework pytest|vitest|jest|junit] [--commit <hash>] [--run-id <id>]");
+    process.exit(1);
+  }
+
+  const resultsPath = resolve(file);
+  if (!existsSync(resultsPath)) {
+    console.error(`File not found: ${resultsPath}`);
+    process.exit(1);
+  }
+
+  // Parse flags
+  const frameworkIdx = args.indexOf("--framework");
+  const framework = frameworkIdx >= 0 ? (args[frameworkIdx + 1] as Framework) : undefined;
+  const commitIdx = args.indexOf("--commit");
+  let commitHash = commitIdx >= 0 ? args[commitIdx + 1] : undefined;
+  const runIdIdx = args.indexOf("--run-id");
+  let runId = runIdIdx >= 0 ? args[runIdIdx + 1] : undefined;
+
+  // Find project path (skip flags and file arg)
+  const pathArg = args.slice(2).find((a) => !a.startsWith("-") && args[args.indexOf(a) - 1] !== "--framework" && args[args.indexOf(a) - 1] !== "--commit" && args[args.indexOf(a) - 1] !== "--run-id");
+  const path = resolve(pathArg ?? ".");
+  const name = getProjectName(path);
+
+  // Auto-detect commit hash from git
+  if (!commitHash) {
+    try {
+      commitHash = execSync("git rev-parse HEAD", { cwd: path, encoding: "utf-8" }).trim();
+    } catch {
+      commitHash = "unknown";
+    }
+  }
+
+  // Auto-generate run ID
+  const now = new Date().toISOString();
+  if (!runId) {
+    runId = `${commitHash.slice(0, 8)}-${now.replace(/[:.]/g, "-")}`;
+  }
+
+  // Read and parse
+  const content = readFileSync(resultsPath, "utf-8");
+  const parsed = parseTestResults(content, framework);
+
+  // Open or create database
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+  const db = existsSync(dbPath)
+    ? GraphDatabase.open(dbPath)
+    : new GraphDatabase(name);
+
+  // Fill in commit hash, run ID, and timestamp
+  const results = parsed.results.map((r) => ({
+    ...r,
+    commitHash,
+    runId: runId!,
+    timestamp: now,
+  }));
+
+  const summary = {
+    runId: runId!,
+    commitHash,
+    timestamp: now,
+    ...parsed.summary,
+  };
+
+  // Ingest
+  db.ingestTestRun(results, summary);
+
+  console.log(`Ingested ${results.length} test results from ${parsed.framework}`);
+  console.log(`  Run: ${runId}`);
+  console.log(`  Commit: ${commitHash.slice(0, 8)}`);
+  console.log(`  Passed: ${summary.passed}, Failed: ${summary.failed}, Skipped: ${summary.skipped}`);
+
   db.close();
 }
 

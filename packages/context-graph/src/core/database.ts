@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { SCHEMA, type GraphNode, type GraphEdge } from "./schema.js";
+import { SCHEMA, type GraphNode, type GraphEdge, type TestResult, type RunSummary } from "./schema.js";
 
 export class GraphDatabase {
   private db: Database.Database;
@@ -173,6 +173,177 @@ export class GraphDatabase {
          VALUES (?, ?, ?, ?)`,
       )
       .run(filePath, commitHash, action, oldPath ?? null);
+  }
+
+  // --- Test results ---
+
+  insertTestResult(result: TestResult): void {
+    this.db
+      .prepare(
+        `INSERT INTO test_results (test_id, commit_hash, run_id, status, duration_ms, error_msg, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(test_id, commit_hash, run_id) DO UPDATE SET
+           status = excluded.status,
+           duration_ms = excluded.duration_ms,
+           error_msg = excluded.error_msg,
+           timestamp = excluded.timestamp`,
+      )
+      .run(
+        result.testId,
+        result.commitHash,
+        result.runId,
+        result.status,
+        result.durationMs ?? null,
+        result.errorMsg ?? null,
+        result.timestamp,
+      );
+  }
+
+  insertTestResults(results: TestResult[]): void {
+    const tx = this.db.transaction(() => {
+      for (const result of results) {
+        this.insertTestResult(result);
+      }
+    });
+    tx();
+  }
+
+  insertRunSummary(summary: RunSummary): void {
+    this.db
+      .prepare(
+        `INSERT INTO run_summary (run_id, commit_hash, timestamp, framework, total, passed, failed, skipped, duration_ms, meta)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           commit_hash = excluded.commit_hash,
+           timestamp = excluded.timestamp,
+           framework = excluded.framework,
+           total = excluded.total,
+           passed = excluded.passed,
+           failed = excluded.failed,
+           skipped = excluded.skipped,
+           duration_ms = excluded.duration_ms,
+           meta = excluded.meta`,
+      )
+      .run(
+        summary.runId,
+        summary.commitHash,
+        summary.timestamp,
+        summary.framework ?? null,
+        summary.total,
+        summary.passed,
+        summary.failed,
+        summary.skipped,
+        summary.durationMs ?? null,
+        summary.meta ? JSON.stringify(summary.meta) : null,
+      );
+  }
+
+  /** Ingest a full test run: stores results, summary, and upserts test nodes. */
+  ingestTestRun(results: TestResult[], summary: RunSummary): void {
+    const tx = this.db.transaction(() => {
+      // Insert run summary
+      this.insertRunSummary(summary);
+
+      // Insert individual results and upsert test nodes
+      const now = new Date().toISOString();
+      for (const result of results) {
+        this.insertTestResult(result);
+
+        // Upsert a test node so it exists in the graph
+        this.upsertNode({
+          id: result.testId,
+          type: "test",
+          title: result.testId.replace(/^test:/, ""),
+          status: result.status,
+          meta: {
+            lastRunId: result.runId,
+            lastDurationMs: result.durationMs,
+          },
+        });
+      }
+    });
+    tx();
+  }
+
+  // --- Test result queries ---
+
+  /** Tests that started failing in a given run but passed in the previous run. */
+  newFailures(runId: string): Array<{ testId: string; errorMsg: string | null }> {
+    const rows = this.db
+      .prepare(
+        `SELECT tr.test_id, tr.error_msg
+         FROM test_results tr
+         WHERE tr.run_id = ? AND tr.status IN ('fail', 'error')
+         AND tr.test_id NOT IN (
+           SELECT test_id FROM test_results
+           WHERE run_id = (
+             SELECT run_id FROM run_summary
+             WHERE timestamp < (SELECT timestamp FROM run_summary WHERE run_id = ?)
+             ORDER BY timestamp DESC LIMIT 1
+           ) AND status IN ('fail', 'error')
+         )`,
+      )
+      .all(runId, runId) as Array<{ test_id: string; error_msg: string | null }>;
+    return rows.map((r) => ({ testId: r.test_id, errorMsg: r.error_msg }));
+  }
+
+  /** Tests with both pass and fail in recent runs (within last N days, default 7). */
+  flakyTests(days = 7): Array<{ testId: string; passCount: number; failCount: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT test_id,
+                SUM(CASE WHEN status = 'pass' THEN 1 ELSE 0 END) as pass_count,
+                SUM(CASE WHEN status IN ('fail', 'error') THEN 1 ELSE 0 END) as fail_count
+         FROM test_results
+         WHERE timestamp > datetime('now', ?)
+         GROUP BY test_id
+         HAVING pass_count > 0 AND fail_count > 0
+         ORDER BY fail_count DESC`,
+      )
+      .all(`-${days} days`) as Array<{ test_id: string; pass_count: number; fail_count: number }>;
+
+    return rows.map((r) => ({
+      testId: r.test_id,
+      passCount: r.pass_count,
+      failCount: r.fail_count,
+    }));
+  }
+
+  /** Slowest tests by average duration. */
+  slowestTests(limit = 20): Array<{ testId: string; avgMs: number; maxMs: number; runs: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT test_id,
+                AVG(duration_ms) as avg_ms,
+                MAX(duration_ms) as max_ms,
+                COUNT(*) as runs
+         FROM test_results
+         WHERE duration_ms IS NOT NULL
+         GROUP BY test_id
+         ORDER BY avg_ms DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{ test_id: string; avg_ms: number; max_ms: number; runs: number }>;
+
+    return rows.map((r) => ({
+      testId: r.test_id,
+      avgMs: Math.round(r.avg_ms),
+      maxMs: r.max_ms,
+      runs: r.runs,
+    }));
+  }
+
+  /** Coverage trend: test pass counts per run. */
+  coverageTrend(limit = 20): Array<{ runId: string; timestamp: string; total: number; passed: number; failed: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT run_id, timestamp, total, passed, failed
+         FROM run_summary
+         ORDER BY timestamp DESC
+         LIMIT ?`,
+      )
+      .all(limit) as Array<{ run_id: string; timestamp: string; total: number; passed: number; failed: number }>;
+    return rows.map((r) => ({ runId: r.run_id, timestamp: r.timestamp, total: r.total, passed: r.passed, failed: r.failed }));
   }
 
   // --- Stats ---
