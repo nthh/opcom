@@ -59,33 +59,20 @@ export async function reconcilePlans(allSessions: AgentSession[]): Promise<numbe
             const hasWork = await wm.hasCommits(step.ticketId);
 
             if (hasWork) {
-              // Try to merge
-              const result = await wm.merge(step.ticketId);
-              if (result.merged) {
-                step.status = "done";
-                step.completedAt = new Date().toISOString();
-                step.error = "Reconciled: merged worktree branch after agent crash";
-                log.info("reconciled worktree step as done", { ticketId: step.ticketId, planId: plan.id });
-              } else if (result.conflict) {
-                step.status = "needs-rebase";
-                step.completedAt = new Date().toISOString();
-                step.error = "Reconciled: worktree branch has merge conflicts";
-                log.info("reconciled worktree step as needs-rebase", { ticketId: step.ticketId, planId: plan.id });
-              } else {
-                step.status = "failed";
-                step.completedAt = new Date().toISOString();
-                step.error = `Reconciled: worktree merge failed: ${result.error}`;
-                log.info("reconciled worktree step as failed", { ticketId: step.ticketId, planId: plan.id });
-              }
+              // Don't auto-merge — leave the step for the executor to handle
+              // with proper verification. Just mark it so the user knows there's
+              // work to review.
+              step.status = "ready";
+              step.error = "Reconciled: agent has commits, awaiting verification + merge";
+              step.agentSessionId = undefined;
+              log.info("reconciled worktree step as ready for re-run", { ticketId: step.ticketId, planId: plan.id });
             } else {
               step.status = "failed";
               step.completedAt = new Date().toISOString();
               step.error = "Reconciled: agent exited without commits in worktree";
               log.info("reconciled worktree step as failed", { ticketId: step.ticketId, planId: plan.id });
-            }
 
-            // Clean up worktree (unless needs-rebase, keep it for manual resolution)
-            if (step.status !== "needs-rebase") {
+              // Only remove worktree if truly empty
               await wm.remove(step.ticketId).catch(() => {});
               step.worktreePath = undefined;
               step.worktreeBranch = undefined;
