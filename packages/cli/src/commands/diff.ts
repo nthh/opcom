@@ -34,12 +34,11 @@ export async function runDiff(ticketId: string, opts: { session?: string }): Pro
     }
 
     // Build diff args from commit SHAs
-    const diffOpts: { commitSha?: string } = {};
+    const diffOpts: { commitSha?: string; commitShas?: string[] } = {};
     if (cs.commitShas.length === 1) {
       diffOpts.commitSha = cs.commitShas[0];
     } else if (cs.commitShas.length > 1) {
-      // For multiple commits, use last commit (commits are in reverse chronological order from git log)
-      diffOpts.commitSha = cs.commitShas[cs.commitShas.length - 1];
+      diffOpts.commitShas = cs.commitShas;
     }
 
     const diff = await getTicketDiff(project.path, diffOpts);

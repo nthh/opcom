@@ -221,7 +221,7 @@ export class Station {
 
     try {
       const body = await readBody(req);
-      const result = await this.routeRequest(method, apiPath, body);
+      const result = await this.routeRequest(method, apiPath, body, url.searchParams);
       res.writeHead(result.status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result.data));
     } catch (err) {
@@ -235,6 +235,7 @@ export class Station {
     method: string,
     path: string,
     body: unknown,
+    searchParams?: URLSearchParams,
   ): Promise<{ status: number; data: unknown }> {
     // GET /health
     if (method === "GET" && path === "/health") {
@@ -511,6 +512,21 @@ export class Station {
         const msg = err instanceof Error ? err.message : "Failed to cancel pipeline";
         return { status: 502, data: { error: msg } };
       }
+    }
+
+    // GET /changesets?ticketId=X&sessionId=Y&projectId=Z
+    if (method === "GET" && path === "/changesets") {
+      if (!this.eventStore) {
+        return { status: 200, data: [] };
+      }
+      const query: import("@opcom/types").ChangesetQuery = {};
+      const ticketId = searchParams?.get("ticketId");
+      const sessionId = searchParams?.get("sessionId");
+      const projectId = searchParams?.get("projectId");
+      if (ticketId) query.ticketId = ticketId;
+      if (sessionId) query.sessionId = sessionId;
+      if (projectId) query.projectId = projectId;
+      return { status: 200, data: this.eventStore.loadChangesets(query) };
     }
 
     return { status: 404, data: { error: "Not found" } };

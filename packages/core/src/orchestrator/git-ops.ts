@@ -127,6 +127,7 @@ export async function getTicketDiff(
     branch?: string;
     baseBranch?: string;
     commitSha?: string;
+    commitShas?: string[]; // for multi-commit range diffs
   },
 ): Promise<string> {
   try {
@@ -135,6 +136,12 @@ export async function getTicketDiff(
     if (opts.branch) {
       const base = opts.baseBranch ?? "HEAD";
       diffArgs = ["diff", `${base}...${opts.branch}`];
+    } else if (opts.commitShas && opts.commitShas.length > 1) {
+      // Multi-commit range: diff from parent of oldest commit to newest
+      // commitShas are in reverse chronological order (newest first) from git log
+      const oldest = opts.commitShas[opts.commitShas.length - 1];
+      const newest = opts.commitShas[0];
+      diffArgs = ["diff", `${oldest}~1`, newest];
     } else if (opts.commitSha) {
       diffArgs = ["diff", `${opts.commitSha}~1`, opts.commitSha];
     } else {
