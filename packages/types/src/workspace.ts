@@ -38,4 +38,5 @@ export interface OpcomSettings {
 export interface GlobalConfig {
   defaultWorkspace: string;
   settings: OpcomSettings;
+  integrations?: import("./integrations.js").IntegrationsConfig;
 }

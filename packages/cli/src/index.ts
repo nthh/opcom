@@ -19,6 +19,7 @@ import { runChanges } from "./commands/changes.js";
 import { runDiff } from "./commands/diff.js";
 import { runCI } from "./commands/ci.js";
 import { runSettingsList, runSettingsGet, runSettingsSet, runSettingsReset } from "./commands/settings.js";
+import { runIntegrationsList, runIntegrationsEnable, runIntegrationsDisable } from "./commands/integrations.js";
 import { runTicketList, runTicketCreate, runTicketShow } from "./commands/ticket.js";
 import {
   runPlanList,
@@ -340,6 +341,33 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "integrations":
+    case "integration": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+        case undefined:
+          return runIntegrationsList();
+        case "enable":
+          if (!args[2]) {
+            console.error("  Usage: opcom integrations enable <id>");
+            process.exit(1);
+          }
+          return runIntegrationsEnable(args[2]);
+        case "disable":
+          if (!args[2]) {
+            console.error("  Usage: opcom integrations disable <id>");
+            process.exit(1);
+          }
+          return runIntegrationsDisable(args[2]);
+        default:
+          console.error("  Usage: opcom integrations [list|enable|disable]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -410,6 +438,9 @@ function printHelp(): void {
     settings get <key>           Get a single setting value
     settings set <key> <value>   Set a setting value
     settings reset [key]         Reset one or all settings to defaults
+    integrations [list]          Show available/active integration modules
+    integrations enable <id>     Enable an integration module
+    integrations disable <id>    Disable an integration module
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help
