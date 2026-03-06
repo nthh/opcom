@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@opcom/types": "*",
+    "@opcom/context-graph": "*",
     "better-sqlite3": "^11.7.0",
     "smol-toml": "^1.3.0",
     "ws": "^8.19.0",

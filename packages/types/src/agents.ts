@@ -117,8 +117,26 @@ export interface ContextPacket {
     remote: string | null;
     clean: boolean;
   };
+  graph?: GraphContext;
   agentConfig?: string;
   memory?: string;
+}
+
+/** Context pulled from the project's knowledge graph. */
+export interface GraphContext {
+  /** Files related to the current work item (via spec/ticket edges). */
+  relatedFiles: string[];
+  /** Test files that cover the related source files. */
+  testFiles: string[];
+  /** Drift signals relevant to the current scope. */
+  driftSignals: DriftSignal[];
+}
+
+export interface DriftSignal {
+  type: "uncovered_spec" | "untested_file" | "new_failure" | "flaky_test";
+  id: string;
+  title?: string;
+  detail?: string;
 }
 
 // --- Message Routing ---
