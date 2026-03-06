@@ -36,6 +36,9 @@ Commands:
   drift [path]                Detect spec/test/code drift
   search <term> [path]        Full-text search across entities
   ingest <file> [path]        Ingest test results (pytest/vitest/junit)
+  churn [path] [--since Nd]   Files ranked by change frequency
+  coupling [path] [--min N]   File pairs that co-change together
+  risk [path] [--since Nd]    Compound risk score (churn × coverage)
   install-hooks [path]        Install git post-commit/pre-push hooks
 
 [path] defaults to the current directory.
@@ -68,6 +71,15 @@ Output: ~/.context/<project>/graph.db
       break;
     case "ingest":
       cmdIngest();
+      break;
+    case "churn":
+      cmdChurn();
+      break;
+    case "coupling":
+      cmdCoupling();
+      break;
+    case "risk":
+      cmdRisk();
       break;
     case "install-hooks":
       cmdInstallHooks();
@@ -332,6 +344,113 @@ function cmdIngest(): void {
   console.log(`  Run: ${runId}`);
   console.log(`  Commit: ${commitHash.slice(0, 8)}`);
   console.log(`  Passed: ${summary.passed}, Failed: ${summary.failed}, Skipped: ${summary.skipped}`);
+
+  db.close();
+}
+
+function cmdChurn(): void {
+  const path = getProjectPath();
+  const name = getProjectName(path);
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+
+  if (!existsSync(dbPath)) {
+    console.error(`No graph found at ${dbPath}. Run 'context-graph build' first.`);
+    process.exit(1);
+  }
+
+  const sinceIdx = args.indexOf("--since");
+  const sinceArg = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
+  const days = sinceArg ? parseInt(sinceArg, 10) : undefined;
+
+  const db = GraphDatabase.open(dbPath);
+  const results = db.churnAnalysis(days);
+
+  if (results.length === 0) {
+    console.log("No churn data. Run 'context-graph replay' first.");
+  } else {
+    console.log(`FILE CHURN${days ? ` (last ${days} days)` : ""}`);
+    console.log(`${"changes".padStart(8)}  ${"coverage".padEnd(10)}  file`);
+    console.log(`${"-------".padStart(8)}  ${"--------".padEnd(10)}  ----`);
+    for (const r of results.slice(0, 50)) {
+      const cov = r.hasCoverage ? "tested" : "UNTESTED";
+      console.log(`${String(r.changes).padStart(8)}  ${cov.padEnd(10)}  ${r.filePath}`);
+    }
+    if (results.length > 50) {
+      console.log(`  ... and ${results.length - 50} more files`);
+    }
+    console.log(`\nTotal: ${results.length} files with changes`);
+  }
+
+  db.close();
+}
+
+function cmdCoupling(): void {
+  const path = getProjectPath();
+  const name = getProjectName(path);
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+
+  if (!existsSync(dbPath)) {
+    console.error(`No graph found at ${dbPath}. Run 'context-graph build' first.`);
+    process.exit(1);
+  }
+
+  const minIdx = args.indexOf("--min");
+  const minArg = minIdx >= 0 ? args[minIdx + 1] : undefined;
+  const minCochanges = minArg ? parseInt(minArg, 10) : 3;
+
+  const db = GraphDatabase.open(dbPath);
+  const results = db.couplingAnalysis(minCochanges);
+
+  if (results.length === 0) {
+    console.log(`No file pairs with >= ${minCochanges} co-changes. Run 'context-graph replay' first.`);
+  } else {
+    console.log(`FILE COUPLING (min ${minCochanges} co-changes)`);
+    console.log(`${"co-changes".padStart(11)}  ${"shared-tests".padEnd(13)}  files`);
+    console.log(`${"----------".padStart(11)}  ${"------------".padEnd(13)}  -----`);
+    for (const r of results.slice(0, 50)) {
+      const shared = r.sharedTests ? "yes" : "NO";
+      console.log(`${String(r.cochanges).padStart(11)}  ${shared.padEnd(13)}  ${r.file1} <-> ${r.file2}`);
+    }
+    if (results.length > 50) {
+      console.log(`  ... and ${results.length - 50} more pairs`);
+    }
+    console.log(`\nTotal: ${results.length} coupled file pairs`);
+  }
+
+  db.close();
+}
+
+function cmdRisk(): void {
+  const path = getProjectPath();
+  const name = getProjectName(path);
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+
+  if (!existsSync(dbPath)) {
+    console.error(`No graph found at ${dbPath}. Run 'context-graph build' first.`);
+    process.exit(1);
+  }
+
+  const sinceIdx = args.indexOf("--since");
+  const sinceArg = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
+  const days = sinceArg ? parseInt(sinceArg, 10) : 90;
+
+  const db = GraphDatabase.open(dbPath);
+  const results = db.riskScore(days);
+
+  if (results.length === 0) {
+    console.log("No risk data. Run 'context-graph replay' first.");
+  } else {
+    console.log(`RISK SCORE (last ${days} days)`);
+    console.log(`${"score".padStart(8)}  ${"changes".padStart(8)}  file`);
+    console.log(`${"-----".padStart(8)}  ${"-------".padStart(8)}  ----`);
+    for (const r of results.slice(0, 30)) {
+      console.log(`${r.riskScore.toFixed(2).padStart(8)}  ${String(r.changes).padStart(8)}  ${r.filePath}`);
+    }
+    if (results.length > 30) {
+      console.log(`  ... and ${results.length - 30} more files`);
+    }
+    console.log(`\nTotal: ${results.length} files scored`);
+  }
 
   db.close();
 }

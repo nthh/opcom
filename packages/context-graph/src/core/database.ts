@@ -346,6 +346,173 @@ export class GraphDatabase {
     return rows.map((r) => ({ runId: r.run_id, timestamp: r.timestamp, total: r.total, passed: r.passed, failed: r.failed }));
   }
 
+  // --- Temporal analysis ---
+
+  /** Files ranked by change frequency. Optionally filtered to last N days. */
+  churnAnalysis(days?: number): Array<{ filePath: string; changes: number; lastChanged: string; hasCoverage: boolean }> {
+    const whereClause = days
+      ? `WHERE cl.timestamp > datetime('now', '-${days} days')`
+      : "";
+    const rows = this.db
+      .prepare(
+        `SELECT fh.file_path,
+                COUNT(DISTINCT fh.commit_hash) as changes,
+                MAX(cl.timestamp) as last_changed
+         FROM file_history fh
+         JOIN commit_log cl ON cl.hash = fh.commit_hash
+         ${whereClause}
+         GROUP BY fh.file_path
+         ORDER BY changes DESC`,
+      )
+      .all() as Array<{ file_path: string; changes: number; last_changed: string }>;
+
+    // Check test coverage for each file
+    const coverageStmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM edges WHERE target = ? AND relation = 'tests'`,
+    );
+
+    return rows.map((r) => {
+      const nodeId = `file:${r.file_path}`;
+      const coverageRow = coverageStmt.get(nodeId) as { c: number } | undefined;
+      return {
+        filePath: r.file_path,
+        changes: r.changes,
+        lastChanged: r.last_changed,
+        hasCoverage: (coverageRow?.c ?? 0) > 0,
+      };
+    });
+  }
+
+  /** File pairs that frequently co-change in the same commit. */
+  couplingAnalysis(minCochanges = 3): Array<{ file1: string; file2: string; cochanges: number; sharedTests: boolean }> {
+    const rows = this.db
+      .prepare(
+        `SELECT a.file_path as file1, b.file_path as file2,
+                COUNT(DISTINCT a.commit_hash) as cochanges
+         FROM file_history a
+         JOIN file_history b ON a.commit_hash = b.commit_hash AND a.file_path < b.file_path
+         GROUP BY a.file_path, b.file_path
+         HAVING cochanges >= ?
+         ORDER BY cochanges DESC`,
+      )
+      .all(minCochanges) as Array<{ file1: string; file2: string; cochanges: number }>;
+
+    // Check if file pairs share any test coverage
+    const testStmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM edges e1
+       JOIN edges e2 ON e1.source = e2.source AND e1.relation = 'tests' AND e2.relation = 'tests'
+       WHERE e1.target = ? AND e2.target = ?`,
+    );
+
+    return rows.map((r) => {
+      const testRow = testStmt.get(`file:${r.file1}`, `file:${r.file2}`) as { c: number } | undefined;
+      return {
+        file1: r.file1,
+        file2: r.file2,
+        cochanges: r.cochanges,
+        sharedTests: (testRow?.c ?? 0) > 0,
+      };
+    });
+  }
+
+  /** Tickets closed per week, extracted from commit messages matching common patterns. */
+  velocityTracking(weeks = 12): Array<{ week: string; ticketsClosed: number; commits: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT strftime('%Y-W%W', timestamp) as week,
+                COUNT(DISTINCT CASE
+                  WHEN message LIKE '%close%#%' OR message LIKE '%closes%#%'
+                    OR message LIKE '%fix%#%' OR message LIKE '%fixes%#%'
+                    OR message LIKE '%resolve%#%' OR message LIKE '%resolves%#%'
+                    OR message LIKE 'close:%' OR message LIKE 'fix:%'
+                  THEN hash END) as tickets_closed,
+                COUNT(*) as commits
+         FROM commit_log
+         WHERE timestamp > datetime('now', ?)
+         GROUP BY week
+         ORDER BY week DESC`,
+      )
+      .all(`-${weeks * 7} days`) as Array<{ week: string; tickets_closed: number; commits: number }>;
+
+    return rows.map((r) => ({
+      week: r.week,
+      ticketsClosed: r.tickets_closed,
+      commits: r.commits,
+    }));
+  }
+
+  /** Specs that lost test coverage between two runs (tests that covered them started failing). */
+  coverageRegression(currentRunId: string, previousRunId: string): Array<{ specId: string; testId: string; status: string }> {
+    const rows = this.db
+      .prepare(
+        `SELECT curr.test_id, curr.status, e.target as spec_id
+         FROM test_results curr
+         JOIN test_results prev ON curr.test_id = prev.test_id
+         JOIN edges e ON e.source = curr.test_id AND e.relation IN ('tests', 'asserts')
+         JOIN nodes n ON n.id = e.target AND n.type IN ('spec', 'file')
+         WHERE curr.run_id = ? AND prev.run_id = ?
+           AND curr.status IN ('fail', 'error')
+           AND prev.status = 'pass'`,
+      )
+      .all(currentRunId, previousRunId) as Array<{ test_id: string; status: string; spec_id: string }>;
+
+    return rows.map((r) => ({
+      specId: r.spec_id,
+      testId: r.test_id,
+      status: r.status,
+    }));
+  }
+
+  /** Compound risk score: high-churn files without test coverage ranked by priority. */
+  riskScore(days = 90): Array<{ filePath: string; changes: number; lastChanged: string; riskScore: number }> {
+    const whereClause = days
+      ? `WHERE cl.timestamp > datetime('now', '-${days} days')`
+      : "";
+    const rows = this.db
+      .prepare(
+        `SELECT fh.file_path,
+                COUNT(DISTINCT fh.commit_hash) as changes,
+                MAX(cl.timestamp) as last_changed
+         FROM file_history fh
+         JOIN commit_log cl ON cl.hash = fh.commit_hash
+         ${whereClause}
+         GROUP BY fh.file_path
+         ORDER BY changes DESC`,
+      )
+      .all() as Array<{ file_path: string; changes: number; last_changed: string }>;
+
+    const coverageStmt = this.db.prepare(
+      `SELECT COUNT(*) as c FROM edges WHERE target = ? AND relation = 'tests'`,
+    );
+
+    const now = Date.now();
+    const results: Array<{ filePath: string; changes: number; lastChanged: string; riskScore: number }> = [];
+
+    for (const r of rows) {
+      const nodeId = `file:${r.file_path}`;
+      const coverageRow = coverageStmt.get(nodeId) as { c: number } | undefined;
+      const hasCoverage = (coverageRow?.c ?? 0) > 0;
+
+      // Risk = churn × coverage_multiplier × recency_multiplier
+      const coverageMultiplier = hasCoverage ? 0.2 : 1.0;
+      const daysSinceChange = Math.max(1, (now - new Date(r.last_changed).getTime()) / (1000 * 60 * 60 * 24));
+      const recencyMultiplier = Math.max(0.1, 1.0 / Math.log2(daysSinceChange + 1));
+      const score = Math.round(r.changes * coverageMultiplier * recencyMultiplier * 100) / 100;
+
+      if (score > 0) {
+        results.push({
+          filePath: r.file_path,
+          changes: r.changes,
+          lastChanged: r.last_changed,
+          riskScore: score,
+        });
+      }
+    }
+
+    results.sort((a, b) => b.riskScore - a.riskScore);
+    return results;
+  }
+
   // --- Stats ---
 
   stats(): { totalNodes: number; totalEdges: number; byType: Record<string, number>; byRelation: Record<string, number> } {
