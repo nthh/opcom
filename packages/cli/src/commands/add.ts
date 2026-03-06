@@ -5,6 +5,7 @@ import {
   loadGlobalConfig,
   loadWorkspace,
   saveWorkspace,
+  buildGraph,
 } from "@opcom/core";
 import type { ProjectConfig, DetectionResult } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
@@ -46,5 +47,15 @@ export async function runAdd(pathArg: string): Promise<void> {
     await saveWorkspace(workspace);
   }
 
-  console.log(`\n  Project "${config.name}" added.\n`);
+  console.log(`\n  Project "${config.name}" added.`);
+
+  // Build context graph in background
+  console.log(`  Building context graph...`);
+  buildGraph(config.name, config.path)
+    .then((stats) => {
+      console.log(`  Graph built: ${stats.totalNodes} nodes, ${stats.totalEdges} edges.\n`);
+    })
+    .catch(() => {
+      console.log(`  Graph build skipped (not a git repo or no analyzable files).\n`);
+    });
 }

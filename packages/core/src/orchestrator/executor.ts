@@ -26,6 +26,7 @@ import { WorktreeManager } from "./worktree.js";
 import { collectOracleInputs, runOracle } from "../skills/oracle.js";
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { createLogger } from "../logger.js";
+import { ingestTestResults } from "../graph/graph-service.js";
 
 const log = createLogger("executor");
 
@@ -568,6 +569,17 @@ export class Executor {
         total: testResult.totalTests,
         failed: testResult.failedTests,
       });
+
+      // Ingest test gate results into the context graph
+      if (testResult.output) {
+        try {
+          const commitHash = await this.getCommitHash(testPath);
+          const runId = `verify-${step.ticketId}-${Date.now()}`;
+          ingestTestResults(project.name, testResult.output, commitHash, runId);
+        } catch {
+          // Graph ingestion is non-fatal
+        }
+      }
     }
 
     // --- Oracle ---
@@ -903,6 +915,15 @@ export class Executor {
       stepTicketId: step.ticketId,
       agentSessionId: session.id,
     });
+  }
+
+  private async getCommitHash(cwd: string): Promise<string> {
+    try {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd });
+      return stdout.trim();
+    } catch {
+      return "unknown";
+    }
   }
 
   private isPlanTerminal(): boolean {

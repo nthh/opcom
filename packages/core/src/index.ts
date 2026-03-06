@@ -217,6 +217,9 @@ export {
 } from "./cloud/index.js";
 export type { WorkersConfig, FirebaseFunctionsConfig } from "./cloud/index.js";
 
+// Context Graph Integration
+export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
+
 // Orchestrator
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";

@@ -31,6 +31,7 @@ import {
   runPlanSkip,
   runPlanHygiene,
 } from "./commands/plan.js";
+import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -277,6 +278,22 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "graph": {
+      const graphSub = args[1];
+      switch (graphSub) {
+        case "build":
+          return runGraphBuild(args[2]);
+        case "stats":
+          return runGraphStats(args[2]);
+        case "drift":
+          return runGraphDrift(args[2]);
+        default:
+          console.error("  Usage: opcom graph <build|stats|drift> [project]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "ci": {
       const ciProject = args[1];
       const ciWatch = args.includes("--watch");
@@ -379,6 +396,9 @@ function printHelp(): void {
     plan context <text> [id]     Add context to plan
     plan skip <ticket> [id]      Skip a step
     plan hygiene                 Run ticket health checks
+    graph build [project]        Build context graph (all projects if none specified)
+    graph stats [project]        Show graph node/edge statistics
+    graph drift [project]        Show drift signals (uncovered specs, untested files, etc.)
     ci [project]                 Show CI/CD pipeline status
     ci <project> --watch         Watch pipeline status live
     schedule list                List scheduled tasks

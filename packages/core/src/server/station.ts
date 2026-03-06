@@ -28,6 +28,7 @@ import { reconcilePlans } from "../orchestrator/reconcile.js";
 import { GitHubActionsAdapter } from "../integrations/github-actions.js";
 import { CICDPoller } from "../integrations/cicd-poller.js";
 import type { ProjectCICDState } from "../integrations/cicd-poller.js";
+import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -284,6 +285,10 @@ export class Station {
       const project = await loadProject(scanMatch[1]);
       if (!project) return { status: 404, data: { error: "Project not found" } };
       const result = await detectProject(project.path);
+
+      // Trigger background graph build after scan
+      this.buildGraphInBackground(project.id, project.name, project.path);
+
       return { status: 200, data: result };
     }
 
@@ -514,6 +519,36 @@ export class Station {
         const msg = err instanceof Error ? err.message : "Failed to cancel pipeline";
         return { status: 502, data: { error: msg } };
       }
+    }
+
+    // --- Context Graph endpoints ---
+
+    // POST /projects/:id/graph/build
+    const graphBuildMatch = path.match(/^\/projects\/([^/]+)\/graph\/build$/);
+    if (method === "POST" && graphBuildMatch) {
+      const project = await loadProject(graphBuildMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      this.buildGraphInBackground(project.id, project.name, project.path);
+      return { status: 202, data: { building: true } };
+    }
+
+    // GET /projects/:id/graph/stats
+    const graphStatsMatch = path.match(/^\/projects\/([^/]+)\/graph\/stats$/);
+    if (method === "GET" && graphStatsMatch) {
+      const project = await loadProject(graphStatsMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const stats = getGraphStats(project.name);
+      if (!stats) return { status: 404, data: { error: "No graph built. Run graph build first." } };
+      return { status: 200, data: stats };
+    }
+
+    // GET /projects/:id/graph/drift
+    const graphDriftMatch = path.match(/^\/projects\/([^/]+)\/graph\/drift$/);
+    if (method === "GET" && graphDriftMatch) {
+      const project = await loadProject(graphDriftMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const signals = queryProjectDrift(project.name);
+      return { status: 200, data: signals };
     }
 
     // GET /changesets?ticketId=X&sessionId=Y&projectId=Z
@@ -786,6 +821,23 @@ export class Station {
   /** Get CI/CD state for a project (used by CLI). */
   getCICDState(projectId: string): ProjectCICDState | undefined {
     return this.cicdPoller?.getState(projectId);
+  }
+
+  /** Build context graph in background and broadcast result. */
+  private buildGraphInBackground(projectId: string, projectName: string, projectPath: string): void {
+    buildGraph(projectName, projectPath)
+      .then((stats) => {
+        this.broadcast({ type: "graph_built", projectId, stats });
+
+        // Also check for drift signals and broadcast them
+        const signals = queryProjectDrift(projectName);
+        if (signals.length > 0) {
+          this.broadcast({ type: "drift_detected", projectId, signals });
+        }
+      })
+      .catch(() => {
+        // Graph build failure is non-fatal — station continues without graph
+      });
   }
 
   private async loadAllTickets(): Promise<TicketSet[]> {

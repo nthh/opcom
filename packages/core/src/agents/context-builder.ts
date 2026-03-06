@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
+import { queryGraphContext } from "../graph/graph-service.js";
 
 export async function buildContextPacket(
   project: ProjectConfig,
@@ -95,6 +96,16 @@ export async function buildContextPacket(
     }
 
     packet.workItem = workItemData;
+
+    // Enrich with context graph data
+    try {
+      const graphCtx = queryGraphContext(project.name, workItem.id, workItem.links);
+      if (graphCtx && (graphCtx.relatedFiles.length > 0 || graphCtx.testFiles.length > 0 || graphCtx.driftSignals.length > 0)) {
+        packet.graph = graphCtx;
+      }
+    } catch {
+      // Graph not available — continue without it
+    }
   }
 
   return packet;
@@ -178,6 +189,36 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
       lines.push(`## Related Tickets`);
       for (const t of packet.workItem.relatedTickets) {
         lines.push(`- ${t.id}: ${t.title} (${t.status})`);
+      }
+      lines.push("");
+    }
+  }
+
+  // Graph context
+  if (packet.graph) {
+    if (packet.graph.relatedFiles.length > 0) {
+      lines.push(`## Related Files`);
+      lines.push(`Files related to this task (from code graph):`);
+      for (const f of packet.graph.relatedFiles) {
+        lines.push(`- ${f}`);
+      }
+      lines.push("");
+    }
+
+    if (packet.graph.testFiles.length > 0) {
+      lines.push(`## Test Coverage`);
+      lines.push(`Tests covering the related files:`);
+      for (const f of packet.graph.testFiles) {
+        lines.push(`- ${f}`);
+      }
+      lines.push("");
+    }
+
+    if (packet.graph.driftSignals.length > 0) {
+      lines.push(`## Drift Signals`);
+      for (const signal of packet.graph.driftSignals) {
+        const label = signal.type.replace(/_/g, " ");
+        lines.push(`- [${label}] ${signal.title ?? signal.id}${signal.detail ? ` — ${signal.detail}` : ""}`);
       }
       lines.push("");
     }

@@ -76,6 +76,10 @@ export type ServerEvent =
   | { type: "port_conflict"; projectId: string; serviceName: string; port: number; conflictsWith: PortAllocation }
   | { type: "environment_status"; projectId: string; status: EnvironmentStatus }
 
+  // Context graph events
+  | { type: "graph_built"; projectId: string; stats: { totalNodes: number; totalEdges: number } }
+  | { type: "drift_detected"; projectId: string; signals: import("./agents.js").DriftSignal[] }
+
   // Changeset responses
   | { type: "changesets"; changesets: import("./changeset.js").Changeset[] };
 
