@@ -106,6 +106,7 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
     project: { name: "test", path: "/tmp", stack: {}, testing: null, linting: [], services: [] },
     git: { branch: "main", remote: null, clean: true },
   })),
+  contextPacketToMarkdown: vi.fn(() => "# Test context"),
 }));
 
 const { mockCommitStepChanges, mockCaptureChangeset, mockScanTickets, mockWriteFile, mockReadFile } = vi.hoisted(() => ({
@@ -119,6 +120,21 @@ const { mockCommitStepChanges, mockCaptureChangeset, mockScanTickets, mockWriteF
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
   commitStepChanges: mockCommitStepChanges,
   captureChangeset: mockCaptureChangeset,
+}));
+
+vi.mock("../../packages/core/src/config/roles.js", () => ({
+  loadRole: vi.fn(async () => ({ id: "engineer", name: "Engineer" })),
+  resolveRoleConfig: vi.fn(() => ({
+    name: "Engineer",
+    permissionMode: "acceptEdits",
+    allowedTools: [],
+    disallowedTools: [],
+    allowedBashPatterns: [],
+    instructions: "",
+    doneCriteria: "",
+    runTests: true,
+    runOracle: false,
+  })),
 }));
 
 // Mock WorktreeManager — use vi.hoisted() so these are available when vi.mock is hoisted

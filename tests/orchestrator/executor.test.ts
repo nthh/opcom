@@ -119,6 +119,7 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
     project: { name: "test", path: "/tmp", stack: {}, testing: null, linting: [], services: [] },
     git: { branch: "main", remote: null, clean: true },
   })),
+  contextPacketToMarkdown: vi.fn(() => "# Test context"),
 }));
 
 const mockCommitStepChanges = vi.fn(async () => true);
@@ -126,6 +127,21 @@ const mockCaptureChangeset = vi.fn(async () => null);
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
   commitStepChanges: (...args: unknown[]) => mockCommitStepChanges(...args),
   captureChangeset: (...args: unknown[]) => mockCaptureChangeset(...args),
+}));
+
+vi.mock("../../packages/core/src/config/roles.js", () => ({
+  loadRole: vi.fn(async () => ({ id: "engineer", name: "Engineer" })),
+  resolveRoleConfig: vi.fn((_roleDef: unknown, stackPatterns: string[], planConfig: Record<string, unknown>) => ({
+    name: "Engineer",
+    permissionMode: "acceptEdits",
+    allowedTools: [],
+    disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
+    allowedBashPatterns: [...(stackPatterns ?? []), ...((planConfig?.allowedBashPatterns as string[]) ?? [])],
+    instructions: "",
+    doneCriteria: "",
+    runTests: true,
+    runOracle: false,
+  })),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {

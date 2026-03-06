@@ -1,7 +1,7 @@
 ---
 id: agent-roles
 title: "Agent roles: per-ticket behavioral profiles for executor agents"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
