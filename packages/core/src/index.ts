@@ -231,8 +231,18 @@ export type { WorkersConfig, FirebaseFunctionsConfig } from "./cloud/index.js";
 export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
 
 // Orchestrator
-export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery } from "./orchestrator/planner.js";
+export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";
+export {
+  writeSubTicket,
+  writeSubTickets,
+  formatTicketFile,
+  assessTicketsForDecomposition,
+  applyDecomposition,
+  hasChildren,
+  getChildTicketIds,
+  isParentComplete,
+} from "./orchestrator/decomposition.js";
 export { Executor, updateTicketStatus } from "./orchestrator/executor.js";
 export { WorktreeManager } from "./orchestrator/worktree.js";
 export type { WorktreeInfo, MergeResult, ExecResult } from "./orchestrator/worktree.js";
