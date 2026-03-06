@@ -13,6 +13,13 @@ export { TicketAnalyzer } from "./analyzers/tickets.js";
 // Utility
 export { minimatch } from "./util/minimatch.js";
 
+// Local imports for createBuilder
+import { GraphBuilder } from "./core/builder.js";
+import { TypeScriptImportAnalyzer } from "./analyzers/typescript-imports.js";
+import { PythonImportAnalyzer } from "./analyzers/python-imports.js";
+import { MarkdownDocAnalyzer } from "./analyzers/markdown-docs.js";
+import { TicketAnalyzer } from "./analyzers/tickets.js";
+
 /**
  * Create a GraphBuilder with all built-in analyzers registered.
  *

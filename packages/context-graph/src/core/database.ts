@@ -29,7 +29,7 @@ export class GraphDatabase {
   static open(dbPath: string): GraphDatabase {
     const instance = Object.create(GraphDatabase.prototype) as GraphDatabase;
     (instance as { dbPath: string }).dbPath = dbPath;
-    (instance as { db: Database.Database }).db = new Database(dbPath);
+    (instance as unknown as { db: Database.Database }).db = new Database(dbPath);
     instance.db.pragma("journal_mode = WAL");
     return instance;
   }
