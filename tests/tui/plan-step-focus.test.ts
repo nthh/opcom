@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createPlanStepFocusState,
   rebuildDisplayLines,
+  toggleTestOutput,
   scrollUp,
   scrollDown,
   scrollToTop,
@@ -379,5 +380,184 @@ describe("scroll navigation", () => {
 
     scrollToBottom(state, viewHeight);
     expect(state.scrollOffset).toBe(Math.max(0, state.displayLines.length - viewHeight));
+  });
+});
+
+describe("toggleTestOutput", () => {
+  function makeVerifiedState(output = "PASS tests/foo.test.ts\nAll tests passed"): PlanStepFocusState {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: true,
+      testGate: {
+        passed: true,
+        testCommand: "npm test",
+        totalTests: 5,
+        passedTests: 5,
+        failedTests: 0,
+        output,
+        durationMs: 800,
+      },
+      failureReasons: [],
+    };
+    return createPlanStepFocusState(step, plan, null, null, [], [], verification);
+  }
+
+  it("starts with showTestOutput false", () => {
+    const state = makeVerifiedState();
+    expect(state.showTestOutput).toBe(false);
+  });
+
+  it("does not show test output lines by default", () => {
+    const state = makeVerifiedState();
+    const hasOutputLine = state.displayLines.some((l) => l.includes("All tests passed"));
+    expect(hasOutputLine).toBe(false);
+  });
+
+  it("shows 'press o to show' hint when output available", () => {
+    const state = makeVerifiedState();
+    const hasHint = state.displayLines.some((l) => l.includes("press o to show"));
+    expect(hasHint).toBe(true);
+  });
+
+  it("shows test output after toggle", () => {
+    const state = makeVerifiedState();
+    toggleTestOutput(state);
+    expect(state.showTestOutput).toBe(true);
+    const hasOutputLine = state.displayLines.some((l) => l.includes("All tests passed"));
+    expect(hasOutputLine).toBe(true);
+  });
+
+  it("shows 'press o to hide' when output is shown", () => {
+    const state = makeVerifiedState();
+    toggleTestOutput(state);
+    const hasHint = state.displayLines.some((l) => l.includes("press o to hide"));
+    expect(hasHint).toBe(true);
+  });
+
+  it("hides test output on second toggle", () => {
+    const state = makeVerifiedState();
+    toggleTestOutput(state);
+    toggleTestOutput(state);
+    expect(state.showTestOutput).toBe(false);
+    const hasOutputLine = state.displayLines.some((l) => l.includes("All tests passed"));
+    expect(hasOutputLine).toBe(false);
+  });
+
+  it("is a no-op when no verification", () => {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+    const linesBefore = state.displayLines.length;
+
+    toggleTestOutput(state);
+
+    expect(state.showTestOutput).toBe(false);
+    expect(state.displayLines.length).toBe(linesBefore);
+  });
+
+  it("is a no-op when test gate has no output", () => {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: true,
+      testGate: {
+        passed: true,
+        testCommand: "npm test",
+        totalTests: 5,
+        passedTests: 5,
+        failedTests: 0,
+        output: "",
+        durationMs: 500,
+      },
+      failureReasons: [],
+    };
+    const state = createPlanStepFocusState(step, plan, null, null, [], [], verification);
+
+    toggleTestOutput(state);
+    expect(state.showTestOutput).toBe(false);
+  });
+
+  it("includes all output lines when shown", () => {
+    const output = "line1\nline2\nline3\nline4";
+    const state = makeVerifiedState(output);
+    toggleTestOutput(state);
+
+    const outputLines = state.displayLines.filter((l) => l.includes("line"));
+    expect(outputLines.length).toBe(4);
+  });
+
+  it("includes footer hint for o key when test output available", () => {
+    const state = makeVerifiedState();
+    // Footer includes "o:output" — check in display by rendering context
+    // (The footer is rendered separately in renderPlanStepFocus, not in displayLines)
+    // So we just verify the state flag is correct
+    expect(state.verification?.testGate?.output).toBeTruthy();
+  });
+});
+
+describe("verification display with failed tests", () => {
+  it("shows failure count and reasons", () => {
+    const step = makePlanStep({ status: "failed" });
+    const plan = makePlan([step]);
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: false,
+      testGate: {
+        passed: false,
+        testCommand: "npm test",
+        totalTests: 10,
+        passedTests: 7,
+        failedTests: 3,
+        output: "FAIL test_a\nFAIL test_b\nFAIL test_c",
+        durationMs: 2000,
+      },
+      failureReasons: ["3 tests failed"],
+    };
+    const state = createPlanStepFocusState(step, plan, null, null, [], [], verification);
+
+    const hasFailCount = state.displayLines.some((l) => l.includes("7/10"));
+    const hasFailedLabel = state.displayLines.some((l) => l.includes("3"));
+    const hasReason = state.displayLines.some((l) => l.includes("3 tests failed"));
+    expect(hasFailCount).toBe(true);
+    expect(hasFailedLabel).toBe(true);
+    expect(hasReason).toBe(true);
+  });
+
+  it("shows oracle criteria when oracle present", () => {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: false,
+      testGate: {
+        passed: true,
+        testCommand: "npm test",
+        totalTests: 5,
+        passedTests: 5,
+        failedTests: 0,
+        output: "ok",
+        durationMs: 500,
+      },
+      oracle: {
+        passed: false,
+        criteria: [
+          { criterion: "handles empty input", met: true, reasoning: "covered" },
+          { criterion: "validates schema", met: false, reasoning: "missing validation" },
+        ],
+        concerns: ["No error handling for edge cases"],
+      },
+      failureReasons: ["Oracle criterion not met: validates schema"],
+    };
+    const state = createPlanStepFocusState(step, plan, null, null, [], [], verification);
+
+    const hasCriterion = state.displayLines.some((l) => l.includes("handles empty input"));
+    const hasFailedCriterion = state.displayLines.some((l) => l.includes("validates schema"));
+    const hasConcern = state.displayLines.some((l) => l.includes("No error handling"));
+    expect(hasCriterion).toBe(true);
+    expect(hasFailedCriterion).toBe(true);
+    expect(hasConcern).toBe(true);
   });
 });

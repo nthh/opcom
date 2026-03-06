@@ -21,6 +21,7 @@ export interface PlanStepFocusState {
   /** Map of blocker ticketId → its current step status (from the plan) */
   blockerStatuses: Map<string, { status: string; ticket: WorkItem | null }>;
   verification: VerificationResult | null;
+  showTestOutput: boolean;
   scrollOffset: number;
   displayLines: string[];
   wrapWidth: number;
@@ -58,6 +59,7 @@ export function createPlanStepFocusState(
     agent: resolvedAgent,
     blockerStatuses,
     verification: verification ?? null,
+    showTestOutput: false,
     scrollOffset: 0,
     displayLines: [],
     wrapWidth: 0,
@@ -117,6 +119,12 @@ function formatDuration(startedAt?: string, completedAt?: string): string {
   if (hours > 0) return `${hours}h${minutes % 60}m`;
   if (minutes > 0) return `${minutes}m${seconds % 60}s`;
   return `${seconds}s`;
+}
+
+export function toggleTestOutput(state: PlanStepFocusState): void {
+  if (!state.verification?.testGate?.output) return;
+  state.showTestOutput = !state.showTestOutput;
+  rebuildDisplayLines(state, state.wrapWidth || 80);
 }
 
 export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void {
@@ -218,6 +226,17 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
       if (!tg.passed) {
         lines.push(`  ${dim("Failed:")} ${tg.failedTests}`);
       }
+      if (tg.output) {
+        if (state.showTestOutput) {
+          lines.push(`  ${dim("Output:")} ${dim("(press o to hide)")}`);
+          const outputLines = tg.output.split("\n");
+          for (const ol of outputLines) {
+            lines.push(`    ${dim(ol)}`);
+          }
+        } else {
+          lines.push(`  ${dim("Output:")} ${dim("(press o to show)")}`);
+        }
+      }
     }
 
     if (verification.oracle) {
@@ -308,7 +327,8 @@ export function renderPlanStepFocus(
   const footerY = panel.y + panel.height - 1;
   const agentKey = state.agent ? "a:agent  " : "";
   const startKey = state.step.status === "ready" ? "w:start agent  " : "";
-  const keys = dim(`j/k:scroll  ${startKey}${agentKey}t:ticket  Esc:back`);
+  const outputKey = state.verification?.testGate?.output ? "o:output  " : "";
+  const keys = dim(`j/k:scroll  ${startKey}${agentKey}${outputKey}t:ticket  Esc:back`);
   buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
 }
 
