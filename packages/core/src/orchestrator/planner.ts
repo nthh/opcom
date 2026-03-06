@@ -123,6 +123,7 @@ export function computePlan(
       projectId,
       status,
       blockedBy,
+      role: ticket.role,
     });
   }
 

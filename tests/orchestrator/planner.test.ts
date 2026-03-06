@@ -90,6 +90,29 @@ describe("computePlan", () => {
     expect(ids).toEqual(["high-pri", "mid-pri", "low-pri"]);
   });
 
+  it("propagates role from ticket to step", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "deploy-infra", role: "devops" }),
+          makeTicket({ id: "review-code", role: "reviewer" }),
+          makeTicket({ id: "write-feature" }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "role-plan");
+
+    const deployStep = plan.steps.find((s) => s.ticketId === "deploy-infra")!;
+    const reviewStep = plan.steps.find((s) => s.ticketId === "review-code")!;
+    const featureStep = plan.steps.find((s) => s.ticketId === "write-feature")!;
+
+    expect(deployStep.role).toBe("devops");
+    expect(reviewStep.role).toBe("reviewer");
+    expect(featureStep.role).toBeUndefined();
+  });
+
   it("filters closed and deferred tickets", () => {
     const tickets: TicketSet[] = [
       {
