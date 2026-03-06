@@ -643,7 +643,7 @@ export class Executor {
         totalTests: total,
         passedTests: passed,
         failedTests: failed,
-        output: output.slice(-5000), // Keep last 5KB
+        output: truncateTestOutput(output),
         durationMs: Date.now() - start,
       };
     } catch (err: unknown) {
@@ -657,7 +657,7 @@ export class Executor {
         totalTests: total,
         passedTests: passed,
         failedTests: failed,
-        output: output.slice(-5000),
+        output: truncateTestOutput(output),
         durationMs: Date.now() - start,
       };
     }
@@ -988,6 +988,15 @@ export class Executor {
  * Parse test runner output for pass/fail counts.
  * Supports vitest, jest, and mocha output formats.
  */
+/**
+ * Keep both the start (where failures are printed) and end (summary) of test output.
+ */
+function truncateTestOutput(output: string, maxSize = 8000): string {
+  if (output.length <= maxSize) return output;
+  const half = Math.floor(maxSize / 2);
+  return output.slice(0, half) + "\n\n… [truncated] …\n\n" + output.slice(-half);
+}
+
 export function parseTestOutput(output: string): { total: number; passed: number; failed: number } {
   // Vitest: "Tests  857 passed (857)" or "Tests  3 failed | 854 passed (857)"
   const vitestMatch = output.match(/Tests\s+(?:(\d+)\s+failed\s+\|\s+)?(\d+)\s+passed\s+\((\d+)\)/);
