@@ -62,6 +62,38 @@ priority: 0
     expect(item!.id).toBe("fallback");
     expect(item!.status).toBe("open");
   });
+
+  it("parses role from frontmatter", () => {
+    const content = `---
+id: deploy-infra
+title: Deploy Infrastructure
+status: open
+type: feature
+priority: 2
+role: devops
+deps: []
+---
+
+# Deploy Infrastructure
+`;
+    const item = parseTicketFile(content, "/path/deploy-infra/README.md", "deploy-infra");
+    expect(item).not.toBeNull();
+    expect(item!.role).toBe("devops");
+  });
+
+  it("role is undefined when not specified", () => {
+    const content = `---
+id: no-role
+title: No Role
+status: open
+deps: []
+---
+
+# No Role
+`;
+    const item = parseTicketFile(content, "/path/no-role/README.md", "no-role");
+    expect(item!.role).toBeUndefined();
+  });
 });
 
 describe("summarizeWorkItems", () => {

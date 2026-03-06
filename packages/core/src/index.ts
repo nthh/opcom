@@ -40,7 +40,10 @@ export {
   workspacePath,
   projectsDir,
   projectPath,
+  rolesDir,
+  rolePath,
 } from "./config/paths.js";
+export { loadRole, resolveRoleConfig, writeBuiltinRoles, BUILTIN_ROLES, parseRoleYaml } from "./config/roles.js";
 
 export { validateGlobalConfig, validateWorkspaceConfig, validateProjectConfig, emptyStack } from "./config/schema.js";
 export {

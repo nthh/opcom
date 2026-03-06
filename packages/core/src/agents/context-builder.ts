@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 
 export async function buildContextPacket(
@@ -100,7 +100,7 @@ export async function buildContextPacket(
   return packet;
 }
 
-export function contextPacketToMarkdown(packet: ContextPacket): string {
+export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: ResolvedRoleConfig): string {
   const lines: string[] = [];
 
   lines.push(`# Project: ${packet.project.name}`);
@@ -183,16 +183,31 @@ export function contextPacketToMarkdown(packet: ContextPacket): string {
     }
   }
 
-  // Requirements
-  lines.push(`## Requirements`);
-  lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
-  if (packet.project.testing) {
-    const cmd = packet.project.testing.command ?? "npm test";
-    lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
+  // Role info
+  if (roleConfig) {
+    lines.push(`## Role: ${roleConfig.name}`);
+    lines.push("");
   }
-  lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
+
+  // Requirements (role instructions replace hardcoded defaults)
+  lines.push(`## Requirements`);
+  if (roleConfig?.instructions) {
+    lines.push(roleConfig.instructions);
+  } else {
+    lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
+    if (packet.project.testing) {
+      const cmd = packet.project.testing.command ?? "npm test";
+      lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
+    }
+    lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
+  }
   lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);
   lines.push(`- Do not mark work as complete if tests are failing.`);
+  if (roleConfig?.doneCriteria) {
+    lines.push("");
+    lines.push(`## Done Criteria`);
+    lines.push(roleConfig.doneCriteria);
+  }
   lines.push("");
 
   // Agent config

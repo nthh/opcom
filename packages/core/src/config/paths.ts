@@ -42,3 +42,11 @@ export function planContextPath(id: string): string {
 export function portsPath(): string {
   return join(opcomRoot(), "ports.yaml");
 }
+
+export function rolesDir(): string {
+  return join(opcomRoot(), "roles");
+}
+
+export function rolePath(id: string): string {
+  return join(rolesDir(), `${id}.yaml`);
+}
