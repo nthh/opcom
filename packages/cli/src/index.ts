@@ -19,6 +19,7 @@ import { runChanges } from "./commands/changes.js";
 import { runDiff } from "./commands/diff.js";
 import { runCI } from "./commands/ci.js";
 import { runSettingsList, runSettingsGet, runSettingsSet, runSettingsReset } from "./commands/settings.js";
+import { runTicketList, runTicketCreate, runTicketShow } from "./commands/ticket.js";
 import {
   runPlanList,
   runPlanCreate,
@@ -249,6 +250,33 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "ticket": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+          return runTicketList(args[2]);
+        case "create": {
+          if (!args[2] || !args[3]) {
+            console.error("  Usage: opcom ticket create <project> \"<description>\"");
+            process.exit(1);
+          }
+          return runTicketCreate(args[2], args.slice(3).join(" "));
+        }
+        case "show": {
+          if (!args[2] || !args[3]) {
+            console.error("  Usage: opcom ticket show <project> <ticket-id>");
+            process.exit(1);
+          }
+          return runTicketShow(args[2], args[3]);
+        }
+        default:
+          console.error("  Usage: opcom ticket <list|create|show>");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "ci": {
       const ciProject = args[1];
       const ciWatch = args.includes("--watch");
@@ -334,6 +362,9 @@ function printHelp(): void {
     briefing [--since DATE] [--project NAME]  Generate activity briefing
     triage                       Recommend next actions based on workspace state
     oracle <session-id>          Verify agent work against acceptance criteria
+    ticket list [project]           List tickets (all projects or one)
+    ticket create <project> <desc>  Create a new ticket via agent
+    ticket show <project> <id>      Show ticket details
     changes <ticket-id>             Show file changes for a ticket
     diff <ticket-id>                Show unified diff for a ticket's changes
     analytics tools [--project X]    Tool usage frequency + success rates
