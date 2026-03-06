@@ -503,6 +503,7 @@ function formatContextAsPrompt(config: AgentStartConfig): string {
     if (ctx.project.testing.command) {
       parts.push(`Test command: ${ctx.project.testing.command}`);
     }
+    parts.push(`When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
   }
 
   // Linting

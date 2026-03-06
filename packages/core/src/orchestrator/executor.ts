@@ -840,6 +840,13 @@ export class Executor {
     step.startedAt = new Date().toISOString();
     this.sessionToStep.set(session.id, step.ticketId);
 
+    // Write lock file so cleanupOrphaned() won't remove this worktree
+    if (this.plan.config.worktree && session.pid) {
+      await this.worktreeManager.writeLock(step.ticketId, session.pid).catch((err) => {
+        log.warn("failed to write worktree lock", { ticketId: step.ticketId, error: String(err) });
+      });
+    }
+
     // Ticket transition: open → in-progress
     // In worktree mode, skip this — modifying ticket files on the main tree
     // creates uncommitted changes that block worktree merges later.

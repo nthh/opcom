@@ -42,6 +42,7 @@ class MockSessionManager {
       state: "streaming",
       startedAt: new Date().toISOString(),
       workItemId,
+      pid: 12345,
     };
   }
 
@@ -107,8 +108,9 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
   })),
 }));
 
-const { mockCommitStepChanges, mockScanTickets, mockWriteFile, mockReadFile } = vi.hoisted(() => ({
+const { mockCommitStepChanges, mockCaptureChangeset, mockScanTickets, mockWriteFile, mockReadFile } = vi.hoisted(() => ({
   mockCommitStepChanges: vi.fn(async () => true),
+  mockCaptureChangeset: vi.fn(async () => null),
   mockScanTickets: vi.fn(async () => []),
   mockWriteFile: vi.fn(async () => {}),
   mockReadFile: vi.fn(async () => "---\nstatus: in-progress\n---\n"),
@@ -116,15 +118,17 @@ const { mockCommitStepChanges, mockScanTickets, mockWriteFile, mockReadFile } = 
 
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
   commitStepChanges: mockCommitStepChanges,
+  captureChangeset: mockCaptureChangeset,
 }));
 
 // Mock WorktreeManager — use vi.hoisted() so these are available when vi.mock is hoisted
-const { mockCreate, mockRemove, mockHasCommits, mockMerge, mockCleanupOrphaned } = vi.hoisted(() => ({
+const { mockCreate, mockRemove, mockHasCommits, mockMerge, mockCleanupOrphaned, mockWriteLock } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockRemove: vi.fn(),
   mockHasCommits: vi.fn(),
   mockMerge: vi.fn(),
   mockCleanupOrphaned: vi.fn(),
+  mockWriteLock: vi.fn(),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
@@ -133,6 +137,7 @@ vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
     remove: mockRemove,
     hasCommits: mockHasCommits,
     merge: mockMerge,
+    writeLock: mockWriteLock,
     getInfo: vi.fn(),
     restore: vi.fn(),
   }));
@@ -169,6 +174,7 @@ describe("Executor with worktree isolation", () => {
       branch: "work/t1",
     });
     mockRemove.mockResolvedValue(undefined);
+    mockWriteLock.mockResolvedValue(undefined);
     mockCleanupOrphaned.mockResolvedValue([]);
     mockScanTickets.mockResolvedValue([]);
     mockReadFile.mockResolvedValue("---\nstatus: in-progress\n---\n");
@@ -416,6 +422,23 @@ describe("Executor with worktree isolation", () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(mockCleanupOrphaned).toHaveBeenCalledWith("/tmp/test-p", expect.any(Set));
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("writes lock file with agent PID after session starts", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // writeLock should have been called with the ticketId and the session PID
+    expect(mockWriteLock).toHaveBeenCalledWith("t1", 12345);
 
     executor.stop();
     await runPromise;

@@ -2,11 +2,24 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { readdir, rm, writeFile, readFile } from "node:fs/promises";
 import { createLogger } from "../logger.js";
 
 const execFileAsync = promisify(execFile);
 const log = createLogger("worktree");
+
+/** Lock file placed inside worktrees to signal an active agent process. */
+const LOCK_FILE = ".opcom-lock";
+
+/** Check whether a PID is alive (without sending a signal). */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface WorktreeInfo {
   stepId: string;
@@ -133,6 +146,21 @@ export class WorktreeManager {
   }
 
   /**
+   * Write a lock file into the worktree so cleanupOrphaned() knows an agent
+   * is still using it.  The file contains the agent's PID.
+   */
+  async writeLock(stepId: string, pid: number): Promise<void> {
+    const info = this.worktrees.get(stepId);
+    if (!info) {
+      log.warn("writeLock: worktree not tracked", { stepId });
+      return;
+    }
+    const lockPath = join(info.worktreePath, LOCK_FILE);
+    await writeFile(lockPath, String(pid), "utf-8");
+    log.debug("wrote lock file", { stepId, pid, lockPath });
+  }
+
+  /**
    * Remove a worktree and its branch.
    */
   async remove(stepId: string): Promise<void> {
@@ -140,6 +168,16 @@ export class WorktreeManager {
     if (!info) {
       log.warn("remove: worktree not tracked", { stepId });
       return;
+    }
+
+    // Remove lock file before tearing down the worktree (best-effort)
+    try {
+      const lockPath = join(info.worktreePath, LOCK_FILE);
+      if (existsSync(lockPath)) {
+        await rm(lockPath, { force: true });
+      }
+    } catch {
+      // best effort
     }
 
     try {
@@ -340,7 +378,23 @@ export class WorktreeManager {
           // Branch doesn't exist or other error — safe to clean up
         }
 
+        // Check for lock file — if the agent process is still alive, skip
         const worktreePath = join(worktreeBase, entry);
+        const lockPath = join(worktreePath, LOCK_FILE);
+        if (existsSync(lockPath)) {
+          try {
+            const pidStr = await readFile(lockPath, "utf-8");
+            const pid = parseInt(pidStr.trim(), 10);
+            if (!isNaN(pid) && isProcessAlive(pid)) {
+              log.info("skipping worktree with live agent process", { entry, pid });
+              continue;
+            }
+            log.info("lock file found but process is dead, removing", { entry, pid });
+          } catch {
+            // Can't read lock — treat as stale
+          }
+        }
+
         try {
           await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {
             cwd: projectPath,

@@ -190,6 +190,7 @@ export function contextPacketToMarkdown(packet: ContextPacket): string {
     const cmd = packet.project.testing.command ?? "npm test";
     lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
   }
+  lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
   lines.push(`- Do not mark work as complete if tests are failing.`);
   lines.push("");
 

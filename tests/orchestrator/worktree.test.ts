@@ -248,6 +248,64 @@ describe("WorktreeManager", () => {
     });
   });
 
+  describe("lock file", () => {
+    it("writeLock creates .opcom-lock with PID", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+      await wm.writeLock("step-1", 12345);
+
+      const lockPath = join(info.worktreePath, ".opcom-lock");
+      expect(existsSync(lockPath)).toBe(true);
+      const content = await readFile(lockPath, "utf-8");
+      expect(content).toBe("12345");
+    });
+
+    it("remove deletes lock file along with worktree", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+      await wm.writeLock("step-1", 12345);
+
+      const lockPath = join(info.worktreePath, ".opcom-lock");
+      expect(existsSync(lockPath)).toBe(true);
+
+      await wm.remove("step-1");
+      expect(existsSync(info.worktreePath)).toBe(false);
+    });
+
+    it("cleanupOrphaned skips worktree with live PID", async () => {
+      // Create an orphan worktree with a lock file containing current process PID
+      const wtPath = join(tmpDir, ".opcom/worktrees/locked-step");
+      await exec("git", ["worktree", "add", wtPath, "-b", "work/locked-step"], { cwd: tmpDir });
+      await writeFile(join(wtPath, ".opcom-lock"), String(process.pid), "utf-8");
+
+      const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
+      expect(cleaned).not.toContain("locked-step");
+      expect(existsSync(wtPath)).toBe(true);
+
+      // Clean up
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "work/locked-step"], { cwd: tmpDir });
+    });
+
+    it("cleanupOrphaned removes worktree with dead PID", async () => {
+      const wtPath = join(tmpDir, ".opcom/worktrees/dead-step");
+      await exec("git", ["worktree", "add", wtPath, "-b", "work/dead-step"], { cwd: tmpDir });
+      // Use PID 999999 which almost certainly doesn't exist
+      await writeFile(join(wtPath, ".opcom-lock"), "999999", "utf-8");
+
+      const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
+      expect(cleaned).toContain("dead-step");
+      expect(existsSync(wtPath)).toBe(false);
+    });
+
+    it("cleanupOrphaned removes worktree with no lock file", async () => {
+      const wtPath = join(tmpDir, ".opcom/worktrees/no-lock-step");
+      await exec("git", ["worktree", "add", wtPath, "-b", "work/no-lock-step"], { cwd: tmpDir });
+
+      const cleaned = await WorktreeManager.cleanupOrphaned(tmpDir);
+      expect(cleaned).toContain("no-lock-step");
+      expect(existsSync(wtPath)).toBe(false);
+    });
+  });
+
   describe("full lifecycle", () => {
     it("create → agent work → hasCommits → merge → remove", async () => {
       // 1. Create worktree
