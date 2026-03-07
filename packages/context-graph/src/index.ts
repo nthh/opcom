@@ -5,6 +5,28 @@ export { SCHEMA, type GraphNode, type GraphEdge, type NodeType, type EdgeRelatio
 export { type Analyzer, type AnalyzerContext, type AnalyzerResult } from "./core/analyzer.js";
 export { DriftEngine, type DriftSignal, type DriftSignalType, type TestType, type DriftAction, type DriftOptions, hasUiBehavior, hasApiBehavior, hasInteractionHandlers, isRouteFile } from "./core/drift.js";
 export { TriageEngine, type TriageResult, type TriageOptions, type LLMProvider, buildBatchPrompt, parseTriageResponse, isExpectedUntested, TRIAGE_SCHEMA } from "./core/triage.js";
+export {
+  TestGenerationEngine,
+  UnitTestGenerator,
+  PlaywrightGenerator,
+  ApiTestGenerator,
+  parseGeneratedTests,
+  detectTestFramework,
+  detectPlaywrightConfig,
+  detectApiFramework,
+  loadTestPreferences,
+  GENERATED_TESTS_SCHEMA,
+  type TestGeneratorInterface,
+  type GeneratedTest,
+  type VerificationResult,
+  type GenerationContext,
+  type GenerateOptions,
+  type GenerationPlan,
+  type GenerationResult,
+  type TestFramework,
+  type ApiFramework,
+  type TestPreferences,
+} from "./core/test-generator.js";
 
 // Analyzers
 export { TypeScriptImportAnalyzer } from "./analyzers/typescript-imports.js";
