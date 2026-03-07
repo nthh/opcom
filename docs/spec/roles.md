@@ -174,6 +174,36 @@ runTests: false
 runOracle: null
 ```
 
+### oracle
+
+Verification-only. Evaluates whether code changes satisfy acceptance criteria. No tools, no file access — receives the evaluation prompt as its system prompt and responds with structured output.
+
+```yaml
+id: oracle
+name: Oracle
+permissionMode: default
+allowedTools: []
+disallowedTools:
+  - Edit
+  - Write
+  - NotebookEdit
+  - Bash
+  - Read
+  - Glob
+  - Grep
+  - EnterPlanMode
+  - ExitPlanMode
+  - EnterWorktree
+allowedBashPatterns: []
+instructions: |
+  You are a verification oracle. Evaluate whether code changes satisfy acceptance criteria.
+  Respond ONLY with the structured format specified in your prompt.
+  Do not use any tools. Do not attempt to read or modify files.
+doneCriteria: "Evaluation complete."
+runTests: false
+runOracle: false
+```
+
 ## Ticket Role Declaration
 
 Tickets declare their role via the `role` field in frontmatter. If omitted, the role defaults to `engineer`.
