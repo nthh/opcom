@@ -79,6 +79,16 @@ import {
   isHealthWarning,
   type HealthData,
 } from "./health-data.js";
+import {
+  renderPlanOverview,
+  createPlanOverviewState,
+  rebuildDisplayLines as rebuildPlanOverviewLines,
+  scrollUp as planOverviewScrollUp,
+  scrollDown as planOverviewScrollDown,
+  scrollToTop as planOverviewScrollToTop,
+  scrollToBottom as planOverviewScrollToBottom,
+  type PlanOverviewState,
+} from "./views/plan-overview.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -95,6 +105,7 @@ export class TuiApp {
   private agentFocusState: AgentFocusState | null = null;
   private ticketFocusState: TicketFocusState | null = null;
   private planStepFocusState: PlanStepFocusState | null = null;
+  private planOverviewState: PlanOverviewState | null = null;
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
 
   // Navigation stack for back navigation
@@ -310,6 +321,8 @@ export class TuiApp {
             renderTicketFocus(this.buf, layout.panels[0], this.ticketFocusState);
           } else if (this.planStepFocusState) {
             renderPlanStepFocus(this.buf, layout.panels[0], this.planStepFocusState);
+          } else if (this.planOverviewState) {
+            renderPlanOverview(this.buf, layout.panels[0], this.planOverviewState);
           } else if (this.cloudServiceDetailState) {
             renderCloudServiceDetail(this.buf, layout.panels[0], this.cloudServiceDetailState);
           }
@@ -466,6 +479,8 @@ export class TuiApp {
           this.handleTicketFocusInput(data);
         } else if (this.planStepFocusState) {
           this.handlePlanStepFocusInput(data);
+        } else if (this.planOverviewState) {
+          this.handlePlanOverviewInput(data);
         } else if (this.cloudServiceDetailState) {
           this.handleCloudServiceDetailInput(data);
         }
@@ -540,8 +555,11 @@ export class TuiApp {
       case "P": { // Create plan for selected project
         const project = state.projects[state.selectedIndex[0]];
         if (project) {
-          this.client.createPlan(project.id).then(() => {
+          this.client.createPlan(project.id).then((plan) => {
             this.syncData();
+            if (plan) {
+              this.navigateToPlanOverview(plan);
+            }
             this.scheduleRender();
           }).catch(() => {});
         }
@@ -763,8 +781,11 @@ export class TuiApp {
 
       case "P": // Create plan for this project
         if (this.focusedProjectId) {
-          this.client.createPlan(this.focusedProjectId).then(() => {
+          this.client.createPlan(this.focusedProjectId).then((plan) => {
             this.syncData();
+            if (plan) {
+              this.navigateToPlanOverview(plan);
+            }
             this.scheduleRender();
           }).catch(() => {});
         }
@@ -1285,6 +1306,56 @@ export class TuiApp {
     }
   }
 
+  // --- L3: Plan Overview Input ---
+
+  private handlePlanOverviewInput(data: string): void {
+    if (!this.planOverviewState) return;
+    const state = this.planOverviewState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 2;
+
+    switch (data) {
+      case "\x1b": // Escape
+      case "q":
+        if (state.confirmed === null) {
+          // Cancel plan — user declined
+          state.confirmed = false;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        this.navigateBack();
+        return;
+
+      case " ": // Space — confirm/start execution
+        if (state.confirmed === null) {
+          state.confirmed = true;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          // Start execution
+          this.client.executePlan(state.plan.id).catch(() => {});
+          // Sync the plan panel on dashboard
+          this.syncData();
+        }
+        return;
+
+      case "j":
+      case "\x1b[B":
+        planOverviewScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        planOverviewScrollUp(state, 1);
+        return;
+
+      case "G":
+        planOverviewScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        planOverviewScrollToTop(state);
+        return;
+    }
+  }
+
   // --- Navigation ---
 
   private navigateToProject(project: ProjectStatusSnapshot): void {
@@ -1345,6 +1416,7 @@ export class TuiApp {
     this.agentFocusState = createAgentFocusState(agent, events);
     this.ticketFocusState = null;
     this.planStepFocusState = null;
+    this.planOverviewState = null;
     this.cloudServiceDetailState = null;
   }
 
@@ -1373,12 +1445,34 @@ export class TuiApp {
     this.ticketFocusState = createTicketFocusState(ticket, projectConfig);
     this.agentFocusState = null;
     this.planStepFocusState = null;
+    this.planOverviewState = null;
     this.cloudServiceDetailState = null;
 
     // Load ticket content async
     loadTicketContent(this.ticketFocusState).then(() => {
       this.scheduleRender();
     }).catch(() => {});
+  }
+
+  private navigateToPlanOverview(plan: import("@opcom/types").Plan): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+
+    // Collect all tickets for context
+    const allTickets: WorkItem[] = [];
+    for (const [, tickets] of this.client.projectTickets) {
+      allTickets.push(...tickets);
+    }
+
+    this.planOverviewState = createPlanOverviewState(plan, allTickets);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.cloudServiceDetailState = null;
   }
 
   private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
@@ -1411,6 +1505,7 @@ export class TuiApp {
     );
     this.agentFocusState = null;
     this.ticketFocusState = null;
+    this.planOverviewState = null;
     this.cloudServiceDetailState = null;
   }
 
@@ -1481,6 +1576,7 @@ export class TuiApp {
     this.agentFocusState = null;
     this.ticketFocusState = null;
     this.planStepFocusState = null;
+    this.planOverviewState = null;
   }
 
   private triggerMigration(): void {
@@ -1652,6 +1748,7 @@ export class TuiApp {
         this.agentFocusState = null;
         this.ticketFocusState = null;
         this.planStepFocusState = null;
+        this.planOverviewState = null;
         this.cloudServiceDetailState = null;
         this.focusedProjectId = null;
       }
@@ -1665,6 +1762,7 @@ export class TuiApp {
       this.agentFocusState = null;
       this.ticketFocusState = null;
       this.planStepFocusState = null;
+      this.planOverviewState = null;
       this.cloudServiceDetailState = null;
     }
     if (this.level <= 1) {
@@ -1766,6 +1864,11 @@ export function buildHelpLines(): string[] {
     "  w          Start agent (if step ready)",
     "  a          Jump to assigned agent",
     "  t          Jump to ticket detail",
+    "",
+    bold("Level 3: Plan Overview"),
+    "  j/k        Scroll up/down",
+    "  Space      Confirm and start execution",
+    "  Esc        Cancel plan",
     "",
     dim("Press ? or Esc to close help"),
   ];
