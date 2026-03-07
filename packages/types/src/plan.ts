@@ -36,12 +36,15 @@ export interface PlanStep {
   worktreeBranch?: string;
   verification?: VerificationResult;
   role?: string;
+  attempt?: number;                      // current attempt (1 = first try, 2+ = retry)
+  previousVerification?: VerificationResult;  // feedback from last failed attempt
 }
 
 export interface VerificationConfig {
   runTests: boolean;
   runOracle: boolean;
   oracleModel?: string;
+  maxRetries?: number;  // default 2 — retries on verification failure (0 = fail immediately)
 }
 
 export interface OrchestratorConfig {

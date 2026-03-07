@@ -1,7 +1,7 @@
 ---
 id: context-graph-test-generation
 title: "AI Test Generation from Triage Results"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-05

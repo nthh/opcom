@@ -399,17 +399,50 @@ export class Executor {
     const verification = await this.runVerification(step, event, roleVerify);
 
     if (verification && !verification.passed) {
-      const reason = `Verification failed: ${verification.failureReasons.join("; ")}`;
+      const attempt = step.attempt ?? 1;
+      const maxRetries = this.plan.config.verification.maxRetries ?? 2;
+      const maxAttempts = 1 + maxRetries;
+
+      if (attempt < maxAttempts) {
+        // Retry: queue the step for a new agent session with failure feedback
+        log.info("verification failed, retrying", {
+          ticketId: step.ticketId,
+          attempt,
+          maxAttempts,
+          reasons: verification.failureReasons,
+        });
+        step.attempt = attempt + 1;
+        step.previousVerification = verification;
+        step.verification = verification;
+        step.status = "ready";
+        step.agentSessionId = undefined;
+        step.completedAt = undefined;
+        step.error = undefined;
+        if (event.sessionId) {
+          this.sessionToStep.delete(event.sessionId);
+          this.sessionWrites.delete(event.sessionId);
+        }
+        // Worktree is preserved — agent picks up where it left off
+        this.logPlanEvent("step_retry", {
+          stepTicketId: step.ticketId,
+          agentSessionId: event.sessionId,
+          detail: { attempt: step.attempt, previousVerification: verification },
+        });
+        return; // recomputeAndContinue will pick up the ready step
+      }
+
+      // Out of retries — hard fail
+      const reason = `Verification failed after ${attempt} attempt(s): ${verification.failureReasons.join("; ")}`;
       await this.failStep(step, reason);
       step.verification = verification;
 
       // Keep worktree for inspection on verification failure
-      log.warn("step verification failed", { ticketId: step.ticketId, reasons: verification.failureReasons });
+      log.warn("step verification failed (retries exhausted)", { ticketId: step.ticketId, attempt, reasons: verification.failureReasons });
       this.emit("step_failed", { step, error: reason });
       this.logPlanEvent("step_failed", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: reason, mode: "worktree", verification },
+        detail: { error: reason, mode: "worktree", verification, attempt },
       });
 
       if (this.plan.config.pauseOnFailure) {
@@ -869,8 +902,8 @@ export class Executor {
     const allowedBashTools = resolved.allowedBashPatterns.map((p) => `Bash(${p})`);
     const allowedTools = [...allowedBashTools, ...resolved.allowedTools];
 
-    // Build system prompt with role-aware context
-    const systemPrompt = contextPacketToMarkdown(contextPacket, resolved);
+    // Build system prompt with role-aware context (and retry feedback if applicable)
+    const systemPrompt = contextPacketToMarkdown(contextPacket, resolved, step.previousVerification);
 
     const session = await this.sessionManager.startSession(
       step.projectId,

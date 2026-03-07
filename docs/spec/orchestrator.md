@@ -273,7 +273,7 @@ How does the executor know an agent is "done"? Several signals:
 3. **Ticket status changes** — if the agent (or user) marks the ticket as `closed` or `in-progress`, update accordingly.
 4. **Manual confirmation** — user presses a key in TUI to mark step done.
 
-After agent exit, the **verification pipeline** runs (see `docs/spec/verification.md`): auto-commit → test gate → oracle evaluation → mark done/failed. This replaces the naive write-count check.
+After agent exit, the **verification pipeline** runs (see `docs/spec/verification.md`): auto-commit → full test suite → oracle evaluation → mark done/failed (or retry with feedback). This replaces the naive write-count check. If verification fails and retries remain, the executor starts a new agent session with structured failure context — the agent fixes the specific failures without starting over.
 
 The executor listens to `SessionManager` events:
 

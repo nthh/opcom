@@ -169,7 +169,8 @@ describe("settings", () => {
     expect(keys).toContain("orchestrator.pauseOnFailure");
     expect(keys).toContain("orchestrator.runTests");
     expect(keys).toContain("orchestrator.runOracle");
+    expect(keys).toContain("orchestrator.maxRetries");
     expect(keys).toContain("notifications.enabled");
-    expect(keys).toHaveLength(10);
+    expect(keys).toHaveLength(11);
   });
 });

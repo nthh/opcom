@@ -69,7 +69,7 @@ describe("resolveRoleConfig", () => {
     expect(resolved.allowedBashPatterns).toContain("git status*");
     expect(resolved.allowedBashPatterns).toContain("npm test*");
     expect(resolved.instructions).toContain("tests");
-    expect(resolved.doneCriteria).toContain("Tests passing");
+    expect(resolved.doneCriteria).toContain("Relevant tests passing");
     expect(resolved.runTests).toBe(true);
     // runOracle is null on engineer → falls back to plan config (false)
     expect(resolved.runOracle).toBe(false);

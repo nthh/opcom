@@ -22,6 +22,7 @@ export interface OrchestratorSettings {
   pauseOnFailure: boolean;
   runTests: boolean;
   runOracle: boolean;
+  maxRetries: number;
 }
 
 export interface NotificationSettings {

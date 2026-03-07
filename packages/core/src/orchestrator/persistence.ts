@@ -16,6 +16,7 @@ export function defaultConfig(): OrchestratorConfig {
     verification: {
       runTests: true,
       runOracle: false,
+      maxRetries: 2,
     },
   };
 }

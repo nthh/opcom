@@ -3,7 +3,7 @@ id: plan-overview-screen
 title: "TUI: Plan overview screen on creation"
 status: open
 type: feature
-priority: 2
+priority: 1
 created: 2026-03-06
 deps:
   - orchestrator-plan-engine

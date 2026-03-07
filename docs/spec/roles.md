@@ -25,8 +25,9 @@ disallowedTools:
 allowedBashPatterns: []        # empty = inherit from stack detection
 instructions: |
   - All changes MUST include tests.
-  - Run the project's test command before finishing.
-doneCriteria: "Code committed. Tests passing."
+  - Run tests relevant to your changes during development (specific test files, not the full suite).
+  - The full test suite will be run by the verification pipeline after you finish. Do not run it yourself.
+doneCriteria: "Code committed. Relevant tests passing."
 runTests: true
 runOracle: null                # null = inherit from plan config
 ```
@@ -64,9 +65,10 @@ disallowedTools:
   - EnterWorktree
 instructions: |
   - All changes MUST include tests.
-  - Run the project's test command before finishing.
+  - Run tests relevant to your changes during development (specific test files, not the full suite).
+  - The full test suite will be run by the verification pipeline after you finish. Do not run it yourself.
   - Commit completed work with a descriptive message.
-doneCriteria: "Code committed. Tests passing."
+doneCriteria: "Code committed. Relevant tests passing."
 runTests: true
 runOracle: null
 ```
@@ -86,7 +88,7 @@ disallowedTools:
 instructions: |
   - You are a QA tester. Write tests that verify the ticket's acceptance criteria.
   - Do NOT modify production source code. Only create or edit test files.
-  - Run all tests and report results.
+  - Run the test files you wrote to verify they pass. Do not run the full test suite.
 doneCriteria: "Tests written and passing that cover all acceptance criteria."
 runTests: true
 runOracle: null

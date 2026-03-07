@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
 
@@ -111,7 +111,7 @@ export async function buildContextPacket(
   return packet;
 }
 
-export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: ResolvedRoleConfig): string {
+export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: ResolvedRoleConfig, previousVerification?: VerificationResult): string {
   const lines: string[] = [];
 
   lines.push(`# Project: ${packet.project.name}`);
@@ -236,11 +236,8 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
     lines.push(roleConfig.instructions);
   } else {
     lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
-    if (packet.project.testing) {
-      const cmd = packet.project.testing.command ?? "npm test";
-      lines.push(`- Run \`${cmd}\` before finishing and ensure all tests pass.`);
-    }
-    lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
+    lines.push(`- Run tests relevant to your changes during development (specific test files, not the full suite).`);
+    lines.push(`- The full test suite will be run by the verification pipeline after you finish. Do not run it yourself.`);
   }
   lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);
   lines.push(`- When committing, use a simple single-line commit message: \`git commit -m 'short description'\`. Do NOT use multi-line messages, heredocs, or \`$()\` substitution — they will be blocked by the permission system.`);
@@ -251,6 +248,34 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
     lines.push(roleConfig.doneCriteria);
   }
   lines.push("");
+
+  // Previous attempt feedback (verification retry)
+  if (previousVerification) {
+    lines.push(`## Previous Attempt`);
+    lines.push(`This is a retry. Your previous attempt failed verification.`);
+    lines.push("");
+    if (previousVerification.testGate && !previousVerification.testGate.passed) {
+      lines.push(`### Test Failures`);
+      lines.push(`The full project test suite found ${previousVerification.testGate.failedTests} failing test(s):`);
+      lines.push("");
+      lines.push("```");
+      lines.push(previousVerification.testGate.output);
+      lines.push("```");
+      lines.push("");
+    }
+    if (previousVerification.oracle && !previousVerification.oracle.passed) {
+      lines.push(`### Unmet Acceptance Criteria`);
+      for (const c of previousVerification.oracle.criteria.filter(c => !c.met)) {
+        lines.push(`- **${c.criterion}**: ${c.reasoning}`);
+      }
+      lines.push("");
+    }
+    lines.push(`### What to fix`);
+    lines.push(`- Focus on the failures listed above. Do not start over.`);
+    lines.push(`- Run the specific failing tests to verify your fix.`);
+    lines.push(`- Do not modify unrelated code.`);
+    lines.push("");
+  }
 
   // Agent config
   if (packet.agentConfig) {

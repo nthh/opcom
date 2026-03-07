@@ -19,6 +19,7 @@ export const settingsDefs: SettingDef[] = [
   { key: "orchestrator.pauseOnFailure", type: "boolean", description: "Pause plan on step failure" },
   { key: "orchestrator.runTests", type: "boolean", description: "Run tests as verification gate" },
   { key: "orchestrator.runOracle", type: "boolean", description: "Run oracle verification after steps" },
+  { key: "orchestrator.maxRetries", type: "number", description: "Max verification retries per step (0 = fail immediately)", min: 0, max: 10 },
   { key: "notifications.enabled", type: "boolean", description: "Enable notification delivery" },
 ];
 
@@ -38,6 +39,7 @@ export function defaultSettings(): OpcomSettings {
       pauseOnFailure: true,
       runTests: true,
       runOracle: false,
+      maxRetries: 2,
     },
     notifications: {
       enabled: false,
@@ -135,6 +137,7 @@ export function validateSettings(data: unknown): OpcomSettings {
       pauseOnFailure: typeof orch.pauseOnFailure === "boolean" ? orch.pauseOnFailure : defaults.orchestrator.pauseOnFailure,
       runTests: typeof orch.runTests === "boolean" ? orch.runTests : defaults.orchestrator.runTests,
       runOracle: typeof orch.runOracle === "boolean" ? orch.runOracle : defaults.orchestrator.runOracle,
+      maxRetries: typeof orch.maxRetries === "number" ? orch.maxRetries : defaults.orchestrator.maxRetries,
     },
     notifications: {
       enabled: typeof notif.enabled === "boolean" ? notif.enabled : defaults.notifications.enabled,
