@@ -4,7 +4,7 @@ Phase 1 (detection, types, config, CLI) is complete. Build everything else.
 ## Step 1: Understand the project
 
 Read in this order:
-1. ~/projects/opcom/CLAUDE.md — overview, conventions, commands
+1. ~/projects/opcom/AGENTS.md — overview, conventions, commands
 2. ~/projects/opcom/docs/VISION.md — full vision, user story, architecture, prior art
 3. ~/projects/opcom/docs/ROADMAP.md — all phases
 4. ~/projects/opcom/docs/spec/adapters.md — agent + project adapters, context packets, message routing

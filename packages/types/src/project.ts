@@ -70,7 +70,7 @@ export interface WorkSystemInfo {
 }
 
 export interface ProjectDocs {
-  agentConfig?: string;       // CLAUDE.md, AGENTS.md, .cursorrules
+  agentConfig?: string;       // AGENTS.md, CLAUDE.md, .cursorrules, CONVENTIONS.md, etc.
   readme?: string;            // README.md
   specsDir?: string;          // docs/spec/
   decisionsDir?: string;      // docs/decisions/, docs/adr/

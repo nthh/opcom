@@ -21,12 +21,12 @@ Assemble context packets from project detection + ticket + spec so agents start 
 ## Tasks
 
 - [ ] ContextPacket type: project profile, work item, spec contents, git state, agent config, memory
-- [ ] Build context from ProjectConfig + WorkItem: load ticket frontmatter, read linked spec files, include CLAUDE.md
+- [ ] Build context from ProjectConfig + WorkItem: load ticket frontmatter, read linked spec files, include AGENTS.md
 - [ ] Inject context into Claude Code adapter (augment system prompt or prepend to conversation)
 - [ ] Inject context into Pi adapter (system prompt configuration)
 - [ ] Include testing/linting commands so agent knows how to verify its work
 - [ ] Include service definitions so agent knows the runtime topology
-- [ ] Handle missing data gracefully (no spec file, no CLAUDE.md, etc.)
+- [ ] Handle missing data gracefully (no spec file, no AGENTS.md, etc.)
 - [ ] Unit tests: verify context packet assembly for each project type
 
 ## Acceptance Criteria

@@ -37,7 +37,7 @@ function extractSections(specPath: string): SpecSection[] {
 function findProjectRoot(): string {
   let dir = process.cwd();
   while (dir !== "/") {
-    if (existsSync(join(dir, ".tickets")) || existsSync(join(dir, "CLAUDE.md"))) return dir;
+    if (existsSync(join(dir, ".tickets")) || existsSync(join(dir, "AGENTS.md")) || existsSync(join(dir, "CLAUDE.md"))) return dir;
     dir = join(dir, "..");
   }
   return process.cwd();

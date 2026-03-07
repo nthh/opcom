@@ -316,7 +316,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
 
   // --- Docs detection ---
   // Agent config (instructions for coding agents)
-  for (const agentFile of ["CLAUDE.md", "AGENTS.md", ".cursorrules", ".github/copilot-instructions.md"]) {
+  for (const agentFile of ["AGENTS.md", "CLAUDE.md", "CONVENTIONS.md", ".cursorrules", ".github/copilot-instructions.md"]) {
     if (existsSync(join(projectPath, agentFile))) {
       docs.agentConfig = agentFile;
       evidence.push({ file: agentFile, detectedAs: "docs:agent-config" });

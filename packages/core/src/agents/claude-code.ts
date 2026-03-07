@@ -529,7 +529,7 @@ function formatContextAsPrompt(config: AgentStartConfig): string {
     }
   }
 
-  // Agent config (CLAUDE.md contents)
+  // Agent config (AGENTS.md or equivalent)
   if (ctx.agentConfig) {
     parts.push(`\n# Agent Configuration\n${ctx.agentConfig}`);
   }

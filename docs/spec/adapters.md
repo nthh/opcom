@@ -47,7 +47,7 @@ interface ContextPacket {
     remote: string
     clean: boolean
   }
-  agentConfig?: string         // CLAUDE.md or similar
+  agentConfig?: string         // AGENTS.md, CLAUDE.md, .cursorrules, etc.
   memory?: string              // persistent agent memory file contents
 }
 ```
@@ -57,7 +57,7 @@ interface ContextPacket {
 **Claude Code adapter:**
 - Spawns `claude` subprocess with `--output-format stream-json`
 - Parses NDJSON stream: `message_start`, `content_block_start/delta/stop`, `message_stop`
-- Injects context packet as initial system prompt / CLAUDE.md augmentation
+- Injects context packet as initial system prompt / agent config augmentation
 - Supports worktree isolation via `git worktree add`
 
 **Pi coding agent adapter:**

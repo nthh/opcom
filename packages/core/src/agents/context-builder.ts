@@ -25,7 +25,7 @@ export async function buildContextPacket(
     },
   };
 
-  // Load agent config (CLAUDE.md, etc.)
+  // Load agent config (AGENTS.md, CLAUDE.md, .cursorrules, etc.)
   if (project.docs.agentConfig) {
     const configPath = join(project.path, project.docs.agentConfig);
     if (existsSync(configPath)) {
