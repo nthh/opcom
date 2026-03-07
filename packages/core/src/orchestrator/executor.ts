@@ -26,7 +26,7 @@ import { WorktreeManager } from "./worktree.js";
 import { collectOracleInputs, runOracle } from "../skills/oracle.js";
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { createLogger } from "../logger.js";
-import { ingestTestResults } from "../graph/graph-service.js";
+import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
 
 const log = createLogger("executor");
 
@@ -64,6 +64,8 @@ export class Executor {
   private sessionToStep = new Map<string, string>(); // sessionId → ticketId
   private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
   private stepVerification = new Map<string, { runTests: boolean; runOracle: boolean }>(); // ticketId → role verification
+  private stepFiles = new Map<string, string[]>(); // ticketId → related file paths (cached from graph)
+  private ticketCache = new Map<string, import("@opcom/types").WorkItem[]>(); // projectId → tickets
   private worktreeManager = new WorktreeManager();
 
   constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
@@ -854,7 +856,35 @@ export class Executor {
     if (available <= 0) return;
 
     const ready = this.plan.steps.filter((s) => s.status === "ready");
-    const toStart = ready.slice(0, available);
+
+    // Sort ready steps: lower priority number first, then fewer blockedBy, then array order
+    const sorted = [...ready].sort((a, b) => {
+      const pa = this.getStepPriority(a);
+      const pb = this.getStepPriority(b);
+      if (pa !== pb) return pa - pb;
+      return a.blockedBy.length - b.blockedBy.length;
+    });
+
+    // Collect files claimed by active steps
+    const claimedFiles = new Set<string>();
+    for (const step of this.plan.steps) {
+      if (step.status === "in-progress" || step.status === "verifying") {
+        for (const f of this.getStepFiles(step)) claimedFiles.add(f);
+      }
+    }
+
+    // Filter: skip steps that overlap with claimed files or with each other
+    const toStart: PlanStep[] = [];
+    for (const step of sorted) {
+      if (toStart.length >= available) break;
+      const files = this.getStepFiles(step);
+      if (files.length > 0 && files.some((f) => claimedFiles.has(f))) {
+        log.info("holding step due to file overlap", { ticketId: step.ticketId, overlappingFiles: files.filter((f) => claimedFiles.has(f)) });
+        continue;
+      }
+      toStart.push(step);
+      for (const f of files) claimedFiles.add(f);
+    }
 
     for (const step of toStart) {
       try {
@@ -864,6 +894,29 @@ export class Executor {
         await this.failStep(step, String(err));
       }
     }
+  }
+
+  /** Get related files for a step from the context graph (cached). */
+  private getStepFiles(step: PlanStep): string[] {
+    if (this.stepFiles.has(step.ticketId)) return this.stepFiles.get(step.ticketId)!;
+    try {
+      const tickets = this.ticketCache.get(step.projectId);
+      const workItem = tickets?.find((t) => t.id === step.ticketId);
+      const ctx = queryGraphContext(step.projectId, step.ticketId, workItem?.links ?? []);
+      const files = ctx?.relatedFiles ?? [];
+      this.stepFiles.set(step.ticketId, files);
+      return files;
+    } catch {
+      this.stepFiles.set(step.ticketId, []);
+      return [];
+    }
+  }
+
+  /** Get priority for a step from cached ticket data. */
+  private getStepPriority(step: PlanStep): number {
+    const tickets = this.ticketCache.get(step.projectId);
+    const workItem = tickets?.find((t) => t.id === step.ticketId);
+    return workItem?.priority ?? 4;
   }
 
   private async startStep(step: PlanStep): Promise<void> {
@@ -982,6 +1035,7 @@ export class Executor {
         if (!project) continue;
         const tickets = await scanTickets(project.path);
         ticketSets.push({ projectId: pid, tickets });
+        this.ticketCache.set(pid, tickets);
       } catch {
         // Skip failed scans
       }

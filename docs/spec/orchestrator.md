@@ -233,6 +233,56 @@ class Executor {
 }
 ```
 
+### File-Overlap Scheduling
+
+When multiple steps are `ready`, the executor checks for file-level overlaps before starting them in parallel. Two steps that touch the same files are likely to cause merge conflicts if run concurrently — serializing them avoids the conflict entirely.
+
+**How it works:**
+
+The context graph already maps tickets → related files (via spec links and code analysis). Before starting ready steps, the executor queries the graph for each step's related files and compares them against files claimed by in-progress/verifying steps.
+
+```typescript
+private async startReadySteps(): Promise<void> {
+  const ready = this.plan.steps.filter(s => s.status === "ready");
+  const active = this.plan.steps.filter(
+    s => s.status === "in-progress" || s.status === "verifying"
+  );
+
+  // Collect files claimed by active steps
+  const claimedFiles = new Set<string>();
+  for (const step of active) {
+    const files = this.getStepFiles(step);
+    for (const f of files) claimedFiles.add(f);
+  }
+
+  // Filter ready steps: skip those that overlap with claimed files
+  const startable: PlanStep[] = [];
+  const newlyClaimed = new Set<string>();
+  for (const step of sortByPriority(ready)) {
+    const files = this.getStepFiles(step);
+    const overlaps = files.some(f => claimedFiles.has(f) || newlyClaimed.has(f));
+    if (!overlaps) {
+      startable.push(step);
+      for (const f of files) newlyClaimed.add(f);
+    }
+  }
+
+  // Start up to available slots
+  for (const step of startable.slice(0, this.availableSlots())) {
+    await this.startStep(step);
+  }
+}
+```
+
+**Priority breaks ties.** When two ready steps overlap on files, `sortByPriority` determines which runs first:
+1. Lower priority number wins (P1 before P2)
+2. Equal priority: fewer `blockedBy` deps wins (more foundational)
+3. Still equal: array order (from planner's topological sort)
+
+**This is a soft optimization, not a hard guarantee.** The graph may not know about all files an agent will touch. Worktree isolation + auto-rebase handle the cases where overlap prediction is wrong. File-overlap scheduling just reduces how often that happens.
+
+**Graph unavailable fallback.** If the context graph hasn't been built for a project, the executor skips overlap detection and starts all ready steps (current behavior). No graph = no file data = no overlap to detect.
+
 ### Starting a Step
 
 When the executor starts a step:
