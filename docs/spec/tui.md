@@ -239,8 +239,24 @@ See the ticket detail, linked spec, then decide to start an agent.
 |-----|--------|
 | `Esc` | Go up one level (L3→L2→L1) |
 | `q` | Quit (from L1) or go up (from L2/L3) |
-| `?` | Help overlay |
+| `?` | Help overlay (includes spec-driven workflow guide) |
 | `r` | Refresh status |
+
+### Help Overlay (?): Workflow Guide
+
+The `?` help overlay includes a brief workflow guide so the process is always one keystroke away:
+
+```
+  WORKFLOW
+
+  1. Write spec        docs/spec/<feature>.md  (## Section {#anchor})
+  2. Scaffold tickets   opcom scaffold <spec>   (or H → scaffold from TUI)
+  3. Check health       H                       (audit + coverage)
+  4. Assign agents      w                       (on a ticket)
+  5. Track use cases    U                       (cross-cutting readiness)
+
+  Spec-driven: every ticket links to a spec. Run `opcom audit` to check.
+```
 
 ### Level 1: Dashboard
 | Key | Action |
@@ -285,6 +301,150 @@ See the ticket detail, linked spec, then decide to start an agent.
 | `w` | Start agent on this ticket |
 | `e` | Open ticket file in $EDITOR |
 
+## Traceability & Health {#traceability--health}
+
+The TUI surfaces spec-driven development health at every level. The principle: you shouldn't need to run CLI commands to know if specs are covered, tickets are linked, or use cases are ready.
+
+### Level 1: Health Bar
+
+The status bar at the bottom of the dashboard shows workspace health at a glance:
+
+```
+┌─ opcom ── personal workspace ────────────────────────────────────────────┐
+│  ...                                                                     │
+├──────────────────────────────────────────────────────────────────────────┤
+│ 16 specs (88% covered)  68 tickets (78% linked)  UC-001: 50%  0 broken  │
+│ enter:open  w:work  H:health  U:use-cases  ?:help  q:quit               │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Specs covered**: how many specs have implementing tickets (from `opcom coverage`)
+- **Tickets linked**: how many tickets link to a spec (from `opcom audit`)
+- **UC readiness**: summary of use-case satisfaction (from `opcom uc`)
+- **Broken links**: count of broken spec/ticket links (from `opcom audit`)
+
+A red indicator appears if broken links > 0 or if tickets without spec links > 25%.
+
+### Level 1: Health View (H key)
+
+Pressing `H` from the dashboard opens a full-screen health overlay — the TUI equivalent of `opcom audit` + `opcom coverage`:
+
+```
+┌─ Workspace Health ───────────────────────────────────────────────────────┐
+│                                                                           │
+│  SPEC COVERAGE (16 specs)                                                │
+│                                                                           │
+│    Spec                  Tickets  Status                                  │
+│    detection                 4    ● covered                               │
+│    config                    0    ○ no tickets                             │
+│    adapters                  6    ● covered                               │
+│    orchestrator              8    ● covered                               │
+│    tui                       9    ● covered                               │
+│    cicd                      2    ● covered                               │
+│    context-graph             7    ◐ partial                               │
+│    integrations              1    ● covered                               │
+│    ...                                                                    │
+│                                                                           │
+│  TICKET HEALTH                                                           │
+│    With spec links:    53/68 (78%)                                        │
+│    Without spec links: 15 tickets                                         │
+│                                                                           │
+│  BROKEN LINKS                                                            │
+│    None                                                                   │
+│                                                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│ esc:back  Enter:drill into spec  ?:help                                   │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Pressing `Enter` on a spec drills into section-level coverage (the `opcom coverage <spec>` view).
+
+### Level 1: Use Cases View (U key)
+
+Pressing `U` from the dashboard shows use-case readiness — the TUI equivalent of `opcom uc ls`:
+
+```
+┌─ Use Cases ──────────────────────────────────────────────────────────────┐
+│                                                                           │
+│  ID         Title                          Pri   Status    Done  Gaps     │
+│  UC-001     First-Run Onboarding           P0    partial   7/14   7      │
+│  UC-002     Agent Orchestration            P1    ready    12/12   0      │
+│  UC-003     Multi-Project Planning         P2    blocked   4/9    5      │
+│                                                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│ esc:back  Enter:show details  g:gaps only  ?:help                         │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+Pressing `Enter` drills into the use case detail with per-requirement status (the `opcom uc show` view). Pressing `g` shows only unmet requirements (the `opcom uc gaps` view).
+
+### Level 2: Project Specs Section
+
+The L2 project detail view gains a SPECS section alongside STACK, showing which specs cover this project:
+
+```
+┌─ opcom ── main ✓ ── TypeScript ──────────────────────────────────────────┐
+│                                                                           │
+│  TICKETS (68)                  │  SPECS (covering this project)           │
+│  ...                           │                                          │
+│                                │    orchestrator     8 tickets  ● covered │
+│                                │    tui              9 tickets  ● covered │
+│                                │    context-graph    7 tickets  ◐ partial │
+│                                │    adapters         6 tickets  ● covered │
+│                                │    cicd             2 tickets  ● covered │
+│                                │    config           0 tickets  ○ missing │
+│                                │                                          │
+│                                │  STACK                                   │
+│                                │    TypeScript (Node16, ES2022)           │
+│                                │    vitest, ESM                           │
+│                                │    ...                                   │
+```
+
+### Level 3: Ticket Focus Enhancement
+
+The existing L3 ticket focus view already shows the linked spec content. Traceability adds:
+- **Coverage indicator** — does this ticket link to a spec? (green check or red warning)
+- **Related tickets** — other tickets implementing the same spec section
+- **Related tests** — test files covering the spec (from `opcom trace`)
+
+```
+┌─ opcom/plan-stages ── P2 feature ── open ────────────────────────────────┐
+│                                                                           │
+│  Plan stages: sequential rounds with approval gates                       │
+│                                                                           │
+│  Status: open          Priority: P2                                       │
+│  Spec: orchestrator.md#plan-stages  ✓ linked                             │
+│  Deps: orchestrator-plan-engine (closed), modular-integrations (closed)   │
+│  Related: plan-overview-screen (same spec)                                │
+│  Tests: tests/orchestrator/executor.test.ts (partial)                     │
+│                                                                           │
+│  ─── SPEC (docs/spec/orchestrator.md § Plan Stages) ──────────────────  │
+│  ...                                                                      │
+```
+
+### Keybindings (additions)
+
+#### Level 1: Dashboard
+| Key | Action |
+|-----|--------|
+| `H` | Open health view (audit + coverage) |
+| `U` | Open use cases view |
+
+#### Health View
+| Key | Action |
+|-----|--------|
+| `j/k` | Navigate spec or ticket list |
+| `Enter` | Drill into spec section coverage |
+| `Esc` | Back to dashboard |
+
+#### Use Cases View
+| Key | Action |
+|-----|--------|
+| `j/k` | Navigate use case list |
+| `Enter` | Show use case detail |
+| `g` | Show gaps only for selected use case |
+| `Esc` | Back to dashboard |
+
 ## State Updates
 
 - Git state: refreshed when entering project view, every 30s background poll
@@ -292,6 +452,7 @@ See the ticket detail, linked spec, then decide to start an agent.
 - Agent status: real-time via WebSocket from station daemon
 - Work queue: re-sorted when tickets change or agents start/stop
 - Context usage: updated with each agent event
+- Health data: refreshed on ticket/spec change, cached between views
 
 ## Technology Candidates
 
