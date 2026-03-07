@@ -54,11 +54,16 @@ tests/                  — tests (source of truth: tests > code > docs)
 
 ## Current State
 
-Phase 1 complete (44 tests, clean build). Phases 2-8 built (876 tests passing). context-graph Phase 1 complete (8 tests). See docs/ROADMAP.md for what's next.
+1530 tests passing across 87 test files. See docs/ROADMAP.md for what's next.
+
+## Testing
+
+- `npx vitest run tests/path/to/specific.test.ts` — run a specific test file
+- `npx vitest run tests/orchestrator/` — run tests in a directory
+- Do NOT run the full test suite (`npm test`, `npx vitest run` without args). The verification pipeline runs it automatically after you finish. Running it yourself wastes time and blocks the worktree.
 
 ## Commands
 
-- `npm test` — run all tests (44 passing)
 - `npm run build` — build all packages
 - `npx opcom status` — show workspace dashboard
 - `npx opcom add <path>` — add a project

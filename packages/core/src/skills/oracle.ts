@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { WorkItem } from "@opcom/types";
 
 const exec = promisify(execFile);
@@ -28,35 +29,67 @@ export async function collectOracleInputs(
   projectPath: string,
   sessionId: string,
   ticket: WorkItem,
+  opts?: {
+    worktreePath?: string;
+    worktreeBranch?: string;
+  },
 ): Promise<OracleInput> {
-  // Get git diff for the session's changes
+  // Get git diff for the session's changes.
+  // In worktree mode, diff the worktree branch against main.
+  // Otherwise, diff HEAD~1 on the project path.
+  const diffCwd = opts?.worktreePath ?? projectPath;
   let gitDiff = "";
-  try {
-    const result = await exec("git", ["diff", "HEAD~1"], {
-      cwd: projectPath,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-    gitDiff = result.stdout;
-  } catch {
-    // Try diff against main if HEAD~1 fails
+
+  if (opts?.worktreeBranch) {
+    // Worktree mode: diff base..branch to capture all agent changes
     try {
-      const result = await exec("git", ["diff", "main"], {
-        cwd: projectPath,
+      const result = await exec("git", ["diff", `main...${opts.worktreeBranch}`], {
+        cwd: diffCwd,
         maxBuffer: 10 * 1024 * 1024,
       });
       gitDiff = result.stdout;
     } catch {
-      // No diff available
+      // Fallback: diff HEAD against main
+      try {
+        const result = await exec("git", ["diff", "main...HEAD"], {
+          cwd: diffCwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        gitDiff = result.stdout;
+      } catch {
+        // No diff available
+      }
+    }
+  } else {
+    try {
+      const result = await exec("git", ["diff", "HEAD~1"], {
+        cwd: diffCwd,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+      gitDiff = result.stdout;
+    } catch {
+      try {
+        const result = await exec("git", ["diff", "main"], {
+          cwd: diffCwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        gitDiff = result.stdout;
+      } catch {
+        // No diff available
+      }
     }
   }
 
-  // Read spec file if referenced in ticket
+  // Read spec file if referenced in ticket.
+  // Resolve relative links against the project path.
   let spec: string | undefined;
   if (ticket.links.length > 0) {
     for (const link of ticket.links) {
-      if (link.endsWith(".md") && existsSync(link)) {
+      if (!link.endsWith(".md")) continue;
+      const absLink = link.startsWith("/") ? link : join(projectPath, link);
+      if (existsSync(absLink)) {
         try {
-          spec = await readFile(link, "utf-8");
+          spec = await readFile(absLink, "utf-8");
           break;
         } catch {
           // Skip unreadable spec

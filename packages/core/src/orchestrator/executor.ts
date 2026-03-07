@@ -661,6 +661,10 @@ export class Executor {
             project.path,
             event.sessionId ?? "",
             workItem,
+            {
+              worktreePath: step.worktreePath,
+              worktreeBranch: step.worktreeBranch,
+            },
           );
           // Feed test results into oracle context
           if (result.testGate) {
@@ -768,65 +772,35 @@ export class Executor {
     const project = await loadProject(step.projectId);
     if (!project) return null;
 
-    // Start oracle agent session
-    const session = await this.sessionManager.startSession(
-      step.projectId,
-      this.plan.config.backend as "claude-code" | "opencode",
-      {
-        projectPath: project.path,
-        contextPacket: {
-          project: {
-            name: project.name,
-            path: project.path,
-            stack: project.stack,
-            testing: project.testing,
-            linting: project.linting,
-            services: project.services,
-          },
-          git: {
-            branch: project.git?.branch ?? "main",
-            remote: project.git?.remote ?? null,
-            clean: true,
-          },
-        },
-        systemPrompt: prompt,
-        model,
-        permissionMode: "default",
-        disallowedTools: [
-          "Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep",
-          "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
-        ],
-      },
-      `oracle:${step.ticketId}`,
-    );
+    // Set up event listeners BEFORE starting the session to avoid
+    // a race where the oracle finishes before listeners are registered.
+    let oracleSessionId: string | undefined;
+    let text = "";
+    let cleanup: () => void;
 
-    result.oracleSessionId = session.id;
-    log.info("oracle agent started", { ticketId: step.ticketId, sessionId: session.id });
-
-    // Wait for the oracle session to stop, collecting assistant text
-    const responseText = await new Promise<string>((resolve, reject) => {
-      let text = "";
-
+    const responseText = await new Promise<string>(async (resolve, reject) => {
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
-        if (sessionId !== session.id) return;
+        if (!oracleSessionId || sessionId !== oracleSessionId) return;
         if (ev.type === "message_delta" && ev.data?.text) {
           text += ev.data.text;
         }
       };
 
       const onStopped = (stopped: import("@opcom/types").AgentSession) => {
-        if (stopped.id !== session.id) return;
+        if (!oracleSessionId || stopped.id !== oracleSessionId) return;
         cleanup();
         resolve(text);
       };
 
       const timer = setTimeout(() => {
         cleanup();
-        this.sessionManager.stopSession(session.id).catch(() => {});
-        reject(new Error("Oracle agent timed out after 120s"));
-      }, 120_000);
+        if (oracleSessionId) {
+          this.sessionManager.stopSession(oracleSessionId).catch(() => {});
+        }
+        reject(new Error("Oracle agent timed out after 180s"));
+      }, 180_000);
 
-      const cleanup = () => {
+      cleanup = () => {
         clearTimeout(timer);
         this.sessionManager.off("agent_event", onEvent);
         this.sessionManager.off("session_stopped", onStopped);
@@ -834,13 +808,54 @@ export class Executor {
 
       this.sessionManager.on("agent_event", onEvent);
       this.sessionManager.on("session_stopped", onStopped);
+
+      // Now start the session — listeners are already in place
+      try {
+        const session = await this.sessionManager.startSession(
+          step.projectId,
+          this.plan.config.backend as "claude-code" | "opencode",
+          {
+            projectPath: project.path,
+            contextPacket: {
+              project: {
+                name: project.name,
+                path: project.path,
+                stack: project.stack,
+                testing: project.testing,
+                linting: project.linting,
+                services: project.services,
+              },
+              git: {
+                branch: project.git?.branch ?? "main",
+                remote: project.git?.remote ?? null,
+                clean: true,
+              },
+            },
+            systemPrompt: prompt,
+            model,
+            permissionMode: "default",
+            disallowedTools: [
+              "Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep",
+              "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
+            ],
+          },
+          `oracle:${step.ticketId}`,
+        );
+
+        oracleSessionId = session.id;
+        result.oracleSessionId = session.id;
+        log.info("oracle agent started", { ticketId: step.ticketId, sessionId: session.id });
+      } catch (err) {
+        cleanup();
+        reject(err);
+      }
     });
 
     if (!responseText.trim()) {
       result.oracleError = "Oracle agent produced no response";
       result.passed = false;
       result.failureReasons.push("Oracle: agent produced no response");
-      log.warn("oracle agent empty response", { ticketId: step.ticketId, sessionId: session.id });
+      log.warn("oracle agent empty response", { ticketId: step.ticketId, sessionId: oracleSessionId });
       return null;
     }
 
