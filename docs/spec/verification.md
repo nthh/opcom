@@ -474,12 +474,107 @@ When auto-rebase is in progress, the step shows a distinct status in the dashboa
 
 The step detail view (Enter on a rebasing step) shows which files conflicted and whether a clean rebase or agent resolution is being attempted.
 
+## Zero-Commit Oracle Arbitration
+
+When an agent exits without making any commits, the step currently hard-fails immediately. But this is ambiguous — the agent may have found that the work was already done (e.g., a previous step already implemented the feature, or the ticket describes existing behavior). The oracle can resolve this ambiguity.
+
+### Flow
+
+```
+Agent exits with 0 commits
+    |
+Oracle enabled?
+    |-- yes -> run oracle against current state (no diff)
+    |           |-- criteria met -> step done (already implemented)
+    |           |-- criteria unmet -> step failed (agent didn't do the work)
+    |-- no  -> step failed (can't verify, assume failure -- current behavior)
+```
+
+When oracle is enabled (now the default), the executor skips the "no commits = failure" short-circuit and instead sets the step to `verifying`, then runs the oracle against the current codebase state with an empty diff. If the oracle confirms all acceptance criteria are met, the step completes as done — no commits needed. If the oracle finds unmet criteria, the step fails with structured feedback (same as normal oracle failure).
+
+Tests are irrelevant in this path — if the agent made no changes, the test suite result is the same as before the step started.
+
+This means having oracle enabled naturally handles the "ticket already done" case without special logic — it's the normal verification pipeline running on an empty diff.
+
+### Executor Changes
+
+In `handleWorktreeCompletion()`, the `!hasWork` branch changes from immediate failure to:
+
+```typescript
+if (!hasWork) {
+  const roleVerify = this.stepVerification.get(step.ticketId);
+  const verification = roleVerify ?? this.plan.config.verification;
+
+  if (verification.runOracle) {
+    // Oracle can arbitrate: is the work already done?
+    step.status = "verifying";
+    await savePlan(this.plan);
+    this.emit("plan_updated", { plan: this.plan });
+
+    const result = await this.runVerification(step, event, {
+      runTests: false,   // tests are irrelevant (no changes)
+      runOracle: true,
+    });
+
+    if (result?.passed) {
+      // Oracle confirms criteria are met — step is done
+      step.status = "done";
+      step.verification = result;
+      // ... complete step (no merge needed — no commits)
+      return;
+    }
+    // Oracle says criteria unmet — fall through to failure
+  }
+
+  const reason = "Agent exited without making any commits";
+  await this.failStep(step, reason);
+  // ... existing failure handling
+}
+```
+
+## Verification Progress Visibility
+
+While verification runs (step status `verifying`), the TUI should expose what's happening inside the pipeline rather than showing an opaque spinner.
+
+### Sub-Phase Tracking
+
+The executor tracks which verification sub-phase is active:
+
+```typescript
+interface PlanStep {
+  // ... existing fields ...
+  verifyingPhase?: "testing" | "oracle";
+}
+```
+
+The executor sets `step.verifyingPhase = "testing"` before running the test gate and `step.verifyingPhase = "oracle"` before running the oracle. The TUI reads this to show distinct states.
+
+### TUI Display
+
+**Dashboard plan panel** — step row shows sub-phase:
+- `◎ testing...` (yellow) — test suite running
+- `◎ oracle...` (yellow) — oracle LLM call in progress
+
+**Plan step focus view** — when step is `verifying`, show:
+- Current sub-phase with elapsed time: `Testing... (12s)` or `Oracle evaluation... (8s)`
+- If test gate completed and oracle is running: show test results above oracle spinner
+- Oracle model name (from config) so the user knows which LLM is being called
+
+### Executor Events
+
+The executor emits granular events for TUI consumption:
+
+```
+step_verify_phase: { stepTicketId, phase: "testing" | "oracle", startedAt }
+```
+
+The TUI subscribes to these events to update the display in real time, rather than polling step state.
+
 ## Non-Goals
 
-- **Blocking on oracle for every step** — oracle is optional and off by default
 - **Unbounded retries** — max 2 retries by default, configurable but always finite
 - **Custom verification scripts** — use the test command for project-specific checks
-- **Verifying steps that had no writes** — those already fail via write-count check
 - **Smart retry strategies** — no backoff, no partial re-execution; each retry is a fresh agent session with failure context
 - **Cross-branch rebase** — auto-rebase only handles rebasing onto the plan's target branch (typically main), not arbitrary branch combinations
 - **Interactive rebase** — only non-interactive rebase is attempted; history rewriting is out of scope
+- **Streaming test output** — test output is captured and displayed after completion, not streamed live (simplifies implementation, avoids TUI flicker)
