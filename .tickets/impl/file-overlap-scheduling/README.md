@@ -18,13 +18,13 @@ When multiple steps are ready, check the context graph for file-level overlaps. 
 
 ## Tasks
 
-- [ ] In `startReadySteps()`, query context graph for each ready step's related files
-- [ ] Collect files claimed by in-progress/verifying steps
-- [ ] Filter out ready steps that overlap with claimed files or with each other
-- [ ] Sort ready steps by priority (P1 first), then by blockedBy count (fewer = first), then array order
-- [ ] Cache step file sets for the duration of the plan to avoid repeated graph queries
-- [ ] Graceful fallback: if graph is unavailable, skip overlap detection (start all ready steps)
-- [ ] Log when a step is held back due to file overlap
+- [x] In `startReadySteps()`, query context graph for each ready step's related files
+- [x] Collect files claimed by in-progress/verifying steps
+- [x] Filter out ready steps that overlap with claimed files or with each other
+- [x] Sort ready steps by priority (P1 first), then by blockedBy count (fewer = first), then array order
+- [x] Cache step file sets for the duration of the plan to avoid repeated graph queries
+- [x] Graceful fallback: if graph is unavailable, skip overlap detection (start all ready steps)
+- [x] Log when a step is held back due to file overlap
 
 ## Acceptance Criteria
 

@@ -561,6 +561,84 @@ describe("Executor file-overlap scheduling", () => {
   });
 
   // -----------------------------------------------------------------------
+  // Verifying-status step files block ready steps
+  // -----------------------------------------------------------------------
+  it("holds back a ready step that overlaps with a verifying step", async () => {
+    mockScanTickets.mockResolvedValue([
+      { id: "t-verifying", title: "Verifying", status: "open", priority: 2, type: "feature", filePath: "/tmp/tv.md", deps: [], links: [], tags: {} },
+      { id: "t-ready", title: "Ready", status: "open", priority: 2, type: "feature", filePath: "/tmp/tr.md", deps: [], links: [], tags: {} },
+      { id: "t-nonoverlap", title: "No overlap", status: "open", priority: 2, type: "feature", filePath: "/tmp/tn.md", deps: [], links: [], tags: {} },
+    ]);
+
+    mockQueryGraphContext.mockImplementation((_proj: string, ticketId: string) => {
+      if (ticketId === "t-verifying") return { relatedFiles: ["src/api.ts"], testFiles: [], driftSignals: [] };
+      if (ticketId === "t-ready") return { relatedFiles: ["src/api.ts", "src/handler.ts"], testFiles: [], driftSignals: [] };
+      if (ticketId === "t-nonoverlap") return { relatedFiles: ["src/utils.ts"], testFiles: [], driftSignals: [] };
+      return null;
+    });
+
+    const plan = makePlan([
+      // t-verifying is in verification phase (agent exited, tests running)
+      { ticketId: "t-verifying", projectId: "p", status: "verifying", blockedBy: [], agentSessionId: "sess-v1", startedAt: new Date().toISOString() },
+      { ticketId: "t-ready", projectId: "p", status: "ready", blockedBy: [] },
+      { ticketId: "t-nonoverlap", projectId: "p", status: "ready", blockedBy: [] },
+    ], { maxConcurrentAgents: 5 });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // t-ready overlaps with t-verifying on src/api.ts → held back
+    // t-nonoverlap has no overlap → should start
+    const startedTickets = mockSM.startCalls.map((c) => c.ticketId);
+    expect(startedTickets).toContain("t-nonoverlap");
+    expect(startedTickets).not.toContain("t-ready");
+    expect(startedTickets).not.toContain("t-verifying");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  // -----------------------------------------------------------------------
+  // Concurrency limit respected alongside file-overlap filtering
+  // -----------------------------------------------------------------------
+  it("respects maxConcurrentAgents even when no file overlaps exist", async () => {
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "T1", status: "open", priority: 2, type: "feature", filePath: "/tmp/t1.md", deps: [], links: [], tags: {} },
+      { id: "t2", title: "T2", status: "open", priority: 2, type: "feature", filePath: "/tmp/t2.md", deps: [], links: [], tags: {} },
+      { id: "t3", title: "T3", status: "open", priority: 2, type: "feature", filePath: "/tmp/t3.md", deps: [], links: [], tags: {} },
+    ]);
+
+    mockQueryGraphContext.mockImplementation((_proj: string, ticketId: string) => {
+      // All disjoint — no overlap
+      if (ticketId === "t1") return { relatedFiles: ["src/a.ts"], testFiles: [], driftSignals: [] };
+      if (ticketId === "t2") return { relatedFiles: ["src/b.ts"], testFiles: [], driftSignals: [] };
+      if (ticketId === "t3") return { relatedFiles: ["src/c.ts"], testFiles: [], driftSignals: [] };
+      return null;
+    });
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+      { ticketId: "t2", projectId: "p", status: "ready", blockedBy: [] },
+      { ticketId: "t3", projectId: "p", status: "ready", blockedBy: [] },
+    ], { maxConcurrentAgents: 2 }); // Only 2 slots
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Only 2 should start despite 3 being ready with no overlaps
+    expect(mockSM.startCalls).toHaveLength(2);
+    expect(plan.steps.filter((s) => s.status === "in-progress")).toHaveLength(2);
+    expect(plan.steps.filter((s) => s.status === "ready")).toHaveLength(1);
+
+    executor.stop();
+    await runPromise;
+  });
+
+  // -----------------------------------------------------------------------
   // Caching: getStepFiles caches results per ticketId
   // -----------------------------------------------------------------------
   it("caches file lists per ticketId (queryGraphContext called once per step)", async () => {
