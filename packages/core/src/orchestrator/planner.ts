@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type {
   Plan,
   PlanStep,
+  PlanStage,
   PlanScope,
   OrchestratorConfig,
   WorkItem,
@@ -411,4 +412,169 @@ export function detectCycles(steps: PlanStep[]): string[][] {
   }
 
   return cycles;
+}
+
+/**
+ * Compute stages from the DAG — each "wave" of steps that can run in parallel
+ * at the same dependency depth forms a stage.
+ *
+ * Stage 1: all steps with no deps (leaf nodes)
+ * Stage 2: steps whose deps were all in stage 1
+ * Stage 3: steps whose deps were all in stages 1 or 2
+ * ...
+ */
+export function computeStages(steps: PlanStep[]): PlanStage[] {
+  const stages: PlanStage[] = [];
+  const assigned = new Set<string>();
+  const allIds = new Set(steps.map((s) => s.ticketId));
+
+  while (assigned.size < steps.length) {
+    const wave = steps.filter(
+      (s) =>
+        !assigned.has(s.ticketId) &&
+        s.blockedBy
+          .filter((dep) => allIds.has(dep))
+          .every((dep) => assigned.has(dep)),
+    );
+
+    if (wave.length === 0) {
+      // Remaining steps have unresolvable deps (cycles or external deps) —
+      // put them all in a final stage to avoid infinite loop
+      const remaining = steps.filter((s) => !assigned.has(s.ticketId));
+      stages.push({
+        index: stages.length,
+        stepTicketIds: remaining.map((s) => s.ticketId),
+        status: "pending",
+      });
+      break;
+    }
+
+    stages.push({
+      index: stages.length,
+      stepTicketIds: wave.map((s) => s.ticketId),
+      status: "pending",
+    });
+    wave.forEach((s) => assigned.add(s.ticketId));
+  }
+
+  return stages;
+}
+
+/**
+ * Build stages from explicit user-defined stage definitions.
+ * Each entry in `stageDefinitions` is an array of ticket IDs that form a stage.
+ * Validates that deps are respected: a ticket cannot be staged before its deps.
+ */
+export function buildExplicitStages(
+  steps: PlanStep[],
+  stageDefinitions: string[][],
+): PlanStage[] {
+  const errors = validateExplicitStages(steps, stageDefinitions);
+  if (errors.length > 0) {
+    throw new Error(`Invalid stage definitions: ${errors.join("; ")}`);
+  }
+
+  const stages: PlanStage[] = stageDefinitions.map((ticketIds, index) => ({
+    index,
+    stepTicketIds: ticketIds,
+    status: "pending" as const,
+  }));
+
+  // Steps not listed in any explicit stage go into a final auto-stage
+  const explicitIds = new Set(stageDefinitions.flat());
+  const unlisted = steps.filter((s) => !explicitIds.has(s.ticketId));
+  if (unlisted.length > 0) {
+    stages.push({
+      index: stages.length,
+      stepTicketIds: unlisted.map((s) => s.ticketId),
+      status: "pending",
+    });
+  }
+
+  return stages;
+}
+
+/**
+ * Validate explicit stage definitions against the dependency graph.
+ * Returns an array of error messages (empty if valid).
+ */
+export function validateExplicitStages(
+  steps: PlanStep[],
+  stageDefinitions: string[][],
+): string[] {
+  const errors: string[] = [];
+  const stepMap = new Map(steps.map((s) => [s.ticketId, s]));
+  const allStepIds = new Set(steps.map((s) => s.ticketId));
+
+  // Check that all referenced tickets exist as steps
+  for (let i = 0; i < stageDefinitions.length; i++) {
+    for (const id of stageDefinitions[i]) {
+      if (!stepMap.has(id)) {
+        errors.push(`Stage ${i + 1}: ticket "${id}" is not a plan step`);
+      }
+    }
+  }
+
+  // Build ticket → stage index mapping
+  const ticketStage = new Map<string, number>();
+  for (let i = 0; i < stageDefinitions.length; i++) {
+    for (const id of stageDefinitions[i]) {
+      if (ticketStage.has(id)) {
+        errors.push(`Ticket "${id}" appears in multiple stages`);
+      }
+      ticketStage.set(id, i);
+    }
+  }
+
+  // Check dependency ordering: a ticket's deps must be in an earlier stage
+  for (let i = 0; i < stageDefinitions.length; i++) {
+    for (const id of stageDefinitions[i]) {
+      const step = stepMap.get(id);
+      if (!step) continue;
+      for (const dep of step.blockedBy) {
+        if (!allStepIds.has(dep)) continue; // external dep — skip
+        const depStageIdx = ticketStage.get(dep);
+        if (depStageIdx !== undefined && depStageIdx >= i) {
+          errors.push(
+            `Stage ${i + 1}: ticket "${id}" depends on "${dep}" which is in stage ${depStageIdx + 1} (must be earlier)`,
+          );
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Compute the summary for a completed stage by examining its steps.
+ */
+export function computeStageSummary(
+  stage: PlanStage,
+  steps: PlanStep[],
+): import("@opcom/types").StageSummary {
+  const stageSteps = steps.filter((s) => stage.stepTicketIds.includes(s.ticketId));
+
+  let totalPassed = 0;
+  let totalFailed = 0;
+  let hasTestResults = false;
+
+  for (const step of stageSteps) {
+    if (step.verification?.testGate) {
+      hasTestResults = true;
+      totalPassed += step.verification.testGate.passedTests;
+      totalFailed += step.verification.testGate.failedTests;
+    }
+  }
+
+  const startedAt = stage.startedAt ? new Date(stage.startedAt).getTime() : Date.now();
+  const completedAt = stage.completedAt ? new Date(stage.completedAt).getTime() : Date.now();
+
+  return {
+    completed: stageSteps.filter((s) => s.status === "done").length,
+    failed: stageSteps.filter((s) => s.status === "failed" || s.status === "needs-rebase").length,
+    skipped: stageSteps.filter((s) => s.status === "skipped").length,
+    durationMs: completedAt - startedAt,
+    ...(hasTestResults ? { testResults: { passed: totalPassed, failed: totalFailed } } : {}),
+  };
 }
