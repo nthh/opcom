@@ -65,6 +65,20 @@ import {
   scrollToBottom as planStepScrollToBottom,
   type PlanStepFocusState,
 } from "./views/plan-step-focus.js";
+import {
+  renderHealthView,
+  createHealthViewState,
+  healthScrollUp,
+  healthScrollDown,
+  type HealthViewState,
+} from "./views/health-view.js";
+import {
+  computeHealthData,
+  computeSpecSectionCoverage,
+  formatHealthBar,
+  isHealthWarning,
+  type HealthData,
+} from "./health-data.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -96,6 +110,11 @@ export class TuiApp {
   // Debounce render
   private renderScheduled = false;
   private helpVisible = false;
+
+  // Health view
+  private healthVisible = false;
+  private healthViewState: HealthViewState = createHealthViewState();
+  private healthData: HealthData | null = null;
 
   // Search mode
   private searchMode = false;
@@ -133,6 +152,9 @@ export class TuiApp {
 
     // Sync initial data
     this.syncData();
+
+    // Load health data in background
+    this.refreshHealthData();
 
     // Listen for data changes
     this.client.onEvent(() => {
@@ -268,6 +290,9 @@ export class TuiApp {
 
     if (this.helpVisible) {
       this.renderHelp();
+    } else if (this.healthVisible) {
+      const focusPanel = { id: "health", x: 0, y: 0, width: cols, height: rows - 1, title: "Health" };
+      renderHealthView(this.buf, focusPanel, this.healthViewState);
     } else {
       switch (this.level) {
         case 1:
@@ -306,6 +331,15 @@ export class TuiApp {
     const levelNames = ["", "Dashboard", "Project", "Focus"];
     const levelStr = dim(levelNames[this.level] ?? "");
 
+    // Health bar summary for L1
+    let healthStr = "";
+    if (this.level === 1 && this.healthData) {
+      const bar = formatHealthBar(this.healthData);
+      healthStr = isHealthWarning(this.healthData)
+        ? ` ${dim("|")} ${color(ANSI.red, bar)}`
+        : ` ${dim("|")} ${dim(bar)}`;
+    }
+
     let keysStr = "";
     switch (this.level) {
       case 1:
@@ -316,9 +350,9 @@ export class TuiApp {
         } else if (this.dashboardState.planPanel) {
           const ps = this.dashboardState.planPanel.plan.status;
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
-          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  ?:help  q:quit`);
+          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  f/F:project  /:search  1-4:priority  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  H:health  f/F:project  /:search  ?:help  q:quit");
         }
         break;
       case 2:
@@ -336,7 +370,7 @@ export class TuiApp {
         break;
     }
 
-    const statusLine = ` ${modeStr} ${dim("|")} ${levelStr} ${dim("|")} ${keysStr}`;
+    const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${keysStr}`;
     this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
   }
 
@@ -385,6 +419,13 @@ export class TuiApp {
     }
 
 
+    // Handle health view overlay
+    if (this.healthVisible) {
+      this.handleHealthViewInput(data);
+      this.scheduleRender();
+      return;
+    }
+
     // Handle help overlay
     if (this.helpVisible) {
       if (data === "?" || data === "\x1b" || data === "q") {
@@ -406,6 +447,7 @@ export class TuiApp {
           this.syncData();
           this.scheduleRender();
         }).catch(() => {});
+        this.refreshHealthData();
         return;
     }
 
@@ -575,6 +617,10 @@ export class TuiApp {
         state.selectedIndex[1] = 0;
         state.scrollOffset[1] = 0;
         clampDashboard(state);
+        return;
+
+      case "H":
+        this.openHealthView();
         return;
     }
   }
@@ -1515,6 +1561,86 @@ export class TuiApp {
     } catch {
       // Failed to open URL
     }
+  }
+
+  // --- Health View ---
+
+  private openHealthView(): void {
+    this.healthVisible = true;
+    this.healthViewState = createHealthViewState();
+    this.healthViewState.data = this.healthData;
+
+    // If data is stale or missing, refresh
+    if (!this.healthData) {
+      this.refreshHealthData();
+    }
+  }
+
+  private handleHealthViewInput(data: string): void {
+    const layout = getLayout(1, this.termSize.cols, this.termSize.rows);
+    const panelHeight = this.termSize.rows - 1;
+
+    switch (data) {
+      case "\x1b": // Escape
+      case "q":
+        if (this.healthViewState.drilledSpec) {
+          // Back from drill-down to overview
+          this.healthViewState.drilledSpec = null;
+          this.healthViewState.sectionCoverage = null;
+          this.healthViewState.drillSelectedIndex = 0;
+          this.healthViewState.drillScrollOffset = 0;
+        } else {
+          this.healthVisible = false;
+        }
+        return;
+
+      case "j":
+      case "\x1b[B":
+        healthScrollDown(this.healthViewState, panelHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        healthScrollUp(this.healthViewState);
+        return;
+
+      case "\r":
+      case "\n":
+        // Drill into selected spec
+        if (!this.healthViewState.drilledSpec && this.healthViewState.data) {
+          const spec = this.healthViewState.data.specs[this.healthViewState.selectedIndex];
+          if (spec) {
+            this.healthViewState.drilledSpec = spec.name;
+            this.healthViewState.sectionCoverage = null;
+            this.healthViewState.drillSelectedIndex = 0;
+            this.healthViewState.drillScrollOffset = 0;
+
+            // Load section coverage async
+            computeSpecSectionCoverage(spec.name).then((sections) => {
+              if (this.healthViewState.drilledSpec === spec.name) {
+                this.healthViewState.sectionCoverage = sections;
+                this.scheduleRender();
+              }
+            }).catch(() => {});
+          }
+        }
+        return;
+
+      case "?":
+        this.healthVisible = false;
+        this.helpVisible = true;
+        return;
+    }
+  }
+
+  private refreshHealthData(): void {
+    computeHealthData().then((data) => {
+      this.healthData = data;
+      if (this.healthVisible) {
+        this.healthViewState.data = data;
+      }
+      this.scheduleRender();
+    }).catch(() => {});
   }
 
   private navigateBack(): void {
