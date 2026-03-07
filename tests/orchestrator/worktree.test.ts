@@ -435,4 +435,65 @@ describe("WorktreeManager", () => {
       await wm.remove("ticket-1");
     });
   });
+
+  describe("attemptRebase", () => {
+    it("succeeds with clean rebase (no conflicts)", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      // Agent makes changes in worktree (different file from what main will change)
+      await writeFile(join(info.worktreePath, "feature.ts"), "export const feature = true;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: info.worktreePath });
+      await exec("git", ["commit", "-m", "agent work"], { cwd: info.worktreePath });
+
+      // Meanwhile, main adds a different file
+      await writeFile(join(tmpDir, "other.ts"), "export const other = 1;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: tmpDir });
+      await exec("git", ["commit", "-m", "main change"], { cwd: tmpDir });
+
+      const result = await wm.attemptRebase("step-1", "main");
+
+      expect(result.rebased).toBe(true);
+      expect(result.conflict).toBe(false);
+
+      // Worktree should now have both files
+      expect(existsSync(join(info.worktreePath, "feature.ts"))).toBe(true);
+      expect(existsSync(join(info.worktreePath, "other.ts"))).toBe(true);
+
+      // Cleanup
+      await wm.remove("step-1");
+    });
+
+    it("detects conflicts and aborts rebase", async () => {
+      const info = await wm.create(tmpDir, "step-1", "ticket-1");
+
+      // Agent changes README in worktree
+      await writeFile(join(info.worktreePath, "README.md"), "# Changed by agent", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: info.worktreePath });
+      await exec("git", ["commit", "-m", "agent change"], { cwd: info.worktreePath });
+
+      // Meanwhile, main also changes README (conflict!)
+      await writeFile(join(tmpDir, "README.md"), "# Changed on main", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: tmpDir });
+      await exec("git", ["commit", "-m", "main change"], { cwd: tmpDir });
+
+      const result = await wm.attemptRebase("step-1", "main");
+
+      expect(result.rebased).toBe(false);
+      expect(result.conflict).toBe(true);
+      expect(result.conflictFiles).toBeDefined();
+
+      // Worktree should be in a clean state (rebase was aborted)
+      const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: info.worktreePath });
+      expect(stdout.trim()).toBe("");
+
+      // Cleanup
+      await wm.remove("step-1");
+    });
+
+    it("returns error for untracked worktree", async () => {
+      const result = await wm.attemptRebase("nonexistent");
+      expect(result.rebased).toBe(false);
+      expect(result.error).toBeDefined();
+    });
+  });
 });

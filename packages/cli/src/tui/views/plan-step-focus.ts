@@ -79,6 +79,7 @@ function stepStatusIcon(status: string): string {
     case "failed": return "\u2717";  // ✗
     case "skipped": return "\u2298"; // ⊘
     case "needs-rebase": return "\u21c4"; // ⇄
+    case "rebasing": return "\u27f3"; // ⟳
     default: return "?";
   }
 }
@@ -91,6 +92,7 @@ function stepStatusColor(status: string): string {
     case "done": return ANSI.green;
     case "failed": return ANSI.red;
     case "needs-rebase": return ANSI.red;
+    case "rebasing": return ANSI.yellow;
     case "skipped": return ANSI.dim;
     case "blocked": return ANSI.dim;
     default: return ANSI.white;
@@ -134,9 +136,13 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
   const lines: string[] = [];
 
   // --- Status ---
-  const icon = stepStatusIcon(step.status);
-  const sColor = stepStatusColor(step.status);
-  lines.push(`${dim("Status:")}    ${color(sColor, `${icon} ${step.status}`)}`);
+  const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
+  const icon = stepStatusIcon(displayStatus);
+  const sColor = stepStatusColor(displayStatus);
+  lines.push(`${dim("Status:")}    ${color(sColor, `${icon} ${displayStatus}`)}`);
+  if (step.rebaseConflict) {
+    lines.push(`${dim("Conflicts:")} ${step.rebaseConflict.files.join(", ")}`);
+  }
   lines.push("");
 
   // --- Ticket summary ---

@@ -20,6 +20,7 @@ export const settingsDefs: SettingDef[] = [
   { key: "orchestrator.runTests", type: "boolean", description: "Run tests as verification gate" },
   { key: "orchestrator.runOracle", type: "boolean", description: "Run oracle verification after steps" },
   { key: "orchestrator.maxRetries", type: "number", description: "Max verification retries per step (0 = fail immediately)", min: 0, max: 10 },
+  { key: "orchestrator.autoRebase", type: "boolean", description: "Auto-rebase on merge conflict (agent-assisted resolution)" },
   { key: "notifications.enabled", type: "boolean", description: "Enable notification delivery" },
 ];
 
@@ -40,6 +41,7 @@ export function defaultSettings(): OpcomSettings {
       runTests: true,
       runOracle: true,
       maxRetries: 2,
+      autoRebase: true,
     },
     notifications: {
       enabled: false,
@@ -138,6 +140,7 @@ export function validateSettings(data: unknown): OpcomSettings {
       runTests: typeof orch.runTests === "boolean" ? orch.runTests : defaults.orchestrator.runTests,
       runOracle: typeof orch.runOracle === "boolean" ? orch.runOracle : defaults.orchestrator.runOracle,
       maxRetries: typeof orch.maxRetries === "number" ? orch.maxRetries : defaults.orchestrator.maxRetries,
+      autoRebase: typeof orch.autoRebase === "boolean" ? orch.autoRebase : defaults.orchestrator.autoRebase,
     },
     notifications: {
       enabled: typeof notif.enabled === "boolean" ? notif.enabled : defaults.notifications.enabled,
