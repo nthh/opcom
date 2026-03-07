@@ -563,6 +563,42 @@ describe("rebuildDisplayLines live update", () => {
   });
 });
 
+describe("verification phase visibility", () => {
+  it("shows testing sub-phase when verifyingPhase is testing", () => {
+    const step = makePlanStep({ status: "verifying", verifyingPhase: "testing" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasRunningTests = state.displayLines.some((l) => l.includes("running tests"));
+    expect(hasRunningTests).toBe(true);
+  });
+
+  it("shows oracle sub-phase when verifyingPhase is oracle", () => {
+    const step = makePlanStep({ status: "verifying", verifyingPhase: "oracle" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasOracleEval = state.displayLines.some((l) => l.includes("oracle evaluation"));
+    expect(hasOracleEval).toBe(true);
+  });
+
+  it("shows plain verifying when no sub-phase set", () => {
+    const step = makePlanStep({ status: "verifying" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasVerifying = state.displayLines.some((l) => l.includes("verifying"));
+    expect(hasVerifying).toBe(true);
+    const hasRunningTests = state.displayLines.some((l) => l.includes("running tests"));
+    const hasOracleEval = state.displayLines.some((l) => l.includes("oracle evaluation"));
+    expect(hasRunningTests).toBe(false);
+    expect(hasOracleEval).toBe(false);
+  });
+});
+
 describe("verification display with failed tests", () => {
   it("shows failure count and reasons", () => {
     const step = makePlanStep({ status: "failed" });

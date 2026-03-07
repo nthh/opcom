@@ -41,6 +41,7 @@ export interface PlanStep {
   attempt?: number;                      // current attempt (1 = first try, 2+ = retry)
   previousVerification?: VerificationResult;  // feedback from last failed attempt
   rebaseConflict?: RebaseConflict;       // set when agent needs to resolve merge conflicts
+  verifyingPhase?: "testing" | "oracle"; // which verification sub-phase is active
 }
 
 export interface RebaseConflict {
