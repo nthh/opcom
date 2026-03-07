@@ -1,7 +1,7 @@
 ---
 id: oracle-agent-session
 title: "Oracle evaluation as agent session instead of bespoke llmCall"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:
@@ -32,10 +32,10 @@ Replace `llmCall()` with an agent session using the existing `SessionManager` an
 
 ## Tasks
 
-- [ ] Add `oracle` built-in role to `BUILTIN_ROLES` in `packages/core/src/config/roles.ts`
-- [ ] Update `docs/spec/roles.md` with oracle role documentation
-- [ ] Add `oracleSessionId?: string` to `VerificationResult` in `packages/types/src/plan.ts`
-- [ ] Rewrite oracle section of `runVerification()` in executor.ts:
+- [x] Add `oracle` built-in role to `BUILTIN_ROLES` in `packages/core/src/config/roles.ts`
+- [x] Update `docs/spec/roles.md` with oracle role documentation
+- [x] Add `oracleSessionId?: string` to `VerificationResult` in `packages/types/src/plan.ts`
+- [x] Rewrite oracle section of `runVerification()` in executor.ts:
   - Start oracle agent via `sessionManager.startSession()` with oracle role
   - Pass formatted oracle prompt as `systemPrompt` in config
   - Use `plan.config.backend` and optional `oracleModel`
@@ -43,14 +43,14 @@ Replace `llmCall()` with an agent session using the existing `SessionManager` an
   - Collect assistant text from event stream
   - Parse with `parseOracleResponse()`
   - Store `oracleSessionId` on result
-- [ ] Remove `llmCall()` from executor
-- [ ] Tests
+- [x] Remove `llmCall()` from executor
+- [x] Tests
 
 ## Acceptance Criteria
 
-- [ ] Oracle runs as an agent session through SessionManager
-- [ ] Oracle uses the plan's configured backend
-- [ ] Oracle prompt delivered via adapter (no CLI argument overflow)
-- [ ] `executor.llmCall()` is removed
-- [ ] Oracle session ID stored on VerificationResult
-- [ ] Existing oracle and verification tests pass
+- [x] Oracle runs as an agent session through SessionManager
+- [x] Oracle uses the plan's configured backend
+- [x] Oracle prompt delivered via adapter (no CLI argument overflow)
+- [x] `executor.llmCall()` is removed
+- [x] Oracle session ID stored on VerificationResult
+- [x] Existing oracle and verification tests pass
