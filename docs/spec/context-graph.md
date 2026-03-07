@@ -503,6 +503,259 @@ GRAPH
 
 L3 drill-down shows drift signals and test coverage map.
 
+### P7.5: Traceability commands {#traceability}
+
+Inspired by trk (`~/projects/folia/scripts/trk.py`), opcom gains traceability commands that enforce spec-driven development and provide visibility into spec-ticket-code-test coverage.
+
+#### `opcom scaffold <spec-file>`
+
+Generates tickets from spec section anchors. This mechanically enforces the specs-before-tickets rule — you write a spec with `## Section {#anchor}` headings, then scaffold creates the tickets.
+
+```bash
+opcom scaffold docs/spec/integrations.md           # create tickets for each section
+opcom scaffold docs/spec/integrations.md --dry-run  # preview what would be created
+opcom scaffold --all                                # scaffold all specs with unlinked sections
+```
+
+**Anchor extraction:**
+Parse spec for `## Title {#anchor-id}` headings (Pandoc-style). Skip non-actionable sections (overview, summary, non-goals, architecture, references).
+
+```typescript
+const SECTION_PATTERN = /^##\s+(.+?)\s*\{#([a-z0-9-]+)\}\s*$/gm;
+const SKIP_ANCHORS = new Set([
+  "overview", "summary", "architecture", "non-goals",
+  "references", "dependencies", "related-docs",
+]);
+
+interface SpecSection {
+  title: string;
+  anchor: string;
+  specFile: string;
+}
+
+function extractSections(specPath: string): SpecSection[] {
+  const content = readFileSync(specPath, "utf-8");
+  const sections: SpecSection[] = [];
+  for (const match of content.matchAll(SECTION_PATTERN)) {
+    if (!SKIP_ANCHORS.has(match[2])) {
+      sections.push({ title: match[1], anchor: match[2], specFile: specPath });
+    }
+  }
+  return sections;
+}
+```
+
+**Ticket generation:**
+For each section without an existing ticket, create `.tickets/impl/<anchor>/README.md`:
+
+```yaml
+---
+id: <anchor>
+title: "<Spec Title>: <Section Title>"
+status: open
+type: feature
+priority: 2
+created: <today>
+links:
+  - <specFile>#<anchor>
+---
+
+# <Section Title>
+
+Implement the <section title> section of the <spec name> spec.
+
+See [spec](<specFile>#<anchor>) for requirements.
+```
+
+**Skip logic:**
+- Skip sections that already have a ticket (scan `.tickets/impl/` for matching `links:` entries)
+- Skip sections with anchors in SKIP_ANCHORS
+- `--dry-run` prints what would be created without writing files
+
+#### `opcom audit`
+
+Traceability audit report. Shows spec coverage, orphan tickets, and link health across the workspace.
+
+```bash
+opcom audit                    # full audit across all projects
+opcom audit --project opcom    # single project
+opcom audit --verbose          # include file-level detail
+```
+
+**Output:**
+
+```
+TRACEABILITY AUDIT — opcom
+============================================================
+
+SPEC COVERAGE:
+  Specs:              16
+  With tickets:       14 (88%)
+  With tests:          8 (50%)
+  Fully covered:       6 (38%)    # has both tickets AND tests
+
+TICKET HEALTH:
+  Total tickets:      63
+  With spec links:    51 (81%)    # have links: to a spec
+  Without spec links: 12 (19%)   # VIOLATION: specs-before-tickets rule
+  Closed with code:   28 (44%)
+  Closed with tests:  22 (35%)
+
+ORPHAN CODE:
+  Source files:       142
+  Covered by tickets:  98 (69%)
+  Orphan files:        44 (31%)
+
+  Top orphan directories:
+    packages/core/src/cloud/     8 files
+    packages/cli/src/commands/   6 files
+    ...
+
+LINK VALIDATION:
+  Total links:        127
+  Valid:              124
+  Broken:               3
+    - dashboard-deploy-status → docs/spec/cicd.md#dashboard-l1 (anchor not found)
+    ...
+```
+
+**Data sources:**
+- Without context-graph: scan `.tickets/impl/` for frontmatter, scan `docs/spec/` for files, validate link paths exist
+- With context-graph: additionally check file-level coverage via graph edges, test assertions
+
+#### `opcom trace <path>`
+
+Reverse lookup: given a file path, show what specs and tickets cover it.
+
+```bash
+opcom trace packages/core/src/orchestrator/executor.ts
+```
+
+```
+Coverage for: packages/core/src/orchestrator/executor.ts
+============================================================
+
+Specs:
+  orchestrator.md         § Executor
+  orchestrator.md         § Plan Stages
+  verification.md         § Test Gate
+
+Tickets:
+  orchestrator-executor     [closed]
+  plan-stages               [open]
+  executor-test-gate        [closed]
+
+Tests:
+  tests/orchestrator/executor.test.ts
+  tests/orchestrator/executor-worktree.test.ts
+
+Total: 3 specs, 3 tickets, 2 test files
+```
+
+**Without graph:** Walk `.tickets/impl/*/README.md` for `code:` and `links:` fields matching the path. Walk `docs/spec/` for references.
+**With graph:** `getEdgesTo(fileNodeId)` → follow `implements`, `asserts`, `links_to` edges.
+
+#### `opcom coverage`
+
+Spec-level coverage report — which specs are implemented, tested, and which have gaps.
+
+```bash
+opcom coverage                     # all specs
+opcom coverage docs/spec/cicd.md   # one spec with section detail
+```
+
+```
+SPEC COVERAGE
+============================================================
+
+ Spec                Sections  Tickets  Tests   Status
+ detection              —        4        3    ✓ covered
+ config                 —        2        2    ✓ covered
+ adapters               —        8        5    ◐ partial
+ orchestrator           12       8        4    ◐ partial
+ tui                    —        6        2    ◐ partial
+ cicd                   5        2        0    ○ no tests
+ context-graph          8        7        1    ○ needs work
+ integrations           7        1        0    ○ needs work
+ verification           —        3        3    ✓ covered
+ ...
+
+ Summary: 16 specs, 10 covered (63%), 4 partial, 2 uncovered
+```
+
+With `--sections` or a specific spec file, drill into section-level coverage:
+
+```
+docs/spec/orchestrator.md — 12 sections, 8 tickets, 4 test files
+
+ Section                     Ticket                    Tests
+ § planner                   orchestrator-plan-engine   ✓ 2
+ § executor                  orchestrator-executor      ✓ 2
+ § planning-sessions         orchestrator-planning-…    ○ 0
+ § ticket-hygiene            ticket-hygiene             ✓ 1
+ § plan-overview-screen      plan-overview-screen       ○ 0
+ § plan-stages               plan-stages                ○ 0
+ ...
+```
+
+#### `opcom uc`
+
+Use-case management with automated readiness checking.
+
+```bash
+opcom uc ls                    # list use cases with readiness %
+opcom uc show UC-001           # show one use case with requirement status
+opcom uc gaps UC-001           # show only unmet requirements
+```
+
+**Readiness checkers:**
+
+Each `requires:` category has a checker that validates against project state:
+
+```typescript
+const UC_CHECKERS: Record<string, (item: string) => boolean> = {
+  specs:    (name) => existsSync(`docs/spec/${name}.md`),
+  features: (name) => checkFeatureImplemented(name),  // grep for key exports/types
+  tickets:  (id)   => getTicketStatus(id) === "closed",
+};
+
+function computeReadiness(requires: Record<string, string[]>): {
+  total: number;
+  satisfied: number;
+  details: Record<string, Array<{ item: string; ok: boolean }>>;
+} {
+  // For each category, run the checker on each item
+}
+```
+
+**Output:**
+
+```
+UC-001: First-Run Onboarding
+Status: partial  Priority: P0
+Persona: Solo developer managing multiple projects with coding agents
+
+Requirements: 8/11 satisfied (73%)
+
+  specs: (6/6)
+    [x] detection
+    [x] config
+    [x] adapters
+    [x] integrations
+    [x] cicd
+    [x] tui
+
+  features: (2/4)
+    [x] project-detection
+    [x] stack-detection
+    [x] ticket-scanning
+    [ ] integration-auto-detect
+    [ ] cicd-dashboard-status
+
+  tickets: (0/1)
+    [ ] modular-integrations
+```
+
 ## Phase 8: Multi-Project & Cross-Project Analysis {#phase-8}
 
 *Status: NOT STARTED*

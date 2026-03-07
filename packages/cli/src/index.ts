@@ -33,6 +33,7 @@ import {
   runPlanHygiene,
 } from "./commands/plan.js";
 import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js";
+import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -301,6 +302,58 @@ async function main(): Promise<void> {
       return runCI(ciProject, { watch: ciWatch });
     }
 
+    case "scaffold": {
+      const scaffoldAll = args.includes("--all");
+      const scaffoldDryRun = args.includes("--dry-run");
+      const scaffoldSpec = args.filter(a => !a.startsWith("--"))[1];
+      return runScaffold(scaffoldSpec, { dryRun: scaffoldDryRun, all: scaffoldAll });
+    }
+
+    case "audit": {
+      const auditVerbose = args.includes("--verbose") || args.includes("-v");
+      const auditProjectIdx = args.indexOf("--project");
+      const auditProject = auditProjectIdx !== -1 ? args[auditProjectIdx + 1] : undefined;
+      return runAudit({ verbose: auditVerbose, project: auditProject });
+    }
+
+    case "trace": {
+      if (!args[1]) {
+        console.error("  Usage: opcom trace <file-path>");
+        process.exit(1);
+      }
+      return runTrace(args[1]);
+    }
+
+    case "coverage": {
+      return runCoverage(args[1]);
+    }
+
+    case "uc": {
+      const ucSub = args[1];
+      switch (ucSub) {
+        case "ls":
+        case "list":
+        case undefined:
+          return runUcLs();
+        case "show":
+          if (!args[2]) {
+            console.error("  Usage: opcom uc show <uc-id>");
+            process.exit(1);
+          }
+          return runUcShow(args[2]);
+        case "gaps":
+          if (!args[2]) {
+            console.error("  Usage: opcom uc gaps <uc-id>");
+            process.exit(1);
+          }
+          return runUcGaps(args[2]);
+        default:
+          console.error("  Usage: opcom uc [ls|show|gaps]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "dev": {
       if (!args[1]) {
         console.error("  Usage: opcom dev <project> [service]");
@@ -441,6 +494,14 @@ function printHelp(): void {
     integrations [list]          Show available/active integration modules
     integrations enable <id>     Enable an integration module
     integrations disable <id>    Disable an integration module
+    scaffold <spec-file>         Generate tickets from spec section anchors
+    scaffold --all               Scaffold all specs
+    audit [--verbose]            Traceability audit (spec coverage, broken links)
+    trace <file-path>            Reverse lookup: what covers this file?
+    coverage [spec-file]         Spec-to-ticket coverage report
+    uc [ls]                      List use cases with readiness %
+    uc show <id>                 Show use case with requirement status
+    uc gaps <id>                 Show unmet requirements for a use case
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help

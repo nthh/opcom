@@ -232,7 +232,7 @@ Add CI and deploy status indicators per project, next to git state:
 
 Where `✔` = last pipeline passed, `✖` = failed, `◌` = in progress, `—` = no CI.
 
-### Dashboard Deploy Column (L1)
+### Dashboard Deploy Column (L1) {#dashboard-deploy-column-l1}
 
 When projects have deployment data, the dashboard gains a deploy status column showing the most relevant deployment per project:
 
