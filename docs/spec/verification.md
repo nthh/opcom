@@ -96,14 +96,14 @@ interface OrchestratorConfig {
   autoCommit: boolean;
   verification: {
     runTests: boolean;           // default true — run full test suite as gate
-    runOracle: boolean;          // default false — oracle requires LLM config
+    runOracle: boolean;          // default true — LLM checks diff against acceptance criteria
     oracleModel?: string;        // model for oracle calls (default: project's configured model)
     maxRetries: number;          // default 2 — retries on verification failure (0 = fail immediately)
   };
 }
 ```
 
-Oracle is off by default — it requires an LLM provider to be configured. Test gate is on by default. Retries default to 2. All can be toggled per-plan.
+Both test gate and oracle are on by default. Retries default to 2. All can be toggled per-plan.
 
 ## Executor Integration
 

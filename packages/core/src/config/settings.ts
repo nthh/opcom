@@ -38,7 +38,7 @@ export function defaultSettings(): OpcomSettings {
       autoCommit: true,
       pauseOnFailure: true,
       runTests: true,
-      runOracle: false,
+      runOracle: true,
       maxRetries: 2,
     },
     notifications: {

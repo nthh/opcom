@@ -15,7 +15,7 @@ export function defaultConfig(): OrchestratorConfig {
     autoCommit: true,
     verification: {
       runTests: true,
-      runOracle: false,
+      runOracle: true,
       maxRetries: 2,
     },
   };
