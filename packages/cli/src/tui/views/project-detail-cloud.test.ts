@@ -97,13 +97,13 @@ describe("getCloudServicesList", () => {
 });
 
 describe("PANEL_COUNT", () => {
-  it("is 4 (tickets, agents, stack, cloud)", () => {
-    expect(PANEL_COUNT).toBe(4);
+  it("is 5 (tickets, agents, specs, stack, cloud)", () => {
+    expect(PANEL_COUNT).toBe(5);
   });
 });
 
 describe("getPanelItemCount", () => {
-  it("returns cloud services count for panel 3", () => {
+  it("returns cloud services count for panel 4", () => {
     const state = createProjectDetailState(makeProject());
     state.cloudServices = [
       makeCloudService({ provider: "turso", kind: "database", name: "db1" }),
@@ -111,12 +111,12 @@ describe("getPanelItemCount", () => {
       makeCloudService({ provider: "cloudflare-r2", kind: "storage", name: "assets" }),
     ];
 
-    expect(getPanelItemCount(state, 3)).toBe(3);
+    expect(getPanelItemCount(state, 4)).toBe(3);
   });
 
   it("returns 0 for cloud panel when no services", () => {
     const state = createProjectDetailState(makeProject());
-    expect(getPanelItemCount(state, 3)).toBe(0);
+    expect(getPanelItemCount(state, 4)).toBe(0);
   });
 });
 
@@ -126,19 +126,19 @@ describe("clampSelection for cloud panel", () => {
     state.cloudServices = [
       makeCloudService({ provider: "turso", kind: "database", name: "db" }),
     ];
-    state.selectedIndex[3] = 5; // Out of range
+    state.selectedIndex[4] = 5; // Out of range
 
     clampSelection(state);
-    expect(state.selectedIndex[3]).toBe(0);
+    expect(state.selectedIndex[4]).toBe(0);
   });
 
   it("resets to 0 when no cloud services", () => {
     const state = createProjectDetailState(makeProject());
-    state.selectedIndex[3] = 2;
+    state.selectedIndex[4] = 2;
 
     clampSelection(state);
-    expect(state.selectedIndex[3]).toBe(0);
-    expect(state.scrollOffset[3]).toBe(0);
+    expect(state.selectedIndex[4]).toBe(0);
+    expect(state.scrollOffset[4]).toBe(0);
   });
 });
 
@@ -148,9 +148,9 @@ describe("createProjectDetailState", () => {
     expect(state.cloudServices).toEqual([]);
   });
 
-  it("has 4 panel slots in selectedIndex", () => {
+  it("has 5 panel slots in selectedIndex", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(4);
-    expect(state.scrollOffset).toHaveLength(4);
+    expect(state.selectedIndex).toHaveLength(5);
+    expect(state.scrollOffset).toHaveLength(5);
   });
 });

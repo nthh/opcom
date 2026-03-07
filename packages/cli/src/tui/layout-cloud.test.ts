@@ -11,10 +11,10 @@ describe("L2 layout with cloud panel", () => {
     expect(cloudPanel!.height).toBeGreaterThan(0);
   });
 
-  it("has 4 panels in L2", () => {
+  it("has 5 panels in L2", () => {
     const layout = getLayout(2, 120, 40);
-    expect(layout.panels).toHaveLength(4);
-    expect(layout.panels.map((p) => p.id)).toEqual(["tickets", "agents", "stack", "cloud"]);
+    expect(layout.panels).toHaveLength(5);
+    expect(layout.panels.map((p) => p.id)).toEqual(["tickets", "agents", "specs", "stack", "cloud"]);
   });
 
   it("cloud panel is positioned below stack panel", () => {

@@ -21,6 +21,7 @@ import {
   createProjectDetailState,
   clampSelection as clampProjectDetail,
   getTicketsList,
+  getSpecsList,
   getCloudServicesList,
   getPanelItemCount as getProjectItemCount,
   PANEL_COUNT as PROJECT_PANEL_COUNT,
@@ -74,6 +75,7 @@ import {
 } from "./views/health-view.js";
 import {
   computeHealthData,
+  computeProjectSpecs,
   computeSpecSectionCoverage,
   formatHealthBar,
   isHealthWarning,
@@ -247,6 +249,9 @@ export class TuiApp {
         this.projectDetailState.agents = this.client.agents;
         const tickets = this.client.projectTickets.get(this.focusedProjectId) ?? [];
         this.projectDetailState.tickets = tickets;
+        if (this.healthData) {
+          this.projectDetailState.projectSpecs = computeProjectSpecs(tickets, this.healthData.specs);
+        }
         const cloudServices = this.client.projectCloudServices.get(this.focusedProjectId) ?? [];
         this.projectDetailState.cloudServices = cloudServices;
         clampProjectDetail(this.projectDetailState);
@@ -772,7 +777,7 @@ export class TuiApp {
         return;
 
       case "v": // Focus cloud panel
-        state.focusedPanel = 3;
+        state.focusedPanel = 4;
         return;
 
       case "M": // Run migrations on selected database
@@ -834,7 +839,20 @@ export class TuiApp {
       if (agent) {
         this.navigateToAgent(agent);
       }
-    } else if (panel === 3) {
+    } else if (panel === 2) {
+      // Drill into spec — open health view drilled to this spec
+      const specs = getSpecsList(state);
+      const spec = specs[selected];
+      if (spec) {
+        this.healthVisible = true;
+        this.healthViewState.data = this.healthData;
+        this.healthViewState.drilledSpec = spec.name;
+        computeSpecSectionCoverage(spec.name).then((sections) => {
+          this.healthViewState.sectionCoverage = sections;
+          this.scheduleRender();
+        }).catch(() => {});
+      }
+    } else if (panel === 4) {
       // Drill into cloud service
       const services = getCloudServicesList(state);
       const service = services[selected];
@@ -1422,6 +1440,10 @@ export class TuiApp {
     this.client.getTickets(project.id).then((tickets) => {
       if (this.projectDetailState) {
         this.projectDetailState.tickets = tickets;
+        // Compute project specs from tickets + health data
+        if (this.healthData) {
+          this.projectDetailState.projectSpecs = computeProjectSpecs(tickets, this.healthData.specs);
+        }
         clampProjectDetail(this.projectDetailState);
         this.scheduleRender();
       }
@@ -1626,9 +1648,9 @@ export class TuiApp {
     const state = this.projectDetailState;
 
     // If cloud panel is focused, migrate the selected service
-    if (state.focusedPanel === 3) {
+    if (state.focusedPanel === 4) {
       const services = getCloudServicesList(state);
-      const service = services[state.selectedIndex[3]];
+      const service = services[state.selectedIndex[4]];
       if (service && service.capabilities.includes("migrate")) {
         this.triggerMigrationOnService(service);
       }
@@ -1777,6 +1799,11 @@ export class TuiApp {
       if (this.healthVisible) {
         this.healthViewState.data = data;
       }
+      // Update project specs if we're viewing a project detail
+      if (this.projectDetailState && this.projectDetailState.tickets.length > 0) {
+        this.projectDetailState.projectSpecs = computeProjectSpecs(this.projectDetailState.tickets, data.specs);
+        clampProjectDetail(this.projectDetailState);
+      }
       this.scheduleRender();
     }).catch(() => {});
   }
@@ -1872,7 +1899,7 @@ export function buildHelpLines(): string[] {
     bold("Level 2: Project Detail"),
     "  j/k        Navigate up/down",
     "  Tab        Switch panel focus",
-    "  Enter      Drill down to ticket/agent/cloud",
+    "  Enter      Drill down to ticket/agent/spec/cloud",
     "  w          Start agent on ticket",
     "  v          Focus cloud services panel",
     "  M          Run pending migrations",
