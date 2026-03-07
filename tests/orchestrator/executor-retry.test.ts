@@ -12,6 +12,7 @@ class MockSessionManager {
   stopCalls: string[] = [];
   private sessionCounter = 0;
 
+  getSession(_id: string): undefined { return undefined; }
   on(event: string, handler: EventHandler<unknown>): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(handler);

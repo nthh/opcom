@@ -10,7 +10,10 @@ class MockSessionManager {
   private listeners = new Map<string, Set<EventHandler<unknown>>>();
   startCalls: Array<{ projectId: string; backend: string; config: unknown; ticketId?: string }> = [];
   private sessionCounter = 0;
+  private knownSessions = new Map<string, AgentSession>();
 
+  getSession(id: string): AgentSession | undefined { return this.knownSessions.get(id); }
+  registerSession(session: AgentSession): void { this.knownSessions.set(session.id, session); }
   on(event: string, handler: EventHandler<unknown>): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(handler);
@@ -576,6 +579,12 @@ describe("Executor file-overlap scheduling", () => {
       if (ticketId === "t-ready") return { relatedFiles: ["src/api.ts", "src/handler.ts"], testFiles: [], driftSignals: [] };
       if (ticketId === "t-nonoverlap") return { relatedFiles: ["src/utils.ts"], testFiles: [], driftSignals: [] };
       return null;
+    });
+
+    // Register the verifying step's session so recovery code doesn't reset it
+    mockSM.registerSession({
+      id: "sess-v1", backend: "claude-code", projectId: "p",
+      state: "stopped", startedAt: new Date().toISOString(),
     });
 
     const plan = makePlan([

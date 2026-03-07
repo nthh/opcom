@@ -102,6 +102,22 @@ export class Executor {
       await this.cleanupOrphanedWorktrees();
     }
 
+    // Recover steps stuck in "verifying" from a previous crashed run.
+    // A step is stuck if its agent session no longer exists in the SessionManager.
+    for (const step of this.plan.steps) {
+      if (step.status === "verifying") {
+        const sessionAlive = step.agentSessionId
+          ? this.sessionManager.getSession(step.agentSessionId) !== undefined
+          : false;
+        if (!sessionAlive) {
+          log.warn("recovering stuck verifying step", { ticketId: step.ticketId });
+          step.status = "ready";
+          step.attempt = (step.attempt ?? 1) + 1;
+          step.agentSessionId = undefined;
+        }
+      }
+    }
+
     // Wire SessionManager events
     const onStopped = (session: AgentSession) => {
       const ticketId = this.sessionToStep.get(session.id);
@@ -273,7 +289,14 @@ export class Executor {
             // This allows multiple steps to verify in parallel.
             this.activeVerifications++;
             this.handleWorktreeCompletion(step, event)
-              .catch((err) => log.error("worktree completion failed", { ticketId: step.ticketId, error: String(err) }))
+              .catch(async (err) => {
+                log.error("worktree completion failed", { ticketId: step.ticketId, error: String(err) });
+                // Don't leave step stuck in "verifying"
+                if (step.status === "verifying") {
+                  await this.failStep(step, `Verification crashed: ${String(err)}`);
+                  this.emit("step_failed", { step, error: String(err) });
+                }
+              })
               .finally(async () => {
                 this.activeVerifications--;
                 await this.recomputeAndContinue();

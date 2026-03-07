@@ -40,6 +40,7 @@ class MockSessionManager {
   /** Callback to auto-simulate oracle sessions. Set by individual tests. */
   onOracleStart?: (session: AgentSession) => void;
 
+  getSession(_id: string): undefined { return undefined; }
   on(event: string, handler: EventHandler<unknown>): void {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     this.listeners.get(event)!.add(handler);
@@ -308,10 +309,7 @@ describe("Executor oracle agent session", () => {
     expect(oracleCall.config.systemPrompt).toBeDefined();
     expect(oracleCall.config.systemPrompt).toContain("Acceptance Criteria");
     expect(oracleCall.config.permissionMode).toBe("default");
-    expect(oracleCall.config.disallowedTools).toContain("Edit");
-    expect(oracleCall.config.disallowedTools).toContain("Write");
-    expect(oracleCall.config.disallowedTools).toContain("Bash");
-    expect(oracleCall.config.disallowedTools).toContain("Read");
+    expect(oracleCall.config.disableAllTools).toBe(true);
 
     executor.stop();
     await runPromise;
