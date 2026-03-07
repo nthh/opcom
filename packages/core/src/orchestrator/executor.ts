@@ -999,10 +999,7 @@ export class Executor {
             systemPrompt: prompt,
             model,
             permissionMode: "default",
-            disallowedTools: [
-              "Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep",
-              "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
-            ],
+            disableAllTools: true,
           },
           `oracle:${step.ticketId}`,
         );

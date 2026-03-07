@@ -36,22 +36,26 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const args = [
       "--output-format", "stream-json",
       "--verbose",
-      "-p",
+      "-p", initialPrompt,
     ];
 
     if (config.model) {
       args.push("--model", config.model);
     }
 
-    if (config.allowedTools) {
-      for (const tool of config.allowedTools) {
-        args.push("--allowedTools", tool);
+    if (config.disableAllTools) {
+      args.push("--tools", "");
+    } else {
+      if (config.allowedTools) {
+        for (const tool of config.allowedTools) {
+          args.push("--allowedTools", tool);
+        }
       }
-    }
 
-    if (config.disallowedTools) {
-      for (const tool of config.disallowedTools) {
-        args.push("--disallowedTools", tool);
+      if (config.disallowedTools) {
+        for (const tool of config.disallowedTools) {
+          args.push("--disallowedTools", tool);
+        }
       }
     }
 
@@ -86,10 +90,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       env: childEnv,
     });
 
-    // Pipe prompt via stdin to avoid OS argument length limits.
-    // The -p flag (without a value) tells Claude Code to read from stdin.
+    // Close stdin immediately — we pass the prompt via -p flag, not stdin.
+    // If stdin stays open, Claude Code may block waiting for EOF.
     if (proc.stdin) {
-      proc.stdin.write(initialPrompt);
       proc.stdin.end();
     }
 

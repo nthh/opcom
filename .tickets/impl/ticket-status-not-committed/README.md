@@ -1,7 +1,7 @@
 ---
 id: ticket-status-not-committed
 title: "Bug: ticket status changes not committed after plan step completion"
-status: open
+status: closed
 type: bug
 priority: 1
 links:

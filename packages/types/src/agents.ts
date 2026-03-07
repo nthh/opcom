@@ -82,6 +82,7 @@ export interface AgentStartConfig {
   worktree?: boolean;
   allowedTools?: string[];
   disallowedTools?: string[];
+  disableAllTools?: boolean;
   permissionMode?: "default" | "acceptEdits" | "bypassPermissions" | "plan";
   additionalDirs?: string[];
   systemPrompt?: string;
