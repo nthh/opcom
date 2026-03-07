@@ -60,6 +60,7 @@ import {
   renderPlanStepFocus,
   createPlanStepFocusState,
   toggleTestOutput,
+  rebuildDisplayLines as rebuildPlanStepLines,
   scrollUp as planStepScrollUp,
   scrollDown as planStepScrollDown,
   scrollToTop as planStepScrollToTop,
@@ -280,6 +281,44 @@ export class TuiApp {
         this.agentFocusState.events = events;
         this.agentFocusState.renderedEventCount = events.length;
         rebuildDisplayLines(this.agentFocusState, this.agentFocusState.wrapWidth || 80);
+      }
+    }
+
+    // Update plan step focus if active
+    if (this.planStepFocusState && this.client.activePlan) {
+      const plan = this.client.activePlan;
+      const stepId = this.planStepFocusState.step.ticketId;
+      const updatedStep = plan.steps.find((s) => s.ticketId === stepId);
+      if (updatedStep) {
+        let changed = false;
+
+        if (updatedStep.status !== this.planStepFocusState.step.status ||
+            updatedStep.verification !== this.planStepFocusState.step.verification ||
+            updatedStep.agentSessionId !== this.planStepFocusState.step.agentSessionId ||
+            updatedStep.attempt !== this.planStepFocusState.step.attempt) {
+          this.planStepFocusState.step = updatedStep;
+          this.planStepFocusState.plan = plan;
+          changed = true;
+        }
+
+        // Update verification from step
+        if (updatedStep.verification && updatedStep.verification !== this.planStepFocusState.verification) {
+          this.planStepFocusState.verification = updatedStep.verification;
+          changed = true;
+        }
+
+        // Update agent reference
+        if (updatedStep.agentSessionId) {
+          const agent = this.client.agents.find((a) => a.id === updatedStep.agentSessionId);
+          if (agent && agent !== this.planStepFocusState.agent) {
+            this.planStepFocusState.agent = agent;
+            changed = true;
+          }
+        }
+
+        if (changed) {
+          rebuildPlanStepLines(this.planStepFocusState, this.planStepFocusState.wrapWidth || 80);
+        }
       }
     }
   }
@@ -1512,9 +1551,12 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
 
-    // Load ticket content async
-    loadTicketContent(this.ticketFocusState).then(() => {
-      this.scheduleRender();
+    // Load ticket content async — guard against stale state if user navigated away
+    const stateRef = this.ticketFocusState;
+    loadTicketContent(stateRef).then(() => {
+      if (this.ticketFocusState === stateRef) {
+        this.scheduleRender();
+      }
     }).catch(() => {});
   }
 

@@ -57,9 +57,60 @@ If tests fail, the step enters the retry loop (see below). No oracle call needed
 
 ### Stage 2: Oracle Evaluation
 
-The oracle (existing `packages/core/src/skills/oracle.ts`) validates the git diff against the ticket's acceptance criteria and linked spec. It's an LLM call — slower and more expensive, but catches semantic issues that tests miss.
+The oracle validates the git diff against the ticket's acceptance criteria and linked spec. It catches semantic issues that tests miss — an agent that passes all tests but didn't actually implement the feature.
 
-Oracle receives:
+**The oracle is an agent session**, not a bespoke LLM call. It runs through the same `SessionManager` and backend infrastructure as coding agents, using a dedicated `oracle` role (see `docs/spec/roles.md`). This means:
+
+- It works with any configured backend (claude-code, opencode, codex, etc.)
+- Events are tracked in the event store and visible in the TUI
+- No separate LLM call infrastructure to maintain
+- The oracle agent shows up in the agents panel while running
+
+The oracle role is read-only: no file editing, no bash, no tools. It receives the evaluation prompt as its system prompt, responds with a structured evaluation, and exits.
+
+#### Oracle Agent Session
+
+The executor starts an oracle agent session via `SessionManager.startSession()` with:
+- Role: `oracle` (built-in)
+- System prompt: the formatted oracle prompt (ticket, acceptance criteria, spec, git diff, test results)
+- Backend: `plan.config.backend` (same as coding agents)
+- Model: `plan.config.verification.oracleModel` (optional override)
+- No worktree, no tools, no bash
+
+The executor listens for `session_stopped` on the oracle session, collects the assistant's response text from the event stream, and parses it with `parseOracleResponse()`.
+
+#### Oracle Role
+
+```yaml
+# Built-in role: oracle
+id: oracle
+name: Oracle
+permissionMode: default
+allowedTools: []
+disallowedTools:
+  - Edit
+  - Write
+  - NotebookEdit
+  - Bash
+  - Read
+  - Glob
+  - Grep
+  - EnterPlanMode
+  - ExitPlanMode
+  - EnterWorktree
+allowedBashPatterns: []
+instructions: |
+  You are a verification oracle. Evaluate whether code changes satisfy acceptance criteria.
+  Respond ONLY with the structured format specified in your prompt.
+  Do not use any tools. Do not attempt to read or modify files.
+doneCriteria: "Evaluation complete."
+runTests: false
+runOracle: false
+```
+
+#### Oracle Input
+
+Oracle receives (via system prompt, assembled by `formatOraclePrompt()`):
 - Git diff (from auto-commit)
 - Acceptance criteria (parsed from ticket `## Acceptance Criteria`)
 - Linked spec (from ticket `links:` field)
@@ -67,11 +118,31 @@ Oracle receives:
 
 Oracle returns per-criterion pass/fail with reasoning. All criteria must pass for the step to succeed.
 
+#### Oracle Response Parsing
+
+The oracle agent's assistant output text is parsed by `parseOracleResponse()` (existing, in `packages/core/src/skills/oracle.ts`). The structured format:
+
+```markdown
+## Criteria
+- **Criterion**: <text>
+  - **Met**: YES or NO
+  - **Reasoning**: <explanation>
+
+## Concerns
+- <concern text, or "None.">
+```
+
+#### Prompt Size
+
+The oracle prompt can be large (50KB+ git diff, spec content, test results). Because the prompt is passed as the system prompt to an agent session (not as a CLI argument), it avoids OS argument length limits. The agent adapter handles prompt delivery via its normal mechanism (stdin pipe for claude-code, HTTP body for opencode).
+
 ```typescript
 interface VerificationResult {
   stepTicketId: string;
-  testGate: TestGateResult;
+  testGate?: TestGateResult;
   oracle?: OracleResult;         // null if tests failed (oracle skipped)
+  oracleError?: string;          // set if oracle agent failed to run
+  oracleSessionId?: string;      // agent session ID for the oracle run
   passed: boolean;
   failureReasons: string[];      // human-readable list
 }

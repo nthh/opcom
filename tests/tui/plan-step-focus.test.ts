@@ -498,6 +498,71 @@ describe("toggleTestOutput", () => {
   });
 });
 
+describe("rebuildDisplayLines live update", () => {
+  it("updates display lines when step status changes", () => {
+    const step = makePlanStep({ status: "in-progress" });
+    const plan = makePlan([step]);
+    const ticket = makeWorkItem();
+
+    const state = createPlanStepFocusState(step, plan, ticket, null, [ticket], []);
+
+    const hasInProgress = state.displayLines.some((l) => l.includes("in-progress"));
+    expect(hasInProgress).toBe(true);
+
+    // Simulate status change
+    state.step = { ...step, status: "done" };
+    rebuildDisplayLines(state, 80);
+
+    const hasDone = state.displayLines.some((l) => l.includes("done"));
+    expect(hasDone).toBe(true);
+  });
+
+  it("updates display lines when verification is added", () => {
+    const step = makePlanStep({ status: "verifying" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasVerification = state.displayLines.some((l) => l.includes("Verification"));
+    expect(hasVerification).toBe(false);
+
+    // Simulate verification arriving
+    state.verification = {
+      stepTicketId: "tile-perf",
+      passed: true,
+      testGate: { passed: true, testCommand: "npm test", totalTests: 5, passedTests: 5, failedTests: 0, output: "", durationMs: 100 },
+      failureReasons: [],
+    };
+    rebuildDisplayLines(state, 80);
+
+    const hasVerificationNow = state.displayLines.some((l) => l.includes("Verification"));
+    expect(hasVerificationNow).toBe(true);
+  });
+
+  it("display lines contain only structured content, no raw markdown", () => {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const ticket = makeWorkItem({ title: "Test ticket" });
+    const agent = makeAgent();
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: true,
+      testGate: { passed: true, testCommand: "npm test", totalTests: 10, passedTests: 10, failedTests: 0, output: "all good", durationMs: 1000 },
+      failureReasons: [],
+    };
+
+    const state = createPlanStepFocusState(step, plan, ticket, agent, [ticket], [agent], verification);
+
+    // Display should only contain structured sections, not raw markdown
+    for (const line of state.displayLines) {
+      // No markdown headers
+      expect(line).not.toMatch(/^#{1,3}\s/);
+      // No markdown code fences
+      expect(line).not.toMatch(/^```/);
+    }
+  });
+});
+
 describe("verification display with failed tests", () => {
   it("shows failure count and reasons", () => {
     const step = makePlanStep({ status: "failed" });

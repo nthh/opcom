@@ -1,7 +1,7 @@
 ---
 id: plan-stages
 title: "Plan stages: sequential rounds with approval gates"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-06

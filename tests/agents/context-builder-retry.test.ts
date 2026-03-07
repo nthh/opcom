@@ -248,4 +248,55 @@ describe("contextPacketToMarkdown with previousVerification", () => {
     expect(md).toContain("### Unmet Acceptance Criteria");
     expect(md).toContain("### What to fix");
   });
+
+  it("renders oracle infrastructure error when oracleError is set but oracle is null", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const verification: VerificationResult = {
+      stepTicketId: "t1",
+      passed: false,
+      failureReasons: ["Tests failed: 2/10 failed"],
+      testGate: {
+        passed: false,
+        testCommand: "npm test",
+        totalTests: 10,
+        passedTests: 8,
+        failedTests: 2,
+        output: "FAIL src/cache.test.ts",
+        durationMs: 3000,
+      },
+      oracleError: "Error: Command failed: claude -p Evaluate whether...",
+    };
+
+    const md = contextPacketToMarkdown(packet, undefined, verification);
+
+    expect(md).toContain("## Previous Attempt");
+    expect(md).toContain("### Test Failures");
+    expect(md).toContain("### Oracle Evaluation Failed");
+    expect(md).toContain("infrastructure error");
+    expect(md).toContain("Command failed");
+    expect(md).not.toContain("### Unmet Acceptance Criteria");
+  });
+
+  it("does not render oracle error section when oracle succeeded", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const verification: VerificationResult = {
+      stepTicketId: "t1",
+      passed: false,
+      failureReasons: ["Oracle: 1 criteria unmet"],
+      oracle: {
+        passed: false,
+        criteria: [
+          { criterion: "Handles edge cases", met: false, reasoning: "Missing null check" },
+        ],
+        concerns: [],
+      },
+    };
+
+    const md = contextPacketToMarkdown(packet, undefined, verification);
+
+    expect(md).toContain("### Unmet Acceptance Criteria");
+    expect(md).not.toContain("### Oracle Evaluation Failed");
+  });
 });

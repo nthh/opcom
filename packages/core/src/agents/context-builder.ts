@@ -269,6 +269,11 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
         lines.push(`- **${c.criterion}**: ${c.reasoning}`);
       }
       lines.push("");
+    } else if (previousVerification.oracleError) {
+      lines.push(`### Oracle Evaluation Failed`);
+      lines.push(`The oracle could not evaluate your changes: ${previousVerification.oracleError}`);
+      lines.push(`This was an infrastructure error, not a judgment on your code. Focus on the other failures listed.`);
+      lines.push("");
     }
     lines.push(`### What to fix`);
     lines.push(`- Focus on the failures listed above. Do not start over.`);
