@@ -1,7 +1,7 @@
 ---
 id: context-graph-opcom-integration
 title: "Wire context-graph into opcom Station & Context Builder"
-status: open
+status: closed
 type: feature
 priority: 1
 created: 2026-03-05

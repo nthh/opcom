@@ -1,7 +1,7 @@
 ---
 id: planning-decomposition
 title: "Planning Sessions: Ticket Decomposition into Agent-Sized Sub-Tickets"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

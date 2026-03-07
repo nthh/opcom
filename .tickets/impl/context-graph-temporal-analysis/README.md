@@ -1,7 +1,7 @@
 ---
 id: context-graph-temporal-analysis
 title: "Commit Replay & Temporal Analysis Queries"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-05

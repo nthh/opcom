@@ -1,7 +1,7 @@
 ---
 id: context-graph-drift-engine
 title: "Composite Drift Detection Engine"
-status: open
+status: closed
 type: feature
 priority: 1
 created: 2026-03-05

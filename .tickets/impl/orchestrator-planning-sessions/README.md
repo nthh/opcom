@@ -1,7 +1,7 @@
 ---
 id: orchestrator-planning-sessions
 title: "Orchestrator: LLM-Assisted Planning Sessions"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

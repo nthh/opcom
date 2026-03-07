@@ -1,7 +1,7 @@
 ---
 id: tui-verification-display
 title: "TUI: Display Verification and Test Gate Results"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

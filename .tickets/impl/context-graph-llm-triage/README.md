@@ -1,7 +1,7 @@
 ---
 id: context-graph-llm-triage
 title: "LLM Drift Triage Agent"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-05

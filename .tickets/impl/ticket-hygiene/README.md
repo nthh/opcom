@@ -1,7 +1,7 @@
 ---
 id: ticket-hygiene
 title: "Ticket Hygiene: Automated Status Checks + Dep Validation"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

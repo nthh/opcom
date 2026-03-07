@@ -1,7 +1,7 @@
 ---
 id: cloud-hosting-mobile-adapters
 title: "Cloud Hosting & Mobile Adapters: Firebase Hosting, Expo/EAS OTA"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
