@@ -87,9 +87,10 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  const rightTopHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.33));
-  const rightMidHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.33));
-  const rightBottomHeight = Math.max(MIN_PANEL_HEIGHT, rows - rightTopHeight - rightMidHeight);
+  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
+  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
+  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
+  const rightH4 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3);
 
   return {
     panels: [
@@ -106,23 +107,31 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         x: leftWidth,
         y: 0,
         width: rightWidth,
-        height: rightTopHeight,
+        height: rightH1,
         title: "Agents",
+      },
+      {
+        id: "specs",
+        x: leftWidth,
+        y: rightH1,
+        width: rightWidth,
+        height: rightH2,
+        title: "Specs",
       },
       {
         id: "stack",
         x: leftWidth,
-        y: rightTopHeight,
+        y: rightH1 + rightH2,
         width: rightWidth,
-        height: rightMidHeight,
+        height: rightH3,
         title: "Stack",
       },
       {
         id: "cloud",
         x: leftWidth,
-        y: rightTopHeight + rightMidHeight,
+        y: rightH1 + rightH2 + rightH3,
         width: rightWidth,
-        height: rightBottomHeight,
+        height: rightH4,
         title: "Cloud",
       },
     ],

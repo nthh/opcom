@@ -357,6 +357,44 @@ function parseUseCaseYaml(content: string): Record<string, unknown> | null {
   return result;
 }
 
+// --- Project-scoped spec computation (for L2 project detail) ---
+
+export function computeProjectSpecs(
+  tickets: Array<{ links: string[] }>,
+  allSpecs: SpecCoverageItem[],
+): SpecCoverageItem[] {
+  // Count how many of this project's tickets reference each spec
+  const specTicketCounts = new Map<string, number>();
+  for (const t of tickets) {
+    for (const link of t.links) {
+      const specMatch = link.match(/(?:docs\/)?spec\/([^#.]+)/);
+      if (specMatch) {
+        const name = specMatch[1];
+        specTicketCounts.set(name, (specTicketCounts.get(name) ?? 0) + 1);
+      }
+    }
+  }
+
+  // Only include specs that are referenced by at least one ticket
+  const result: SpecCoverageItem[] = [];
+  for (const spec of allSpecs) {
+    const count = specTicketCounts.get(spec.name);
+    if (count !== undefined && count > 0) {
+      let status: "covered" | "partial" | "uncovered";
+      if (spec.sections > 0 && count < spec.sections) {
+        status = "partial";
+      } else {
+        status = "covered";
+      }
+      result.push({ name: spec.name, sections: spec.sections, ticketCount: count, status });
+    }
+  }
+
+  // Sort by ticket count descending
+  result.sort((a, b) => b.ticketCount - a.ticketCount);
+  return result;
+}
+
 // --- Health bar formatting (pure function for testability) ---
 
 export function formatHealthBar(data: HealthData): string {

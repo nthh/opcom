@@ -10,6 +10,7 @@ import type {
   CloudServiceKind,
 } from "@opcom/types";
 import type { Panel } from "../layout.js";
+import type { SpecCoverageItem } from "../health-data.js";
 import {
   ScreenBuffer,
   drawBox,
@@ -19,6 +20,7 @@ import {
   color,
   stateColor,
   truncate,
+  padRight,
   progressBar,
 } from "../renderer.js";
 import { healthDot } from "./cloud-service-detail.js";
@@ -29,7 +31,8 @@ export interface ProjectDetailState {
   tickets: WorkItem[];
   agents: AgentSession[];
   cloudServices: CloudService[];
-  focusedPanel: number; // 0=tickets, 1=agents, 2=stack, 3=cloud
+  projectSpecs: SpecCoverageItem[];
+  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
 }
@@ -41,9 +44,10 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     tickets: [],
     agents: [],
     cloudServices: [],
+    projectSpecs: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0, 0],
-    scrollOffset: [0, 0, 0, 0],
+    selectedIndex: [0, 0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0, 0],
   };
 }
 
@@ -54,13 +58,15 @@ export function renderProjectDetail(
 ): void {
   const ticketsPanel = panels.find((p) => p.id === "tickets");
   const agentsPanel = panels.find((p) => p.id === "agents");
+  const specsPanel = panels.find((p) => p.id === "specs");
   const stackPanel = panels.find((p) => p.id === "stack");
   const cloudPanel = panels.find((p) => p.id === "cloud");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
   if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 1);
-  if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 2);
-  if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 3);
+  if (specsPanel) renderSpecsPanel(buf, specsPanel, state, state.focusedPanel === 2);
+  if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 3);
+  if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 4);
 }
 
 // --- Tickets Panel ---
@@ -247,6 +253,68 @@ function formatAgentLine(agent: AgentSession, maxWidth: number): string {
   return truncate(line, maxWidth);
 }
 
+// --- Specs Panel ---
+
+function renderSpecsPanel(
+  buf: ScreenBuffer,
+  panel: Panel,
+  state: ProjectDetailState,
+  focused: boolean,
+): void {
+  const count = state.projectSpecs.length;
+  const title = count > 0 ? `Specs (${count})` : "Specs";
+  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
+
+  const contentWidth = panel.width - 4;
+  const maxItems = panel.height - 2;
+  const selected = state.selectedIndex[2] ?? 0;
+  const scroll = state.scrollOffset[2] ?? 0;
+
+  if (state.projectSpecs.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No specs linked"), contentWidth);
+    return;
+  }
+
+  for (let i = 0; i < maxItems && i + scroll < state.projectSpecs.length; i++) {
+    const idx = i + scroll;
+    const spec = state.projectSpecs[idx];
+    const row = panel.y + 1 + i;
+    const isSelected = idx === selected && focused;
+
+    const line = formatSpecLine(spec, contentWidth);
+    if (isSelected) {
+      buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
+    } else {
+      buf.writeLine(row, panel.x + 2, line, contentWidth);
+    }
+  }
+}
+
+function formatSpecLine(spec: SpecCoverageItem, maxWidth: number): string {
+  const statusIcon = spec.status === "covered" ? "\u25cf"
+    : spec.status === "partial" ? "\u25d0"
+    : "\u25cb";
+  const statusLabel = spec.status === "covered" ? "covered"
+    : spec.status === "partial" ? "partial"
+    : "missing";
+  const sColor = spec.status === "covered" ? ANSI.green
+    : spec.status === "partial" ? ANSI.yellow
+    : ANSI.red;
+
+  const nameCol = Math.max(12, Math.floor(maxWidth * 0.4));
+  const ticketStr = `${spec.ticketCount} ticket${spec.ticketCount !== 1 ? "s" : ""}`;
+
+  const line = padRight(spec.name, nameCol)
+    + padRight(ticketStr, 12)
+    + color(sColor, `${statusIcon} ${statusLabel}`);
+  return truncate(line, maxWidth);
+}
+
+/** Return the specs list for navigation. */
+export function getSpecsList(state: ProjectDetailState): SpecCoverageItem[] {
+  return state.projectSpecs;
+}
+
 // --- Stack Panel ---
 
 function renderStackPanel(
@@ -389,8 +457,8 @@ function renderCloudPanel(
 
   const contentWidth = panel.width - 4;
   const maxRows = panel.height - 2;
-  const selected = state.selectedIndex[3] ?? 0;
-  const scroll = state.scrollOffset[3] ?? 0;
+  const selected = state.selectedIndex[4] ?? 0;
+  const scroll = state.scrollOffset[4] ?? 0;
 
   if (state.cloudServices.length === 0) {
     buf.writeLine(panel.y + 1, panel.x + 2, dim("No cloud services detected"), contentWidth);
@@ -553,14 +621,15 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
   switch (panelIndex) {
     case 0: return getTicketsList(state).length;
     case 1: return state.agents.filter((a) => a.projectId === state.project.id).length;
-    case 2: return 0; // stack is not navigable
-    case 3: return getCloudServicesList(state).length;
+    case 2: return getSpecsList(state).length;
+    case 3: return 0; // stack is not navigable
+    case 4: return getCloudServicesList(state).length;
     default: return 0;
   }
 }
 
 /** Total number of panels for Tab cycling. */
-export const PANEL_COUNT = 4;
+export const PANEL_COUNT = 5;
 
 export function clampSelection(state: ProjectDetailState): void {
   for (let p = 0; p < PANEL_COUNT; p++) {
