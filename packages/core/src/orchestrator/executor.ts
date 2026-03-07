@@ -47,7 +47,7 @@ export interface ExecutorEvents {
 type EventHandler<T> = (data: T) => void;
 
 interface ExecutorEvent {
-  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "inject_context" | "advance_stage";
+  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "inject_context" | "advance_stage" | "verification_done";
   sessionId?: string;
   ticketId?: string;
   error?: string;
@@ -67,6 +67,7 @@ export class Executor {
   private running = false;
   private sessionToStep = new Map<string, string>(); // sessionId → ticketId
   private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
+  private activeVerifications = 0; // count of concurrent verification runs
   private stepVerification = new Map<string, { runTests: boolean; runOracle: boolean }>(); // ticketId → role verification
   private stepFiles = new Map<string, string[]>(); // ticketId → related file paths (cached from graph)
   private ticketCache = new Map<string, import("@opcom/types").WorkItem[]>(); // projectId → tickets
@@ -268,14 +269,22 @@ export class Executor {
         const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
         if (step) {
           if (this.plan.config.worktree) {
-            await this.handleWorktreeCompletion(step, event);
+            // Run verification concurrently — don't block the event loop.
+            // This allows multiple steps to verify in parallel.
+            this.activeVerifications++;
+            this.handleWorktreeCompletion(step, event)
+              .catch((err) => log.error("worktree completion failed", { ticketId: step.ticketId, error: String(err) }))
+              .finally(async () => {
+                this.activeVerifications--;
+                await this.recomputeAndContinue();
+                // Wake the event loop — it may be blocked in nextEvent()
+                this.pushEvent({ type: "verification_done", ticketId: step.ticketId });
+              });
           } else {
             await this.handleLegacyCompletion(step, event);
+            await this.recomputeAndContinue();
           }
         }
-
-        // Recompute and start newly-ready steps
-        await this.recomputeAndContinue();
         break;
       }
 
@@ -354,6 +363,11 @@ export class Executor {
         await this.recomputeAndContinue();
         break;
       }
+
+      case "verification_done":
+        // No-op — recomputeAndContinue was already called in the finally block.
+        // This event just wakes the event loop so it can re-check isPlanTerminal.
+        break;
     }
   }
 
@@ -1445,6 +1459,7 @@ export class Executor {
   }
 
   private isPlanTerminal(): boolean {
+    if (this.activeVerifications > 0) return false;
     return this.plan.steps.every(
       (s) => s.status === "done" || s.status === "failed" || s.status === "skipped" || s.status === "needs-rebase",
     );
