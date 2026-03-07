@@ -279,6 +279,201 @@ When verification fails and retries are exhausted:
 4. User can: fix manually, skip the step, or inject context and resume
 5. All verification results from all attempts are stored in the event store
 
+## Auto-Rebase on Merge Conflict
+
+When verification passes but the merge into main fails with a conflict, the step currently dead-ends at `needs-rebase`. The user must manually resolve conflicts outside opcom. Auto-rebase makes this recoverable.
+
+### Flow
+
+```
+Verification passes → merge fails (conflict)
+    ↓
+1. Attempt git rebase onto main in the worktree
+    ├─ clean rebase → re-run verification → merge → done
+    └─ conflict
+         ↓
+2. Start agent in worktree with conflict context
+    ├─ agent resolves conflicts, commits → re-run verification → merge → done
+    └─ agent fails or verification fails
+         ↓
+3. Mark step needs-rebase (existing behavior — human intervenes)
+```
+
+### Stage 1: Clean Rebase
+
+Before involving an agent, try a non-interactive rebase. Many conflicts are trivial (whitespace, import ordering, non-overlapping changes in the same file).
+
+```typescript
+async attemptRebase(stepId: string): Promise<RebaseResult> {
+  const info = this.worktrees.get(stepId);
+  const cwd = info.worktreePath;
+
+  // Rebase the worktree branch onto current main
+  try {
+    await execFileAsync("git", ["rebase", mainBranch], { cwd });
+    return { rebased: true, conflict: false };
+  } catch (err) {
+    // Check if rebase hit conflicts
+    if (isConflict(err)) {
+      await execFileAsync("git", ["rebase", "--abort"], { cwd });
+      return { rebased: false, conflict: true, conflictFiles: parseConflictFiles(err) };
+    }
+    return { rebased: false, conflict: false, error: String(err) };
+  }
+}
+
+interface RebaseResult {
+  rebased: boolean;
+  conflict: boolean;
+  conflictFiles?: string[];
+  error?: string;
+}
+```
+
+If the rebase succeeds cleanly, re-run the verification pipeline (tests may break due to upstream changes) and then merge. This is a fast path that requires no agent involvement.
+
+### Stage 2: Agent-Assisted Conflict Resolution
+
+If the clean rebase fails, start an agent in the worktree with conflict context. The agent resolves conflicts, commits, and exits — then verification and merge retry.
+
+The agent receives a context packet with:
+
+```markdown
+## Merge Conflict Resolution
+
+Your branch `work/tui-health-view` has conflicts with `main`. Resolve them.
+
+### Conflicting Files
+- src/tui/views/dashboard.ts
+- src/tui/views/plan-step-focus.ts
+
+### Instructions
+- Run `git rebase main` to start the rebase.
+- For each conflict, read the file, understand both sides, and resolve correctly.
+- Do NOT drop changes from either side unless one is clearly obsolete.
+- After resolving each file, `git add <file>` then `git rebase --continue`.
+- Run tests relevant to the conflicting files to verify the resolution.
+- Do not modify files that are not part of the conflict.
+```
+
+The agent uses the same role as the original step (typically `engineer`) but with focused instructions. It gets the conflict file list and both sides of the diff for context.
+
+### Stage 3: Hard Fail
+
+If the agent fails to resolve conflicts (exits without completing the rebase) or post-rebase verification fails:
+- Step status = `"needs-rebase"` (existing behavior)
+- Plan pauses if `pauseOnFailure` is true
+- Worktree preserved for manual intervention
+- Event store records the full attempt chain: original merge → rebase attempt → agent resolution attempt
+
+### Configuration
+
+```typescript
+interface VerificationConfig {
+  // ... existing fields ...
+  autoRebase: boolean;          // default true — attempt auto-rebase on merge conflict
+}
+```
+
+`autoRebase: false` preserves current behavior (immediate `needs-rebase` on conflict).
+
+### Executor Integration
+
+In `handleWorktreeCompletion()`, the merge conflict handler changes from:
+
+```
+merge conflict → mark needs-rebase → pause
+```
+
+To:
+
+```
+merge conflict → attempt clean rebase
+    ├─ success → re-verify → merge
+    └─ conflict → start agent with conflict context
+         ├─ agent resolves → re-verify → merge
+         └─ failure → mark needs-rebase → pause
+```
+
+```typescript
+if (mergeResult.conflict) {
+  if (!this.plan.config.verification.autoRebase) {
+    // Existing behavior: immediate needs-rebase
+    step.status = "needs-rebase";
+    // ...
+    return;
+  }
+
+  // Stage 1: attempt clean rebase
+  const rebaseResult = await this.worktreeManager.attemptRebase(step.ticketId);
+
+  if (rebaseResult.rebased) {
+    // Clean rebase succeeded — re-verify and merge
+    const reVerification = await this.runVerification(step, event, roleVerify);
+    if (reVerification && !reVerification.passed) {
+      // Post-rebase verification failed — enter retry loop or fail
+      // (same logic as normal verification failure)
+    }
+    const reMerge = await this.worktreeManager.merge(step.ticketId);
+    if (reMerge.merged) {
+      // Success — complete the step
+    }
+    return;
+  }
+
+  if (rebaseResult.conflict) {
+    // Stage 2: start agent to resolve conflicts
+    step.status = "ready";
+    step.rebaseConflict = {
+      files: rebaseResult.conflictFiles ?? [],
+      baseBranch: "main",
+    };
+    // startStep() will detect rebaseConflict and build conflict-resolution context
+    return;
+  }
+
+  // Rebase failed for non-conflict reason — needs-rebase
+  step.status = "needs-rebase";
+  // ...
+}
+```
+
+### Step State Addition
+
+```typescript
+interface PlanStep {
+  // ... existing fields ...
+  rebaseConflict?: {
+    files: string[];             // conflicting file paths
+    baseBranch: string;          // branch being rebased onto
+  };
+}
+```
+
+When `rebaseConflict` is set on a step, `startStep()` builds a conflict-resolution context packet instead of the normal ticket context. The `rebaseConflict` field is cleared after the agent completes.
+
+### Event Store
+
+Auto-rebase emits events for traceability:
+
+```
+step_rebase_attempted: { stepId, clean: true/false }
+step_rebase_agent_started: { stepId, conflictFiles: [...] }
+step_rebase_resolved: { stepId, method: "clean" | "agent" }
+step_rebase_failed: { stepId, reason: "..." }
+```
+
+### TUI Integration
+
+When auto-rebase is in progress, the step shows a distinct status in the dashboard:
+
+| Icon | Status |
+|------|--------|
+| `⟳` | rebasing (yellow) — auto-rebase in progress |
+| `⇄` | needs-rebase (red) — auto-rebase failed, manual intervention needed |
+
+The step detail view (Enter on a rebasing step) shows which files conflicted and whether a clean rebase or agent resolution is being attempted.
+
 ## Non-Goals
 
 - **Blocking on oracle for every step** — oracle is optional and off by default
@@ -286,3 +481,5 @@ When verification fails and retries are exhausted:
 - **Custom verification scripts** — use the test command for project-specific checks
 - **Verifying steps that had no writes** — those already fail via write-count check
 - **Smart retry strategies** — no backoff, no partial re-execution; each retry is a fresh agent session with failure context
+- **Cross-branch rebase** — auto-rebase only handles rebasing onto the plan's target branch (typically main), not arbitrary branch combinations
+- **Interactive rebase** — only non-interactive rebase is attempted; history rewriting is out of scope
