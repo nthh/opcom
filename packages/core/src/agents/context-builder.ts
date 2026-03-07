@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
 
@@ -111,7 +111,12 @@ export async function buildContextPacket(
   return packet;
 }
 
-export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: ResolvedRoleConfig, previousVerification?: VerificationResult): string {
+export function contextPacketToMarkdown(
+  packet: ContextPacket,
+  roleConfig?: ResolvedRoleConfig,
+  previousVerification?: VerificationResult,
+  rebaseConflict?: RebaseConflict,
+): string {
   const lines: string[] = [];
 
   lines.push(`# Project: ${packet.project.name}`);
@@ -279,6 +284,28 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
     lines.push(`- Focus on the failures listed above. Do not start over.`);
     lines.push(`- Run the specific failing tests to verify your fix.`);
     lines.push(`- Do not modify unrelated code.`);
+    lines.push("");
+  }
+
+  // Rebase conflict resolution context
+  if (rebaseConflict) {
+    lines.push(`## Merge Conflict Resolution`);
+    lines.push(`Your branch has conflicts with \`${rebaseConflict.baseBranch}\`. Resolve them.`);
+    lines.push("");
+    if (rebaseConflict.files.length > 0) {
+      lines.push(`### Conflicting Files`);
+      for (const f of rebaseConflict.files) {
+        lines.push(`- ${f}`);
+      }
+      lines.push("");
+    }
+    lines.push(`### Instructions`);
+    lines.push(`- Run \`git rebase ${rebaseConflict.baseBranch}\` to start the rebase.`);
+    lines.push(`- For each conflict, read the file, understand both sides, and resolve correctly.`);
+    lines.push(`- Do NOT drop changes from either side unless one is clearly obsolete.`);
+    lines.push(`- After resolving each file, \`git add <file>\` then \`git rebase --continue\`.`);
+    lines.push(`- Run tests relevant to the conflicting files to verify the resolution.`);
+    lines.push(`- Do not modify files that are not part of the conflict.`);
     lines.push("");
   }
 

@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { readdir, rm, writeFile, readFile } from "node:fs/promises";
+import type { RebaseResult } from "@opcom/types";
 import { createLogger } from "../logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -286,6 +287,50 @@ export class WorktreeManager {
   }
 
   /**
+   * Attempt to rebase the worktree branch onto the target branch.
+   * On conflict, aborts the rebase and returns the conflicting files.
+   */
+  async attemptRebase(stepId: string, targetBranch?: string): Promise<RebaseResult> {
+    const info = this.worktrees.get(stepId);
+    if (!info) {
+      return { rebased: false, conflict: false, error: "Worktree not tracked" };
+    }
+
+    const cwd = info.worktreePath;
+
+    // Determine target branch (default: current branch of main repo)
+    let target = targetBranch;
+    if (!target) {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: info.projectPath });
+      target = stdout.trim();
+    }
+
+    try {
+      await execFileAsync("git", ["rebase", target], { cwd });
+      log.info("clean rebase succeeded", { stepId, branch: info.branch, target });
+      return { rebased: true, conflict: false };
+    } catch (err: unknown) {
+      const e = err as { message?: string; stdout?: string; stderr?: string };
+      const combined = [e.message, e.stdout, e.stderr].filter(Boolean).join("\n");
+
+      if (combined.includes("CONFLICT") || combined.includes("could not apply") || combined.includes("Merge conflict")) {
+        // Abort the rebase to restore clean state
+        try {
+          await execFileAsync("git", ["rebase", "--abort"], { cwd });
+        } catch {
+          // Best effort abort
+        }
+        const conflictFiles = parseConflictFiles(combined);
+        log.warn("rebase conflict", { stepId, branch: info.branch, target, conflictFiles });
+        return { rebased: false, conflict: true, conflictFiles, error: combined };
+      }
+
+      log.error("rebase failed", { stepId, error: combined });
+      return { rebased: false, conflict: false, error: combined };
+    }
+  }
+
+  /**
    * Check if the agent made any commits on the worktree's branch.
    */
   async hasCommits(stepId: string): Promise<boolean> {
@@ -503,4 +548,19 @@ export class WorktreeManager {
       log.warn("failed to build in worktree", { worktreePath, error: String(err) });
     }
   }
+}
+
+/**
+ * Parse conflicting file paths from git rebase error output.
+ * Matches patterns like "CONFLICT (content): Merge conflict in <file>"
+ * and "CONFLICT (add/add): Merge conflict in <file>".
+ */
+export function parseConflictFiles(output: string): string[] {
+  const files: string[] = [];
+  const regex = /CONFLICT\s*\([^)]*\):\s*Merge conflict in\s+(.+)/g;
+  let match;
+  while ((match = regex.exec(output)) !== null) {
+    files.push(match[1].trim());
+  }
+  return files;
 }

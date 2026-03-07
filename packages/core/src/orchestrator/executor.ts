@@ -13,6 +13,7 @@ import type {
   NormalizedEvent,
   VerificationResult,
   TestGateResult,
+  RebaseResult,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
@@ -361,6 +362,10 @@ export class Executor {
    * Uses branch commit detection instead of write-count tracking.
    */
   private async handleWorktreeCompletion(step: PlanStep, event: ExecutorEvent): Promise<void> {
+    // Clear rebase conflict context — agent has either resolved it or failed
+    const wasRebaseResolution = !!step.rebaseConflict;
+    step.rebaseConflict = undefined;
+
     // Recover any stashed changes — agents may stash work and forget to pop.
     if (step.worktreePath) {
       try {
@@ -491,11 +496,19 @@ export class Executor {
     const mergeResult = await this.worktreeManager.merge(step.ticketId);
 
     if (mergeResult.conflict) {
-      // Merge conflict — mark as needs-rebase
+      if (verification) step.verification = verification;
+
+      // Auto-rebase: attempt automatic conflict resolution
+      // Skip if this was already a rebase-resolution agent (avoid infinite loops)
+      if (this.plan.config.verification.autoRebase !== false && !wasRebaseResolution) {
+        const resolved = await this.handleAutoRebase(step, event, roleVerify);
+        if (resolved) return; // Step completed or re-queued for agent resolution
+      }
+
+      // Auto-rebase disabled or failed — mark as needs-rebase
       step.status = "needs-rebase";
       step.error = `Merge conflict: ${mergeResult.error}`;
       step.completedAt = new Date().toISOString();
-      if (verification) step.verification = verification;
       // Keep worktree alive for manual rebase
 
       log.warn("merge conflict", { ticketId: step.ticketId });
@@ -586,6 +599,158 @@ export class Executor {
       agentSessionId: event.sessionId,
       detail: { mode: "worktree", verification },
     });
+  }
+
+  /**
+   * Handle auto-rebase after a merge conflict.
+   * Returns true if the step was resolved or re-queued, false if rebase failed entirely.
+   */
+  private async handleAutoRebase(
+    step: PlanStep,
+    event: ExecutorEvent,
+    roleVerify?: { runTests: boolean; runOracle: boolean },
+  ): Promise<boolean> {
+    this.logPlanEvent("step_rebase_attempted", {
+      stepTicketId: step.ticketId,
+      agentSessionId: event.sessionId,
+    });
+
+    // Stage 1: attempt clean rebase
+    const rebaseResult = await this.worktreeManager.attemptRebase(step.ticketId);
+
+    if (rebaseResult.rebased) {
+      // Clean rebase succeeded — re-verify (upstream changes may break tests)
+      log.info("clean rebase succeeded, re-verifying", { ticketId: step.ticketId });
+      this.logPlanEvent("step_rebase_resolved", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { method: "clean" },
+      });
+
+      step.status = "verifying";
+      await savePlan(this.plan);
+      this.emit("plan_updated", { plan: this.plan });
+
+      const reVerification = await this.runVerification(step, event, roleVerify);
+
+      if (reVerification && !reVerification.passed) {
+        // Post-rebase verification failed — enter retry loop
+        const attempt = step.attempt ?? 1;
+        const maxRetries = this.plan.config.verification.maxRetries ?? 2;
+        const maxAttempts = 1 + maxRetries;
+
+        if (attempt < maxAttempts) {
+          step.attempt = attempt + 1;
+          step.previousVerification = reVerification;
+          step.verification = reVerification;
+          step.status = "ready";
+          step.agentSessionId = undefined;
+          step.completedAt = undefined;
+          step.error = undefined;
+          this.logPlanEvent("step_retry", {
+            stepTicketId: step.ticketId,
+            agentSessionId: event.sessionId,
+            detail: { attempt: step.attempt, reason: "post-rebase verification failed" },
+          });
+          return true; // re-queued for retry
+        }
+
+        // Out of retries — hard fail
+        const reason = `Post-rebase verification failed after ${attempt} attempt(s): ${reVerification.failureReasons.join("; ")}`;
+        await this.failStep(step, reason);
+        step.verification = reVerification;
+        this.emit("step_failed", { step, error: reason });
+        this.logPlanEvent("step_rebase_failed", {
+          stepTicketId: step.ticketId,
+          agentSessionId: event.sessionId,
+          detail: { reason },
+        });
+        if (this.plan.config.pauseOnFailure) {
+          this.plan.status = "paused";
+          await savePlan(this.plan);
+          this.emit("plan_paused", { plan: this.plan });
+        }
+        return true; // handled (failed)
+      }
+
+      // Post-rebase verification passed — merge again
+      const reMerge = await this.worktreeManager.merge(step.ticketId);
+      if (reMerge.merged) {
+        // Success — complete the step
+        step.status = "done";
+        step.completedAt = new Date().toISOString();
+        if (reVerification) step.verification = reVerification;
+
+        if (event.sessionId) {
+          const project = await loadProject(step.projectId);
+          if (project) {
+            const changeset = await captureChangeset(project.path, {
+              sessionId: event.sessionId,
+              ticketId: step.ticketId,
+              projectId: step.projectId,
+              branch: step.worktreeBranch,
+            });
+            if (changeset) {
+              this.eventStore?.insertChangeset(changeset);
+            }
+          }
+        }
+
+        await this.worktreeManager.remove(step.ticketId).catch(() => {});
+        step.worktreePath = undefined;
+        step.worktreeBranch = undefined;
+
+        if (this.plan.config.ticketTransitions) {
+          await this.updateTicketStatusSafe(step, "closed");
+        }
+
+        this.emit("step_completed", { step });
+        this.logPlanEvent("step_completed", {
+          stepTicketId: step.ticketId,
+          agentSessionId: event.sessionId,
+          detail: { mode: "worktree", rebase: "clean", verification: reVerification },
+        });
+        return true;
+      }
+
+      // Post-rebase merge still conflicts — fall through to needs-rebase
+      log.warn("post-rebase merge still conflicts", { ticketId: step.ticketId });
+      return false;
+    }
+
+    if (rebaseResult.conflict) {
+      // Stage 2: start agent to resolve conflicts
+      log.info("rebase has conflicts, starting agent resolution", {
+        ticketId: step.ticketId,
+        conflictFiles: rebaseResult.conflictFiles,
+      });
+
+      step.rebaseConflict = {
+        files: rebaseResult.conflictFiles ?? [],
+        baseBranch: "main",
+      };
+      step.status = "ready";
+      step.agentSessionId = undefined;
+      step.completedAt = undefined;
+      step.error = undefined;
+
+      this.logPlanEvent("step_rebase_agent_started", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { conflictFiles: rebaseResult.conflictFiles },
+      });
+
+      return true; // re-queued for agent resolution
+    }
+
+    // Rebase failed for non-conflict reason — fall through to needs-rebase
+    log.warn("rebase failed (non-conflict)", { ticketId: step.ticketId, error: rebaseResult.error });
+    this.logPlanEvent("step_rebase_failed", {
+      stepTicketId: step.ticketId,
+      agentSessionId: event.sessionId,
+      detail: { error: rebaseResult.error },
+    });
+    return false;
   }
 
   /** Check if a worktree has uncommitted changes (staged or unstaged). */
@@ -1067,8 +1232,9 @@ export class Executor {
     const contextPacket = await buildContextPacket(project, workItem);
 
     // Create worktree if enabled — agent runs in isolation
+    // Skip creation if rebaseConflict is set (worktree already exists from the original step)
     let agentCwd: string | undefined;
-    if (this.plan.config.worktree) {
+    if (this.plan.config.worktree && !step.rebaseConflict) {
       const wtInfo = await this.worktreeManager.create(
         project.path,
         step.ticketId,
@@ -1081,6 +1247,10 @@ export class Executor {
       // Point the context packet at the worktree so the agent uses worktree
       // paths for all file operations instead of writing to the main tree.
       contextPacket.project.path = wtInfo.worktreePath;
+    } else if (step.worktreePath) {
+      // Reuse existing worktree (rebase resolution or retry)
+      agentCwd = step.worktreePath;
+      contextPacket.project.path = step.worktreePath;
     }
 
     // Resolve role config: role definition → stack tools → plan overrides
@@ -1096,7 +1266,9 @@ export class Executor {
     const allowedTools = [...allowedBashTools, ...resolved.allowedTools];
 
     // Build system prompt with role-aware context (and retry feedback if applicable)
-    const systemPrompt = contextPacketToMarkdown(contextPacket, resolved, step.previousVerification);
+    const systemPrompt = contextPacketToMarkdown(
+      contextPacket, resolved, step.previousVerification, step.rebaseConflict,
+    );
 
     const session = await this.sessionManager.startSession(
       step.projectId,

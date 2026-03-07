@@ -40,6 +40,19 @@ export interface PlanStep {
   role?: string;
   attempt?: number;                      // current attempt (1 = first try, 2+ = retry)
   previousVerification?: VerificationResult;  // feedback from last failed attempt
+  rebaseConflict?: RebaseConflict;       // set when agent needs to resolve merge conflicts
+}
+
+export interface RebaseConflict {
+  files: string[];       // conflicting file paths
+  baseBranch: string;    // branch being rebased onto
+}
+
+export interface RebaseResult {
+  rebased: boolean;      // true if rebase completed cleanly
+  conflict: boolean;     // true if rebase hit conflicts (aborted)
+  conflictFiles?: string[];
+  error?: string;
 }
 
 export interface VerificationConfig {
@@ -47,6 +60,7 @@ export interface VerificationConfig {
   runOracle: boolean;
   oracleModel?: string;
   maxRetries?: number;  // default 2 — retries on verification failure (0 = fail immediately)
+  autoRebase?: boolean; // default true — attempt auto-rebase on merge conflict
 }
 
 export interface OrchestratorConfig {

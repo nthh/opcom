@@ -226,6 +226,7 @@ function planStepIcon(status: string): string {
     case "failed": return "\u2717"; // ✗
     case "skipped": return "\u2298"; // ⊘
     case "needs-rebase": return "\u21c4"; // ⇄
+    case "rebasing": return "\u27f3"; // ⟳
     default: return "?";
   }
 }
@@ -238,6 +239,7 @@ function planStatusColor(status: string): string {
     case "done": return ANSI.green;
     case "failed": return ANSI.red;
     case "needs-rebase": return ANSI.red;
+    case "rebasing": return ANSI.yellow;
     case "skipped": return ANSI.dim;
     case "blocked": return ANSI.dim;
     default: return ANSI.white;
@@ -308,9 +310,10 @@ function renderPlanPanel(
       buf.writeLine(row, panel.x + 2, bold(dim(`[${line.name}]`)), contentWidth);
     } else {
       const step = line.step;
-      const icon = planStepIcon(step.status);
-      const sColor = planStatusColor(step.status);
-      const statusStr = color(sColor, `${icon} ${step.status}`);
+      const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
+      const icon = planStepIcon(displayStatus);
+      const sColor = planStatusColor(displayStatus);
+      const statusStr = color(sColor, `${icon} ${displayStatus}`);
       const verifyBadge = formatStepVerificationBadge(step);
       const text = `  ${statusStr} ${step.ticketId}${verifyBadge}`;
       const isSelected = line.index === selected && focused;

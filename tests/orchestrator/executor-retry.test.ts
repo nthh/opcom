@@ -135,6 +135,7 @@ vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
       remove: mockRemove,
       hasCommits: mockHasCommits,
       merge: mockMerge,
+      attemptRebase: vi.fn(async () => ({ rebased: false, conflict: false, error: "not implemented" })),
       getInfo: vi.fn(),
       restore: vi.fn(),
       writeLock: mockWriteLock,

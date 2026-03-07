@@ -17,6 +17,7 @@ export function defaultConfig(): OrchestratorConfig {
       runTests: true,
       runOracle: true,
       maxRetries: 2,
+      autoRebase: true,
     },
   };
 }

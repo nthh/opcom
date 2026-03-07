@@ -145,13 +145,14 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
 }));
 
 // Mock WorktreeManager — use vi.hoisted() so these are available when vi.mock is hoisted
-const { mockCreate, mockRemove, mockHasCommits, mockMerge, mockCleanupOrphaned, mockWriteLock } = vi.hoisted(() => ({
+const { mockCreate, mockRemove, mockHasCommits, mockMerge, mockCleanupOrphaned, mockWriteLock, mockAttemptRebase } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockRemove: vi.fn(),
   mockHasCommits: vi.fn(),
   mockMerge: vi.fn(),
   mockCleanupOrphaned: vi.fn(),
   mockWriteLock: vi.fn(),
+  mockAttemptRebase: vi.fn(),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
@@ -161,6 +162,7 @@ vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
     hasCommits: mockHasCommits,
     merge: mockMerge,
     writeLock: mockWriteLock,
+    attemptRebase: mockAttemptRebase,
     getInfo: vi.fn(),
     restore: vi.fn(),
   }));
@@ -381,7 +383,7 @@ describe("Executor with worktree isolation", () => {
 
     const plan = makePlan([
       { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
-    ], { worktree: true, pauseOnFailure: true });
+    ], { worktree: true, pauseOnFailure: true, verification: { ...defaultConfig().verification, autoRebase: false } });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
@@ -476,7 +478,7 @@ describe("Executor with worktree isolation", () => {
 
     const plan = makePlan([
       { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
-    ], { worktree: true, pauseOnFailure: false });
+    ], { worktree: true, pauseOnFailure: false, verification: { ...defaultConfig().verification, autoRebase: false } });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 

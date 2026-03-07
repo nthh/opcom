@@ -23,6 +23,7 @@ export interface OrchestratorSettings {
   runTests: boolean;
   runOracle: boolean;
   maxRetries: number;
+  autoRebase: boolean;
 }
 
 export interface NotificationSettings {
