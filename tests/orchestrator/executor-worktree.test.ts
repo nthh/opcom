@@ -109,12 +109,19 @@ vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
   contextPacketToMarkdown: vi.fn(() => "# Test context"),
 }));
 
-const { mockCommitStepChanges, mockCaptureChangeset, mockScanTickets, mockWriteFile, mockReadFile } = vi.hoisted(() => ({
+const { mockCommitStepChanges, mockCaptureChangeset, mockScanTickets, mockWriteFile, mockReadFile, mockExecFile } = vi.hoisted(() => ({
   mockCommitStepChanges: vi.fn(async () => true),
   mockCaptureChangeset: vi.fn(async () => null),
   mockScanTickets: vi.fn(async () => []),
   mockWriteFile: vi.fn(async () => {}),
   mockReadFile: vi.fn(async () => "---\nstatus: in-progress\n---\n"),
+  mockExecFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+    cb(null, { stdout: "", stderr: "" });
+  }),
+}));
+
+vi.mock("node:child_process", () => ({
+  execFile: mockExecFile,
 }));
 
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
@@ -194,6 +201,9 @@ describe("Executor with worktree isolation", () => {
     mockCleanupOrphaned.mockResolvedValue([]);
     mockScanTickets.mockResolvedValue([]);
     mockReadFile.mockResolvedValue("---\nstatus: in-progress\n---\n");
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+      cb(null, { stdout: "", stderr: "" });
+    });
   });
 
   it("creates worktree before starting agent when worktree=true", async () => {
@@ -613,6 +623,132 @@ describe("Executor with worktree isolation", () => {
     expect(plan.steps[0].status).toBe("failed");
     // writeFile should NOT have been called since ticketTransitions is off
     expect(mockWriteFile).not.toHaveBeenCalled();
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("commits ticket status change after writing it", async () => {
+    mockHasCommits.mockResolvedValue(false);
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, ticketTransitions: true, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Ticket status was written
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/test-p/.tickets/impl/t1/README.md",
+      expect.stringContaining("status: open"),
+      "utf-8",
+    );
+
+    // git add and git commit were called for the ticket file
+    const execCalls = mockExecFile.mock.calls;
+    const gitAddCall = execCalls.find(
+      (c: unknown[]) => c[0] === "git" && c[1][0] === "add" && c[1][1] === "/tmp/test-p/.tickets/impl/t1/README.md",
+    );
+    const gitCommitCall = execCalls.find(
+      (c: unknown[]) => c[0] === "git" && c[1][0] === "commit" && (c[1] as string[]).some((a: string) => a.includes("open") && a.includes("t1")),
+    );
+    expect(gitAddCall).toBeDefined();
+    expect(gitCommitCall).toBeDefined();
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("commits ticket status as closed after successful worktree merge", async () => {
+    mockHasCommits.mockResolvedValue(true);
+    mockMerge.mockResolvedValue({ merged: true, conflict: false });
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], {
+      worktree: true,
+      ticketTransitions: true,
+      pauseOnFailure: false,
+      verification: { runTests: false, runOracle: false, maxRetries: 0 },
+    });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(plan.steps[0].status).toBe("done");
+
+    // Ticket status was written as closed
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/test-p/.tickets/impl/t1/README.md",
+      expect.stringContaining("status: closed"),
+      "utf-8",
+    );
+
+    // git add and git commit were called for the ticket file
+    const execCalls = mockExecFile.mock.calls;
+    const gitAddCall = execCalls.find(
+      (c: unknown[]) => c[0] === "git" && c[1][0] === "add" && c[1][1] === "/tmp/test-p/.tickets/impl/t1/README.md",
+    );
+    const gitCommitCall = execCalls.find(
+      (c: unknown[]) => c[0] === "git" && c[1][0] === "commit" && (c[1] as string[]).some((a: string) => a.includes("closed") && a.includes("t1")),
+    );
+    expect(gitAddCall).toBeDefined();
+    expect(gitCommitCall).toBeDefined();
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("does not break if git commit fails after ticket status write", async () => {
+    mockHasCommits.mockResolvedValue(false);
+    mockScanTickets.mockResolvedValue([
+      { id: "t1", title: "Test", status: "in-progress", filePath: "/tmp/test-p/.tickets/impl/t1/README.md" },
+    ]);
+    // Make git commands fail
+    mockExecFile.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null) => void) => {
+      cb(new Error("git failed"));
+    });
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: true, ticketTransitions: true, pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Step still completed its normal flow despite git commit failure
+    expect(plan.steps[0].status).toBe("failed");
+    // Ticket status was still written (writeFile succeeded)
+    expect(mockWriteFile).toHaveBeenCalledWith(
+      "/tmp/test-p/.tickets/impl/t1/README.md",
+      expect.stringContaining("status: open"),
+      "utf-8",
+    );
 
     executor.stop();
     await runPromise;
