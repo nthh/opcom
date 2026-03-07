@@ -17,6 +17,7 @@ import {
 } from "@opcom/core";
 import type { Plan, PlanScope, OrchestratorConfig } from "@opcom/types";
 import type { TicketSet } from "@opcom/core";
+import { computePlanSummary } from "../tui/views/plan-overview.js";
 
 // --- Helpers ---
 
@@ -150,28 +151,52 @@ export async function runPlanShow(planId?: string): Promise<void> {
     return;
   }
 
+  const summary = computePlanSummary(plan);
+
   const done = plan.steps.filter((s) => s.status === "done" || s.status === "skipped").length;
-  console.log(`  Plan: ${plan.name}  ${statusIcon(plan.status)} ${plan.status}  ${done}/${plan.steps.length}\n`);
+  console.log(`  Plan: ${plan.name}  ${statusIcon(plan.status)} ${plan.status}  ${done}/${plan.steps.length}`);
+  console.log(`  ID: ${plan.id.slice(0, 8)}`);
+  console.log();
 
-  // Group by track
-  const tracks = new Map<string, typeof plan.steps>();
-  for (const step of plan.steps) {
-    const track = step.track ?? "unassigned";
-    if (!tracks.has(track)) tracks.set(track, []);
-    tracks.get(track)!.push(step);
-  }
+  // Step breakdown
+  console.log(`  Steps: ${summary.totalSteps} total, ${summary.readyCount} ready, ${summary.blockedCount} blocked`);
+  console.log();
 
-  for (const [trackName, steps] of tracks) {
-    console.log(`  [${trackName}]`);
-    for (const step of steps) {
-      const icon = stepIcon(step.status);
-      const deps = step.blockedBy.length > 0 ? `  (after: ${step.blockedBy.join(", ")})` : "";
-      const agent = step.agentSessionId ? `  agent:${step.agentSessionId.slice(0, 8)}` : "";
-      const err = step.error ? `  err: ${step.error}` : "";
-      console.log(`    ${icon} ${step.ticketId}  ${step.status}${deps}${agent}${err}`);
+  // Tracks with steps
+  for (const track of summary.tracks) {
+    console.log(`  [${track.name}] (${track.stepCount} steps)`);
+    for (const ticketId of track.ticketIds) {
+      const step = plan.steps.find((s) => s.ticketId === ticketId);
+      if (step) {
+        const icon = stepIcon(step.status);
+        const deps = step.blockedBy.length > 0 ? `  (after: ${step.blockedBy.join(", ")})` : "";
+        const agent = step.agentSessionId ? `  agent:${step.agentSessionId.slice(0, 8)}` : "";
+        const err = step.error ? `  err: ${step.error}` : "";
+        console.log(`    ${icon} ${step.ticketId}  ${step.status}${deps}${agent}${err}`);
+      }
     }
     console.log();
   }
+
+  // Critical path
+  if (summary.criticalPathLength > 1) {
+    console.log(`  Critical path (${summary.criticalPathLength} steps): ${summary.criticalPath.join(" -> ")}`);
+    console.log();
+  }
+
+  // Settings
+  const cfg = summary.config;
+  console.log("  Settings:");
+  console.log(`    Max concurrent agents: ${cfg.maxConcurrentAgents}`);
+  console.log(`    Backend: ${cfg.backend}`);
+  console.log(`    Worktree: ${cfg.worktree ? "yes" : "no"}`);
+  console.log(`    Auto-commit: ${cfg.autoCommit ? "yes" : "no"}`);
+  console.log(`    Pause on failure: ${cfg.pauseOnFailure ? "yes" : "no"}`);
+  const vParts: string[] = [];
+  if (cfg.verification.runTests) vParts.push("tests");
+  if (cfg.verification.runOracle) vParts.push("oracle");
+  console.log(`    Verification: ${vParts.length > 0 ? vParts.join(", ") : "none"}`);
+  console.log();
 
   if (plan.context) {
     console.log(`  Context:\n  ${plan.context.split("\n").join("\n  ")}\n`);
