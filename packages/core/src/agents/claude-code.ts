@@ -36,7 +36,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     const args = [
       "--output-format", "stream-json",
       "--verbose",
-      "-p", initialPrompt,
+      "-p",
     ];
 
     if (config.model) {
@@ -86,9 +86,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       env: childEnv,
     });
 
-    // Close stdin immediately — we pass the prompt via -p flag, not stdin.
-    // If stdin stays open, Claude Code may block waiting for EOF.
+    // Pipe prompt via stdin to avoid OS argument length limits.
+    // The -p flag (without a value) tells Claude Code to read from stdin.
     if (proc.stdin) {
+      proc.stdin.write(initialPrompt);
       proc.stdin.end();
     }
 

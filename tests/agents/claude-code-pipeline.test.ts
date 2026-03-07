@@ -326,9 +326,11 @@ describe("ClaudeCodeAdapter pipeline", () => {
   it("uses systemPrompt instead of context packet when provided", async () => {
     await adapter.start(makeConfig({ systemPrompt: "Custom prompt here" }));
 
+    // Prompt is piped via stdin, not passed as -p argument value
     const lastCall = mockSpawn.mock.calls[mockSpawn.mock.calls.length - 1];
     const args = lastCall[1] as string[];
-    const pIndex = args.indexOf("-p");
-    expect(args[pIndex + 1]).toBe("Custom prompt here");
+    expect(args).toContain("-p");
+    expect(mockProc.stdin.write).toHaveBeenCalledWith("Custom prompt here");
+    expect(mockProc.stdin.end).toHaveBeenCalled();
   });
 });

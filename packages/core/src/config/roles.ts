@@ -80,6 +80,25 @@ export const BUILTIN_ROLES: Record<string, RoleDefinition> = {
     runTests: false,
     runOracle: null,
   },
+  oracle: {
+    id: "oracle",
+    name: "Oracle",
+    permissionMode: "default",
+    allowedTools: [],
+    disallowedTools: [
+      "Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep",
+      "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
+    ],
+    allowedBashPatterns: [],
+    instructions: [
+      "You are a verification oracle. Evaluate whether code changes satisfy acceptance criteria.",
+      "Respond ONLY with the structured format specified in your prompt.",
+      "Do not use any tools. Do not attempt to read or modify files.",
+    ].join("\n"),
+    doneCriteria: "Evaluation complete.",
+    runTests: false,
+    runOracle: false,
+  },
 };
 
 /**

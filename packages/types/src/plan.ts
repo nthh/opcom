@@ -82,6 +82,7 @@ export interface VerificationResult {
     concerns: string[];
   };
   oracleError?: string;
+  oracleSessionId?: string;
   passed: boolean;
   failureReasons: string[];
 }

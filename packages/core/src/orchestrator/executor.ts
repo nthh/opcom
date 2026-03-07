@@ -25,7 +25,7 @@ import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges, captureChangeset } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
-import { collectOracleInputs, runOracle } from "../skills/oracle.js";
+import { collectOracleInputs, formatOraclePrompt, parseOracleResponse } from "../skills/oracle.js";
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { createLogger } from "../logger.js";
 import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
@@ -651,7 +651,7 @@ export class Executor {
       }
     }
 
-    // --- Oracle ---
+    // --- Oracle (runs as agent session) ---
     if (verification.runOracle) {
       try {
         const tickets = await scanTickets(project.path);
@@ -669,25 +669,28 @@ export class Executor {
           const oracleModel = "oracleModel" in verification
             ? (verification as { oracleModel?: string }).oracleModel
             : this.plan.config.verification.oracleModel;
-          const oracleResult = await runOracle(oracleInput, (prompt) =>
-            this.llmCall(prompt, oracleModel),
-          );
-          result.oracle = oracleResult;
-          if (!oracleResult.passed) {
-            result.passed = false;
-            const unmet = oracleResult.criteria
-              .filter((c) => !c.met)
-              .map((c) => c.criterion);
-            result.failureReasons.push(
-              `Oracle: ${unmet.length} criteria unmet`,
-            );
+
+          const oraclePrompt = formatOraclePrompt(oracleInput);
+          const oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result);
+          if (oracleResponse) {
+            const oracleResult = parseOracleResponse(oracleResponse);
+            result.oracle = oracleResult;
+            if (!oracleResult.passed) {
+              result.passed = false;
+              const unmet = oracleResult.criteria
+                .filter((c) => !c.met)
+                .map((c) => c.criterion);
+              result.failureReasons.push(
+                `Oracle: ${unmet.length} criteria unmet`,
+              );
+            }
+            log.info("oracle result", {
+              ticketId: step.ticketId,
+              passed: oracleResult.passed,
+              criteriaCount: oracleResult.criteria.length,
+              concerns: oracleResult.concerns.length,
+            });
           }
-          log.info("oracle result", {
-            ticketId: step.ticketId,
-            passed: oracleResult.passed,
-            criteriaCount: oracleResult.criteria.length,
-            concerns: oracleResult.concerns.length,
-          });
         } else {
           result.oracleError = "ticket not found for oracle evaluation";
           result.passed = false;
@@ -752,26 +755,96 @@ export class Executor {
   }
 
   /**
-   * Make an LLM call via Claude Code CLI for oracle evaluation.
+   * Run oracle evaluation as an agent session.
+   * Starts an oracle-role agent, waits for it to finish, collects response text.
+   * Returns null if the oracle session fails to produce a response.
    */
-  private async llmCall(prompt: string, model?: string): Promise<string> {
-    const args = ["-p", prompt, "--output-format", "text"];
-    if (model) args.push("--model", model);
+  private async runOracleAgent(
+    step: PlanStep,
+    prompt: string,
+    model: string | undefined,
+    result: VerificationResult,
+  ): Promise<string | null> {
+    const project = await loadProject(step.projectId);
+    if (!project) return null;
 
-    // Strip Claude env vars to avoid nested session detection
-    const childEnv: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (!k.startsWith("CLAUDE") && v !== undefined) {
-        childEnv[k] = v;
-      }
+    // Start oracle agent session
+    const session = await this.sessionManager.startSession(
+      step.projectId,
+      this.plan.config.backend as "claude-code" | "opencode",
+      {
+        projectPath: project.path,
+        contextPacket: {
+          project: {
+            name: project.name,
+            path: project.path,
+            stack: project.stack,
+            testing: project.testing,
+            linting: project.linting,
+            services: project.services,
+          },
+          git: {
+            branch: project.git?.branch ?? "main",
+            remote: project.git?.remote ?? null,
+            clean: true,
+          },
+        },
+        systemPrompt: prompt,
+        model,
+        permissionMode: "default",
+        disallowedTools: [
+          "Edit", "Write", "NotebookEdit", "Bash", "Read", "Glob", "Grep",
+          "EnterPlanMode", "ExitPlanMode", "EnterWorktree",
+        ],
+      },
+      `oracle:${step.ticketId}`,
+    );
+
+    result.oracleSessionId = session.id;
+    log.info("oracle agent started", { ticketId: step.ticketId, sessionId: session.id });
+
+    // Wait for the oracle session to stop, collecting assistant text
+    const responseText = await new Promise<string>((resolve, reject) => {
+      let text = "";
+
+      const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
+        if (sessionId !== session.id) return;
+        if (ev.type === "message_delta" && ev.data?.text) {
+          text += ev.data.text;
+        }
+      };
+
+      const onStopped = (stopped: import("@opcom/types").AgentSession) => {
+        if (stopped.id !== session.id) return;
+        cleanup();
+        resolve(text);
+      };
+
+      const timer = setTimeout(() => {
+        cleanup();
+        this.sessionManager.stopSession(session.id).catch(() => {});
+        reject(new Error("Oracle agent timed out after 120s"));
+      }, 120_000);
+
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.sessionManager.off("agent_event", onEvent);
+        this.sessionManager.off("session_stopped", onStopped);
+      };
+
+      this.sessionManager.on("agent_event", onEvent);
+      this.sessionManager.on("session_stopped", onStopped);
+    });
+
+    if (!responseText.trim()) {
+      result.oracleError = "Oracle agent produced no response";
+      result.passed = false;
+      result.failureReasons.push("Oracle: agent produced no response");
+      log.warn("oracle agent empty response", { ticketId: step.ticketId, sessionId: session.id });
+      return null;
     }
 
-    const { stdout } = await execFileAsync("claude", args, {
-      timeout: 120_000,
-      maxBuffer: 10 * 1024 * 1024,
-      env: childEnv,
-    });
-    return stdout;
+    return responseText;
   }
 
   /**

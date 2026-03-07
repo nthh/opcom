@@ -147,7 +147,8 @@ vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
 const mockRunTestGate = vi.fn();
 vi.mock("../../packages/core/src/skills/oracle.js", () => ({
   collectOracleInputs: vi.fn(async () => ({})),
-  runOracle: vi.fn(async () => ({ passed: true, criteria: [], concerns: [] })),
+  formatOraclePrompt: vi.fn(() => "oracle prompt"),
+  parseOracleResponse: vi.fn(() => ({ passed: true, criteria: [], concerns: [] })),
 }));
 
 function makePlan(steps: PlanStep[], configOverrides?: Partial<ReturnType<typeof defaultConfig>>): Plan {

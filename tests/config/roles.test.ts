@@ -26,8 +26,8 @@ function makeOrchestratorConfig(overrides?: Partial<OrchestratorConfig>): Orches
 }
 
 describe("BUILTIN_ROLES", () => {
-  it("defines five built-in roles", () => {
-    expect(Object.keys(BUILTIN_ROLES)).toEqual(["engineer", "qa", "reviewer", "researcher", "devops"]);
+  it("defines six built-in roles", () => {
+    expect(Object.keys(BUILTIN_ROLES)).toEqual(["engineer", "qa", "reviewer", "researcher", "devops", "oracle"]);
   });
 
   it("engineer is the default implementation role", () => {
