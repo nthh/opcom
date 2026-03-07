@@ -6,6 +6,8 @@ const execFileAsync = promisify(execFile);
 import type {
   Plan,
   PlanStep,
+  PlanStage,
+  StageSummary,
   AgentSession,
   AgentState,
   NormalizedEvent,
@@ -15,7 +17,7 @@ import type {
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
-import { recomputePlan } from "./planner.js";
+import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
@@ -35,6 +37,7 @@ export interface ExecutorEvents {
   step_completed: { step: PlanStep };
   step_failed: { step: PlanStep; error: string };
   step_needs_rebase: { step: PlanStep; error: string };
+  stage_completed: { planId: string; stage: PlanStage; summary: StageSummary };
   plan_completed: { plan: Plan };
   plan_paused: { plan: Plan };
   plan_updated: { plan: Plan };
@@ -43,7 +46,7 @@ export interface ExecutorEvents {
 type EventHandler<T> = (data: T) => void;
 
 interface ExecutorEvent {
-  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "inject_context";
+  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "inject_context" | "advance_stage";
   sessionId?: string;
   ticketId?: string;
   error?: string;
@@ -132,6 +135,11 @@ export class Executor {
       // Load ticket data for priority sorting and file-overlap detection
       await this.loadCurrentTickets();
 
+      // Compute stages if not already set
+      if (!this.plan.stages || this.plan.stages.length === 0) {
+        this.initializeStages();
+      }
+
       // Initial: start agents on ready steps
       await this.startReadySteps();
       this.emit("plan_updated", { plan: this.plan });
@@ -191,6 +199,14 @@ export class Executor {
       this.eventResolve();
       this.eventResolve = null;
     }
+  }
+
+  /**
+   * Continue to the next stage (user approval gate).
+   * Called from TUI or CLI when user approves.
+   */
+  continueToNextStage(): void {
+    this.pushEvent({ type: "advance_stage" });
   }
 
   // --- Event system ---
@@ -327,6 +343,14 @@ export class Executor {
         if (event.text) {
           await this.injectContext(event.text);
         }
+        break;
+      }
+
+      case "advance_stage": {
+        this.advanceToNextStage();
+        this.plan.status = "executing";
+        this.logPlanEvent("stage_advanced", { detail: { stage: this.plan.currentStage } });
+        await this.recomputeAndContinue();
         break;
       }
     }
@@ -829,11 +853,20 @@ export class Executor {
     await savePlan(this.plan);
 
     if (this.plan.status === "executing") {
+      // Check for stage completion before starting new steps
+      if (this.checkStageCompletion()) {
+        // Stage just completed — don't start new steps yet
+        this.emit("plan_updated", { plan: this.plan });
+        return;
+      }
       await this.startReadySteps();
     }
 
     // Check if plan is complete
     if (this.isPlanTerminal()) {
+      // Mark final stage as completed if stages are active
+      this.markCurrentStageCompleted();
+
       this.plan.status = "done";
       this.plan.completedAt = new Date().toISOString();
       await savePlan(this.plan);
@@ -858,7 +891,12 @@ export class Executor {
 
     if (available <= 0) return;
 
-    const ready = this.plan.steps.filter((s) => s.status === "ready");
+    // Filter ready steps by current stage if stages are active
+    let ready = this.plan.steps.filter((s) => s.status === "ready");
+    const currentStageIds = this.getCurrentStageStepIds();
+    if (currentStageIds) {
+      ready = ready.filter((s) => currentStageIds.has(s.ticketId));
+    }
 
     // Sort ready steps: lower priority number first, then fewer blockedBy, then array order
     const sorted = [...ready].sort((a, b) => {
@@ -1020,6 +1058,126 @@ export class Executor {
     } catch {
       return "unknown";
     }
+  }
+
+  // --- Stage management ---
+
+  /**
+   * Initialize stages from config or auto-compute from DAG.
+   */
+  private initializeStages(): void {
+    if (this.plan.config.stages && this.plan.config.stages.length > 0) {
+      this.plan.stages = buildExplicitStages(this.plan.steps, this.plan.config.stages);
+    } else {
+      this.plan.stages = computeStages(this.plan.steps);
+    }
+
+    // Only use stages if there are 2+ (single stage adds no value)
+    if (this.plan.stages.length <= 1) {
+      this.plan.stages = undefined;
+      this.plan.currentStage = undefined;
+      return;
+    }
+
+    this.plan.currentStage = 0;
+    this.plan.stages[0].status = "executing";
+    this.plan.stages[0].startedAt = new Date().toISOString();
+  }
+
+  /**
+   * Get the set of step ticket IDs in the current stage, or null if stages aren't active.
+   */
+  private getCurrentStageStepIds(): Set<string> | null {
+    if (!this.plan.stages || this.plan.currentStage === undefined) return null;
+    const stage = this.plan.stages[this.plan.currentStage];
+    if (!stage) return null;
+    return new Set(stage.stepTicketIds);
+  }
+
+  /**
+   * Check if the current stage is complete. If so, emit stage_completed
+   * and either auto-continue or pause for approval.
+   * Returns true if a stage just completed (caller should not start new steps).
+   */
+  private checkStageCompletion(): boolean {
+    if (!this.plan.stages || this.plan.currentStage === undefined) return false;
+
+    const stage = this.plan.stages[this.plan.currentStage];
+    if (!stage || stage.status !== "executing") return false;
+
+    // Check if all steps in this stage are terminal
+    const stageSteps = this.plan.steps.filter((s) =>
+      stage.stepTicketIds.includes(s.ticketId),
+    );
+    const allTerminal = stageSteps.every(
+      (s) => s.status === "done" || s.status === "failed" || s.status === "skipped" || s.status === "needs-rebase",
+    );
+
+    if (!allTerminal) return false;
+
+    // Stage is complete
+    this.markCurrentStageCompleted();
+
+    const summary = computeStageSummary(stage, this.plan.steps);
+    stage.summary = summary;
+
+    this.emit("stage_completed", { planId: this.plan.id, stage, summary });
+    this.logPlanEvent("stage_completed", {
+      detail: { stageIndex: stage.index, summary },
+    });
+
+    // Check if there's a next stage
+    const nextIdx = this.plan.currentStage + 1;
+    if (nextIdx >= this.plan.stages.length) {
+      // No more stages — plan will complete naturally
+      return false;
+    }
+
+    if (this.plan.config.autoContinue) {
+      // Auto-advance to next stage
+      this.advanceToNextStage();
+      return false; // caller should continue starting steps
+    }
+
+    // Pause for user approval
+    this.plan.status = "paused";
+    savePlan(this.plan).catch(() => {});
+    this.emit("plan_paused", { plan: this.plan });
+    this.logPlanEvent("plan_paused", { detail: { reason: "stage_gate", stageIndex: stage.index } });
+    return true;
+  }
+
+  /**
+   * Mark the current stage as completed with appropriate status.
+   */
+  private markCurrentStageCompleted(): void {
+    if (!this.plan.stages || this.plan.currentStage === undefined) return;
+    const stage = this.plan.stages[this.plan.currentStage];
+    if (!stage || stage.status !== "executing") return;
+
+    const stageSteps = this.plan.steps.filter((s) =>
+      stage.stepTicketIds.includes(s.ticketId),
+    );
+    const hasFailed = stageSteps.some(
+      (s) => s.status === "failed" || s.status === "needs-rebase",
+    );
+
+    stage.status = hasFailed ? "failed" : "completed";
+    stage.completedAt = new Date().toISOString();
+  }
+
+  /**
+   * Advance to the next stage.
+   */
+  private advanceToNextStage(): void {
+    if (!this.plan.stages || this.plan.currentStage === undefined) return;
+    const nextIdx = this.plan.currentStage + 1;
+    if (nextIdx >= this.plan.stages.length) return;
+
+    this.plan.currentStage = nextIdx;
+    const nextStage = this.plan.stages[nextIdx];
+    nextStage.status = "executing";
+    nextStage.startedAt = new Date().toISOString();
   }
 
   private isPlanTerminal(): boolean {

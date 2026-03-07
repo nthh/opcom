@@ -9,6 +9,8 @@ export interface Plan {
   status: PlanStatus;
   scope: PlanScope;
   steps: PlanStep[];
+  stages?: PlanStage[];
+  currentStage?: number;
   config: OrchestratorConfig;
   context: string;
   createdAt: string;
@@ -57,6 +59,8 @@ export interface OrchestratorConfig {
   autoCommit: boolean;
   verification: VerificationConfig;
   allowedBashPatterns?: string[];
+  autoContinue?: boolean;
+  stages?: string[][];
 }
 
 export interface TestGateResult {
@@ -146,4 +150,25 @@ export interface DecompositionAssessment {
   needsDecomposition: boolean;
   reason: string;
   criteria: string[];
+}
+
+// --- Stage Types ---
+
+export type StageStatus = "pending" | "executing" | "completed" | "failed";
+
+export interface PlanStage {
+  index: number;
+  stepTicketIds: string[];
+  status: StageStatus;
+  startedAt?: string;
+  completedAt?: string;
+  summary?: StageSummary;
+}
+
+export interface StageSummary {
+  completed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  testResults?: { passed: number; failed: number };
 }
