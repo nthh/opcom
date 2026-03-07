@@ -243,6 +243,7 @@ export function contextPacketToMarkdown(packet: ContextPacket, roleConfig?: Reso
     lines.push(`- When running tests during development, always target specific test files relevant to your changes. Do not run the full test suite.`);
   }
   lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);
+  lines.push(`- When committing, use a simple single-line commit message: \`git commit -m 'short description'\`. Do NOT use multi-line messages, heredocs, or \`$()\` substitution — they will be blocked by the permission system.`);
   lines.push(`- Do not mark work as complete if tests are failing.`);
   if (roleConfig?.doneCriteria) {
     lines.push("");
