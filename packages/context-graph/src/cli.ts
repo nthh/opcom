@@ -20,6 +20,7 @@ import { createBuilder, GraphDatabase } from "./index.js";
 import { parseTestResults, detectFramework, type Framework } from "./parsers/index.js";
 import { DriftEngine, type DriftSignalType, type TestType } from "./core/drift.js";
 import { TriageEngine, type LLMProvider, type TriageResult } from "./core/triage.js";
+import { TestGenerationEngine, type GenerationPlan, type GenerationResult } from "./core/test-generator.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -53,6 +54,11 @@ Commands:
   churn [path] [--since Nd]   Files ranked by change frequency
   coupling [path] [--min N]   File pairs that co-change together
   risk [path] [--since Nd]    Compound risk score (churn × coverage)
+  generate-tests [path]       Generate tests from triage results
+    --dry-run                 Show plan without writing files
+    --json                    Output as JSON
+    --model <model>           LLM model (default: claude-sonnet-4-6)
+    --max <N>                 Max signals to generate for (default: 10)
   install-hooks [path]        Install git post-commit/pre-push hooks
 
 [path] defaults to the current directory.
@@ -97,6 +103,9 @@ Output: ~/.context/<project>/graph.db
       break;
     case "risk":
       cmdRisk();
+      break;
+    case "generate-tests":
+      await cmdGenerateTests();
       break;
     case "install-hooks":
       cmdInstallHooks();
@@ -621,6 +630,115 @@ function cmdRisk(): void {
       console.log(`  ... and ${results.length - 30} more files`);
     }
     console.log(`\nTotal: ${results.length} files scored`);
+  }
+
+  db.close();
+}
+
+async function cmdGenerateTests(): Promise<void> {
+  const path = getProjectPath();
+  const name = getProjectName(path);
+  const dbPath = resolve(process.env.HOME ?? "~", ".context", name, "graph.db");
+
+  if (!existsSync(dbPath)) {
+    console.error(`No graph found at ${dbPath}. Run 'context-graph build' first.`);
+    process.exit(1);
+  }
+
+  const dryRun = args.includes("--dry-run");
+  const jsonOutput = args.includes("--json");
+  const modelIdx = args.indexOf("--model");
+  const model = modelIdx >= 0 ? args[modelIdx + 1] : undefined;
+  const maxIdx = args.indexOf("--max");
+  const maxSignals = maxIdx >= 0 ? parseInt(args[maxIdx + 1], 10) : undefined;
+
+  const db = GraphDatabase.open(dbPath);
+
+  // Get triage results (stored or fresh)
+  const triageEngine = new TriageEngine(db, { complete: async () => "" }, {});
+  let triageResults = triageEngine.getStoredResults();
+
+  if (triageResults.length === 0) {
+    // Run triage first
+    console.log("No stored triage results. Running drift detection + triage first...");
+    const driftEngine = new DriftEngine(db, { attachContext: true, projectPath: path });
+    const signals = await driftEngine.detect();
+
+    if (signals.length === 0) {
+      console.log("No drift signals detected.");
+      db.close();
+      return;
+    }
+
+    const llm = new AnthropicProvider();
+    const freshTriageEngine = new TriageEngine(db, llm, {});
+    triageResults = await freshTriageEngine.triage(signals);
+  }
+
+  const actionable = triageResults.filter((r) => r.verdict === "actionable" && r.action === "write_test");
+  if (actionable.length === 0) {
+    console.log("No actionable write_test signals to generate tests for.");
+    db.close();
+    return;
+  }
+
+  const llm = dryRun ? { complete: async () => "" } : new AnthropicProvider();
+  const engine = new TestGenerationEngine(db, llm, path, {
+    dryRun,
+    model,
+    maxSignals,
+  });
+
+  const plans = await engine.plan(actionable);
+
+  if (dryRun) {
+    if (jsonOutput) {
+      console.log(JSON.stringify(plans.map((p) => ({
+        signal: p.signal.signalId,
+        generator: p.generator.name,
+        targetPath: p.signal.testHints.targetPath,
+        testType: p.signal.testHints.testType,
+        framework: p.signal.testHints.framework,
+        behaviors: p.signal.testHints.behaviors,
+      })), null, 2));
+    } else {
+      console.log(`GENERATION PLAN (${plans.length} tests to generate)`);
+      console.log(`${"generator".padEnd(12)}  ${"test".padEnd(6)}  ${"framework".padEnd(12)}  target`);
+      console.log(`${"--------".padEnd(12)}  ${"----".padEnd(6)}  ${"--------".padEnd(12)}  ------`);
+      for (const plan of plans) {
+        console.log(
+          `${plan.generator.name.padEnd(12)}  ${plan.signal.testHints.testType.padEnd(6)}  ${plan.signal.testHints.framework.padEnd(12)}  ${plan.signal.testHints.targetPath}`,
+        );
+        for (const b of plan.signal.testHints.behaviors) {
+          console.log(`    → ${b}`);
+        }
+      }
+    }
+    db.close();
+    return;
+  }
+
+  // Generate tests
+  const results = await engine.generate(plans);
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(results.map((r) => ({
+      signal: r.signal.signalId,
+      status: r.status,
+      tests: r.tests.map((t) => ({ path: t.path, testType: t.testType, framework: t.framework })),
+      retries: r.retries,
+    })), null, 2));
+  } else {
+    console.log(`GENERATION RESULTS (${results.length})`);
+    for (const r of results) {
+      const statusIcon = r.status === "generated" || r.status === "verified" ? "+" : r.status === "skipped" ? "-" : "!";
+      console.log(`  [${statusIcon}] ${r.signal.signalId} → ${r.status}`);
+      for (const t of r.tests) {
+        console.log(`      ${t.path} (${t.framework}/${t.testType})`);
+      }
+    }
+    const generated = results.filter((r) => r.status !== "skipped").length;
+    console.log(`\nGenerated: ${generated}/${results.length} signals`);
   }
 
   db.close();
