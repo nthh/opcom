@@ -1,7 +1,7 @@
 ---
 id: file-overlap-scheduling
 title: "Serialize steps with overlapping files to avoid merge conflicts"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-06
