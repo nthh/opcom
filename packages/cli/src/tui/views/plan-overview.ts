@@ -159,6 +159,7 @@ function stepStatusIcon(status: string): string {
     case "blocked": return "\u25cc"; // ◌
     case "ready": return "\u25cb";   // ○
     case "in-progress": return "\u25cf"; // ●
+    case "verifying": return "\u25ce";   // ◎
     case "done": return "\u2713";    // ✓
     case "failed": return "\u2717";  // ✗
     case "skipped": return "\u2298"; // ⊘
@@ -170,6 +171,7 @@ function stepStatusIcon(status: string): string {
 function stepStatusColor(status: string): string {
   switch (status) {
     case "in-progress": return ANSI.yellow;
+    case "verifying": return ANSI.orange;
     case "ready": return ANSI.cyan;
     case "done": return ANSI.green;
     case "failed": return ANSI.red;
@@ -265,6 +267,7 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
   // --- Confirm prompt ---
   if (state.confirmed === null) {
     lines.push(bold(color(ANSI.yellow, "Press Space to start execution, or Esc to cancel.")));
+    lines.push(dim("+/-:agents  t:toggle tests  o:toggle oracle  w:toggle worktree"));
   } else if (state.confirmed) {
     lines.push(bold(color(ANSI.green, "\u2713 Plan execution started.")));
   } else {
@@ -327,7 +330,7 @@ export function renderPlanOverview(
   // Footer
   const footerY = panel.y + panel.height - 1;
   const keys = state.confirmed === null
-    ? dim("j/k:scroll  Space:start  Esc:cancel")
+    ? dim("j/k:scroll  +/-:agents  t:tests  o:oracle  w:worktree  Space:start  Esc:cancel")
     : dim("Esc:back");
   buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
 }

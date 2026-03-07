@@ -129,6 +129,9 @@ export class Executor {
     this.sessionManager.on("agent_event", onAgentEvent);
 
     try {
+      // Load ticket data for priority sorting and file-overlap detection
+      await this.loadCurrentTickets();
+
       // Initial: start agents on ready steps
       await this.startReadySteps();
       this.emit("plan_updated", { plan: this.plan });

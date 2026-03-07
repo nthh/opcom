@@ -1353,6 +1353,48 @@ export class TuiApp {
       case "g":
         planOverviewScrollToTop(state);
         return;
+
+      // --- Plan config editing ---
+      case "+":
+      case "=":
+        if (state.confirmed === null) {
+          state.plan.config.maxConcurrentAgents = Math.min(32, state.plan.config.maxConcurrentAgents + 1);
+          state.summary.config = state.plan.config;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        return;
+
+      case "-":
+        if (state.confirmed === null) {
+          state.plan.config.maxConcurrentAgents = Math.max(1, state.plan.config.maxConcurrentAgents - 1);
+          state.summary.config = state.plan.config;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        return;
+
+      case "t":
+        if (state.confirmed === null) {
+          state.plan.config.verification.runTests = !state.plan.config.verification.runTests;
+          state.summary.config = state.plan.config;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        return;
+
+      case "o":
+        if (state.confirmed === null) {
+          state.plan.config.verification.runOracle = !state.plan.config.verification.runOracle;
+          state.summary.config = state.plan.config;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        return;
+
+      case "w":
+        if (state.confirmed === null) {
+          state.plan.config.worktree = !state.plan.config.worktree;
+          state.summary.config = state.plan.config;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+        }
+        return;
     }
   }
 
