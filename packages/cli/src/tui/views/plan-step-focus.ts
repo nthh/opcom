@@ -255,6 +255,8 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
           lines.push(...wrapText(`    ${color(ANSI.yellow, concern)}`, width));
         }
       }
+    } else if (verification.oracleError) {
+      lines.push(`  ${dim("Oracle:")} ${color(ANSI.yellow, "\u26a0 " + verification.oracleError)}`);
     }
 
     if (verification.failureReasons.length > 0) {

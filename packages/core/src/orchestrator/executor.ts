@@ -688,10 +688,17 @@ export class Executor {
             criteriaCount: oracleResult.criteria.length,
             concerns: oracleResult.concerns.length,
           });
+        } else {
+          result.oracleError = "ticket not found for oracle evaluation";
+          result.passed = false;
+          result.failureReasons.push("Oracle: ticket not found — cannot evaluate");
+          log.warn("oracle skipped: ticket not found", { ticketId: step.ticketId });
         }
       } catch (err) {
+        result.oracleError = String(err);
+        result.passed = false;
+        result.failureReasons.push(`Oracle: evaluation failed — ${String(err)}`);
         log.warn("oracle evaluation failed", { ticketId: step.ticketId, error: String(err) });
-        // Oracle failure is non-fatal — don't block the step
       }
     }
 

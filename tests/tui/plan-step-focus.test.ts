@@ -560,4 +560,28 @@ describe("verification display with failed tests", () => {
     expect(hasFailedCriterion).toBe(true);
     expect(hasConcern).toBe(true);
   });
+
+  it("shows oracle error when oracle was skipped or failed", () => {
+    const step = makePlanStep({ status: "done" });
+    const plan = makePlan([step]);
+    const verification: VerificationResult = {
+      stepTicketId: "tile-perf",
+      passed: true,
+      testGate: {
+        passed: true,
+        testCommand: "npm test",
+        totalTests: 5,
+        passedTests: 5,
+        failedTests: 0,
+        output: "ok",
+        durationMs: 500,
+      },
+      oracleError: "ticket not found for oracle evaluation",
+      failureReasons: [],
+    };
+    const state = createPlanStepFocusState(step, plan, null, null, [], [], verification);
+
+    const hasOracleError = state.displayLines.some((l) => l.includes("ticket not found"));
+    expect(hasOracleError).toBe(true);
+  });
 });

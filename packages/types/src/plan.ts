@@ -81,6 +81,7 @@ export interface VerificationResult {
     criteria: Array<{ criterion: string; met: boolean; reasoning: string }>;
     concerns: string[];
   };
+  oracleError?: string;
   passed: boolean;
   failureReasons: string[];
 }
