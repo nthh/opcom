@@ -15,6 +15,7 @@ import {
   truncate,
   wrapText,
 } from "../renderer.js";
+import { computeTicketTraceability, type TicketTraceability } from "../health-data.js";
 
 export interface TicketFocusState {
   ticket: WorkItem;
@@ -22,6 +23,7 @@ export interface TicketFocusState {
   specContent: string | null;
   ticketContent: string | null;
   changesets: Changeset[] | null;
+  traceability: TicketTraceability | null;
   scrollOffset: number;
   displayLines: string[];
   wrapWidth: number;
@@ -35,6 +37,7 @@ export function createTicketFocusState(ticket: WorkItem, projectConfig: ProjectC
     specContent: null,
     ticketContent: null,
     changesets: null,
+    traceability: null,
     scrollOffset: 0,
     displayLines: [],
     wrapWidth: 0,
@@ -99,11 +102,21 @@ export async function loadTicketContent(state: TicketFocusState): Promise<void> 
     state.changesets = null;
   }
 
+  // Load traceability data
+  try {
+    const { scanTickets } = await import("@opcom/core");
+    const root = projectConfig?.path ?? process.cwd();
+    const allTickets = await scanTickets(root);
+    state.traceability = computeTicketTraceability(ticket, allTickets, root);
+  } catch {
+    state.traceability = null;
+  }
+
   state.loaded = true;
   rebuildDisplayLines(state);
 }
 
-function rebuildDisplayLines(state: TicketFocusState, width = 80): void {
+export function rebuildDisplayLines(state: TicketFocusState, width = 80): void {
   const { ticket } = state;
   const lines: string[] = [];
 
@@ -137,6 +150,31 @@ function rebuildDisplayLines(state: TicketFocusState, width = 80): void {
     lines.push(`${dim("Tags:")}`);
     for (const [key, values] of tagEntries) {
       lines.push(`  ${dim(key + ":")} ${values.join(", ")}`);
+    }
+  }
+
+  // Traceability section
+  if (state.traceability) {
+    const { specLink, relatedTickets, testFiles } = state.traceability;
+
+    if (specLink) {
+      const specRef = specLink.anchor
+        ? `${specLink.spec}.md#${specLink.anchor}`
+        : `${specLink.spec}.md`;
+      lines.push(`${dim("Spec:")}     ${specRef}  ${color(ANSI.green, "\u2713 linked")}`);
+    } else {
+      lines.push(`${dim("Spec:")}     ${color(ANSI.red, "\u26A0 no spec link")}`);
+    }
+
+    if (relatedTickets.length > 0) {
+      const related = relatedTickets
+        .map(t => `${t.id} (${t.status})`)
+        .join(", ");
+      lines.push(`${dim("Related:")}  ${related}`);
+    }
+
+    if (testFiles.length > 0) {
+      lines.push(`${dim("Tests:")}    ${testFiles.join(", ")}`);
     }
   }
 

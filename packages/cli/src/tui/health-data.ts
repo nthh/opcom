@@ -4,6 +4,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, basename, relative } from "node:path";
 import { scanTickets, parseFrontmatter } from "@opcom/core";
+import type { WorkItem } from "@opcom/types";
 
 // --- Types ---
 
@@ -424,4 +425,79 @@ export function isHealthWarning(data: HealthData): boolean {
   if (data.brokenLinks.length > 0) return true;
   if (data.ticketCount > 0 && (data.ticketsWithoutSpec / data.ticketCount) > 0.25) return true;
   return false;
+}
+
+// --- Ticket-level traceability (for L3 ticket focus view) ---
+
+export interface TicketTraceability {
+  specLink: { spec: string; anchor?: string } | null;
+  relatedTickets: Array<{ id: string; status: string }>;
+  testFiles: string[];
+}
+
+export function computeTicketTraceability(
+  ticket: WorkItem,
+  allTickets: WorkItem[],
+  root: string,
+): TicketTraceability {
+  // 1. Extract spec link from ticket.links
+  let specLink: TicketTraceability["specLink"] = null;
+  for (const link of ticket.links) {
+    const specMatch = link.match(/(?:docs\/)?spec\/([^#.]+)(?:\.md)?(?:#(.+))?/);
+    if (specMatch) {
+      specLink = { spec: specMatch[1], anchor: specMatch[2] || undefined };
+      break;
+    }
+  }
+
+  // 2. Find related tickets (same spec section, excluding self)
+  const relatedTickets: Array<{ id: string; status: string }> = [];
+  if (specLink) {
+    for (const t of allTickets) {
+      if (t.id === ticket.id) continue;
+      for (const link of t.links) {
+        const match = link.match(/(?:docs\/)?spec\/([^#.]+)(?:\.md)?(?:#(.+))?/);
+        if (match && match[1] === specLink.spec) {
+          // If both have anchors, match on anchor; otherwise match on spec name
+          if (!specLink.anchor || !match[2] || match[2] === specLink.anchor) {
+            relatedTickets.push({ id: t.id, status: t.status });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 3. Find test files related to the spec
+  const testFiles: string[] = [];
+  if (specLink) {
+    const testsDir = join(root, "tests");
+    if (existsSync(testsDir)) {
+      // Look in tests/<spec-name>/ directory
+      const specTestDir = join(testsDir, specLink.spec);
+      if (existsSync(specTestDir)) {
+        try {
+          for (const f of readdirSync(specTestDir)) {
+            if (f.endsWith(".test.ts")) {
+              testFiles.push(join("tests", specLink.spec, f));
+            }
+          }
+        } catch {
+          // Ignore read errors
+        }
+      }
+      // Also check for tests/<spec-name>*.test.ts at top level
+      try {
+        for (const f of readdirSync(testsDir)) {
+          if (f.startsWith(specLink.spec) && f.endsWith(".test.ts")) {
+            testFiles.push(join("tests", f));
+          }
+        }
+      } catch {
+        // Ignore read errors
+      }
+    }
+  }
+
+  return { specLink, relatedTickets, testFiles };
 }
