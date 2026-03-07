@@ -80,6 +80,7 @@ type StepStatus =
   | "blocked"       // upstream deps not yet done
   | "ready"         // all deps satisfied, waiting for assignment
   | "in-progress"   // agent working on it
+  | "verifying"     // agent exited, verification pipeline running
   | "done"          // agent completed successfully
   | "failed"        // agent failed or ticket needs intervention
   | "skipped";      // user decided to skip
@@ -633,7 +634,8 @@ PLAN: phase-8-ops ⏸ paused     2/7 steps  0 agents │  Space:resume  c:contex
 
 | Icon | Status |
 |------|--------|
-| `●` | in-progress (green) |
+| `●` | in-progress (yellow) |
+| `◎` | verifying (orange) |
 | `○` | ready (white) |
 | `◌` | blocked (dim) |
 | `✓` | done (green) |

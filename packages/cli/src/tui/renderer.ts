@@ -38,6 +38,8 @@ export const ANSI = {
   cyan: `${ESC}[36m`,
   white: `${ESC}[37m`,
 
+  orange: `${ESC}[38;5;208m`,
+
   brightBlack: `${ESC}[90m`,
   brightRed: `${ESC}[91m`,
   brightGreen: `${ESC}[92m`,

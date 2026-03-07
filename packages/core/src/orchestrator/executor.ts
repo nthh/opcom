@@ -395,6 +395,10 @@ export class Executor {
 
     // Agent has commits — run verification IN the worktree before merging.
     // This prevents bad code from landing on main if tests fail.
+    step.status = "verifying";
+    await savePlan(this.plan);
+    this.emit("plan_updated", { plan: this.plan });
+
     const roleVerify = this.stepVerification.get(step.ticketId);
     const verification = await this.runVerification(step, event, roleVerify);
 
@@ -843,7 +847,7 @@ export class Executor {
   }
 
   private async startReadySteps(): Promise<void> {
-    const running = this.plan.steps.filter((s) => s.status === "in-progress").length;
+    const running = this.plan.steps.filter((s) => s.status === "in-progress" || s.status === "verifying").length;
     const max = this.plan.config.maxConcurrentAgents;
     const available = max - running;
 
@@ -1020,7 +1024,7 @@ export class Executor {
   private async cleanupOrphanedWorktrees(): Promise<void> {
     // Collect step IDs that are currently in-progress — their worktrees must be preserved
     const activeStepIds = new Set(
-      this.plan.steps.filter((s) => s.status === "in-progress").map((s) => s.ticketId),
+      this.plan.steps.filter((s) => s.status === "in-progress" || s.status === "verifying").map((s) => s.ticketId),
     );
     const projectIds = [...new Set(this.plan.steps.map((s) => s.projectId))];
     for (const pid of projectIds) {

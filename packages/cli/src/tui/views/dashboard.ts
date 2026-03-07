@@ -221,6 +221,7 @@ function planStepIcon(status: string): string {
     case "blocked": return "\u25cc"; // ◌
     case "ready": return "\u25cb"; // ○
     case "in-progress": return "\u25cf"; // ●
+    case "verifying": return "\u25ce"; // ◎
     case "done": return "\u2713"; // ✓
     case "failed": return "\u2717"; // ✗
     case "skipped": return "\u2298"; // ⊘
@@ -232,6 +233,7 @@ function planStepIcon(status: string): string {
 function planStatusColor(status: string): string {
   switch (status) {
     case "in-progress": return ANSI.yellow;
+    case "verifying": return ANSI.orange;
     case "ready": return ANSI.cyan;
     case "done": return ANSI.green;
     case "failed": return ANSI.red;

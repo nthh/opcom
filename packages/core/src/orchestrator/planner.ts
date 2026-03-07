@@ -264,7 +264,7 @@ function isParentResolved(
 }
 
 function isSticky(status: StepStatus): boolean {
-  return status === "in-progress" || status === "done" || status === "failed" || status === "skipped" || status === "needs-rebase";
+  return status === "in-progress" || status === "verifying" || status === "done" || status === "failed" || status === "skipped" || status === "needs-rebase";
 }
 
 /**
