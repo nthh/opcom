@@ -740,10 +740,194 @@ The triage skill becomes plan-aware. Instead of just recommending individual tic
 - "The cloud-services track is blocked on cloud-types — prioritize that"
 - "2 tickets have no plan — consider adding them to an execution plan"
 
+## Plan Overview Screen
+
+When a plan is created, the user sees a summary screen before execution starts. This gives a clear picture of what's about to happen and a confirmation gate.
+
+### Overview Contents
+
+The overview displays:
+
+1. **Step summary** — total step count, ready vs. blocked breakdown
+2. **Track layout** — which tickets are in each track, their dependency chain
+3. **Plan settings** — maxConcurrentAgents, worktree mode, autoCommit, verification config
+4. **Dependency visualization** — which steps gate others, critical path through the DAG
+
+```
+┌─ PLAN: phase-8-ops ── 7 steps, 3 tracks ────────────────────────────────┐
+│                                                                           │
+│  Track: event-store          (1 step)                                     │
+│    ○ event-store                                                          │
+│                                                                           │
+│  Track: dashboard            (3 steps)                                    │
+│    ○ workitem-wrapper → project-filter → cli-status                       │
+│                                                                           │
+│  Track: cloud-services       (3 steps)                                    │
+│    ○ cloud-types → db-adapters → serverless                               │
+│                                                                           │
+│  Settings: 3 concurrent agents, worktrees on, pause on failure            │
+│  Ready: 3  Blocked: 4                                                     │
+│                                                                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Enter:start execution  e:edit settings  esc:cancel                        │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+### CLI Equivalent
+
+```bash
+opcom plan show <id>    # prints the same summary to terminal (no TUI needed)
+```
+
+### Time Estimation (Future)
+
+The overview screen is designed to eventually include per-step and total duration estimates based on historical data from the event store (average agent time per ticket size/type). This is not part of the initial implementation — the overview launches without estimates and gains them once enough plan history exists.
+
+## Plan Stages
+
+Stages break plan execution into sequential rounds with approval gates between them. After each stage completes, execution pauses and the user reviews results before the next stage begins.
+
+### Stage Computation
+
+Stages are derived from the DAG — each "wave" of steps that can run in parallel at the same dependency depth forms a stage:
+
+```
+Stage 1: all steps with no deps (leaf nodes in the DAG)
+Stage 2: steps whose deps were all in stage 1
+Stage 3: steps whose deps were all in stage 1 or 2
+...
+```
+
+```typescript
+function computeStages(steps: PlanStep[]): PlanStage[] {
+  const stages: PlanStage[] = [];
+  const completed = new Set<string>();
+
+  while (completed.size < steps.length) {
+    const wave = steps.filter(s =>
+      !completed.has(s.ticketId) &&
+      s.blockedBy.every(dep => completed.has(dep))
+    );
+    stages.push({
+      index: stages.length,
+      stepTicketIds: wave.map(s => s.ticketId),
+      status: "pending",
+    });
+    wave.forEach(s => completed.add(s.ticketId));
+  }
+  return stages;
+}
+```
+
+### Explicit Stages
+
+Users can override auto-staging with explicit stage definitions in the plan config:
+
+```yaml
+plan:
+  stages:
+    - [ticket-a, ticket-b]        # stage 1: run in parallel
+    - [ticket-c]                   # stage 2: after stage 1 completes
+    - [ticket-d, ticket-e]        # stage 3: after stage 2
+```
+
+Explicit stages must respect the dependency graph — a ticket cannot be staged before its deps. The planner validates this and errors on conflicts.
+
+### Types
+
+```typescript
+interface PlanStage {
+  index: number;
+  stepTicketIds: string[];
+  status: "pending" | "executing" | "completed" | "failed";
+  startedAt?: string;
+  completedAt?: string;
+  summary?: StageSummary;
+}
+
+interface StageSummary {
+  completed: number;
+  failed: number;
+  skipped: number;
+  durationMs: number;
+  testResults?: { passed: number; failed: number };
+}
+```
+
+### Executor Behavior
+
+When stages are active, the executor modifies its loop:
+
+1. Only start steps in the current stage (not all ready steps)
+2. When all steps in the current stage are terminal (done/failed/skipped), emit `stage_completed`
+3. Pause execution and wait for user approval before advancing to the next stage
+4. If any step failed, include failure details in the stage summary
+
+```typescript
+// In executor loop, after completing a step:
+if (this.currentStageComplete()) {
+  const summary = this.computeStageSummary(this.currentStage);
+  this.emit("stage_completed", { planId: this.plan.id, stage: this.currentStage, summary });
+  if (!this.config.autoContinue) {
+    this.pause();  // wait for user to approve next stage
+  } else {
+    this.advanceStage();
+  }
+}
+```
+
+### Approval Gate
+
+Between stages, the user can:
+- **Continue** — advance to the next stage (`opcom plan continue` or Space in TUI)
+- **Inject context** — add notes or specs before the next stage starts
+- **Skip steps** — skip specific steps in the upcoming stage
+- **Abort** — stop the plan entirely
+
+### Notifications
+
+Stage completion triggers a notification via the configured notification channel:
+- Terminal bell (default)
+- Slack message (if Slack integration enabled)
+- Desktop notification (if supported)
+
+The notification includes the stage summary: how many steps completed, any failures, total duration.
+
+### Auto-Continue
+
+Plans can opt out of approval gates:
+
+```yaml
+plan:
+  autoContinue: true   # skip approval gates, run all stages back-to-back
+```
+
+This is useful for trusted, well-tested plans where pausing between stages adds overhead without value.
+
+### TUI Integration
+
+The plan view shows stage boundaries:
+
+```
+  PLAN: phase-8-ops (stage 2/3, executing)
+
+  ── Stage 1 (completed, 34m) ──────────────
+    ✓ event-store              34m
+    ✓ workitem-wrapper         18m
+    ✓ cloud-types              22m
+
+  ── Stage 2 (executing) ──────────────────
+    ● project-filter           in-progress
+    ● db-adapters              in-progress
+
+  ── Stage 3 (pending) ────────────────────
+    ◌ cli-status               blocked
+    ◌ serverless               blocked
+```
+
 ## Non-Goals
 
 - **Distributed execution** — the orchestrator runs on one machine. Multi-machine coordination is out of scope.
 - **Automatic re-planning on failure** — when a step fails, the plan pauses. The user decides what to do. No auto-retry or auto-rewrite.
-- **Time estimation** — plans don't predict how long steps will take. Historical data from the event store could enable this later.
 - **Cross-workspace plans** — plans operate within one workspace.
 - **Replacing manual workflow** — the orchestrator is opt-in. You can still use opcom without plans, manually starting agents on tickets. Plans add structure when you want it.

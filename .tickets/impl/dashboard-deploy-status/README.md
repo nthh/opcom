@@ -9,8 +9,8 @@ deps:
   - cicd-integration
   - github-deployments-pane
 links:
+  - docs/spec/cicd.md#dashboard-deploy-column-l1
   - docs/spec/tui.md
-  - docs/spec/cicd.md
 ---
 
 # Dashboard: production & deployment status

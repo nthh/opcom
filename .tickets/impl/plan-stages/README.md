@@ -9,7 +9,7 @@ deps:
   - orchestrator-plan-engine
   - modular-integrations
 links:
-  - docs/spec/orchestrator.md
+  - docs/spec/orchestrator.md#plan-stages
 ---
 
 # Plan stages: sequential rounds with approval gates

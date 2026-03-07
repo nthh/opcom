@@ -222,7 +222,7 @@ type ServerEvent =
 
 ### Dashboard (L1)
 
-Add CI status indicator per project, next to git state:
+Add CI and deploy status indicators per project, next to git state:
 
 ```
   mtnmap       main  ✓  ✔ CI     ● staging
@@ -231,6 +231,61 @@ Add CI status indicator per project, next to git state:
 ```
 
 Where `✔` = last pipeline passed, `✖` = failed, `◌` = in progress, `—` = no CI.
+
+### Dashboard Deploy Column (L1)
+
+When projects have deployment data, the dashboard gains a deploy status column showing the most relevant deployment per project:
+
+```
+ Project          Stack           Deploy              Tickets
+ folia            TS/K8s/Vue      ✓ prod 2m ago       3 open
+ remolt           TS/K8s          ✗ prod failing       1 open
+ mtnmap           TS/Firebase     ✓ prod 1h ago       —
+ costli           TS/CF Workers   ● deploying...       2 open
+```
+
+#### Deploy Status Aggregation
+
+Each project's deploy column shows one line — the "most important" deployment status, selected by:
+
+1. Any actively failing deployment (highest priority — show the fire)
+2. Any in-progress deployment (something is happening right now)
+3. The most recent successful deployment to the highest environment (production > staging > preview)
+
+```typescript
+interface DashboardDeployStatus {
+  projectId: string;
+  environment: string;            // "prod", "staging", "preview"
+  state: "healthy" | "failing" | "deploying" | "unknown";
+  relativeTime: string;           // "2m ago", "1h ago"
+  commitSha?: string;             // what's deployed
+}
+
+function aggregateDeployStatus(
+  deployments: DeploymentStatus[],
+): DashboardDeployStatus | null {
+  // 1. Any failing? Show that.
+  // 2. Any in_progress? Show that.
+  // 3. Most recent active in highest environment? Show that.
+  // 4. No deployments? Return null (hide column for this project).
+}
+```
+
+#### Pending Changes Detection
+
+The dashboard can indicate when local commits haven't been deployed yet:
+
+```
+ folia            TS/K8s/Vue      ✓ prod 2m ago  +3   3 open
+```
+
+The `+3` means 3 commits on the default branch are ahead of the deployed commit SHA. This is computed by comparing `git rev-list <deployed-sha>..HEAD | wc -l`.
+
+#### Visibility Rules
+
+- Projects without CI/CD configured show no deploy column (not "unknown")
+- The deploy column only appears on the dashboard if at least one project has deployment data
+- If all deployments are healthy and recent, the column stays compact (just the checkmark and relative time)
 
 ### Project Detail (L2)
 

@@ -1,13 +1,13 @@
 ---
 id: modular-integrations
 title: "Integration registry: configurable feature modules"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-06
 deps: []
 links:
-  - docs/spec/adapters.md
+  - docs/spec/integrations.md
 ---
 
 # Integration registry: configurable feature modules
