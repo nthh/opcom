@@ -535,9 +535,13 @@ export class Executor {
     if (mergeResult.conflict) {
       if (verification) step.verification = verification;
 
-      // Auto-rebase: attempt automatic conflict resolution
-      // Skip if this was already a rebase-resolution agent (avoid infinite loops)
-      if (this.plan.config.verification.autoRebase !== false && !wasRebaseResolution) {
+      // Auto-rebase: attempt automatic conflict resolution.
+      // Allow rebase even after a resolution agent — main may have moved again
+      // while the agent was working. Limit total rebase attempts to prevent loops.
+      const rebaseAttempts = step.rebaseAttempts ?? 0;
+      const maxRebaseAttempts = 3;
+      if (this.plan.config.verification.autoRebase !== false && rebaseAttempts < maxRebaseAttempts) {
+        step.rebaseAttempts = rebaseAttempts + 1;
         const resolved = await this.handleAutoRebase(step, event, roleVerify);
         if (resolved) return; // Step completed or re-queued for agent resolution
       }

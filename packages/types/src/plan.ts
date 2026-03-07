@@ -39,6 +39,7 @@ export interface PlanStep {
   verification?: VerificationResult;
   role?: string;
   attempt?: number;                      // current attempt (1 = first try, 2+ = retry)
+  rebaseAttempts?: number;               // count of auto-rebase attempts (capped at 3)
   previousVerification?: VerificationResult;  // feedback from last failed attempt
   rebaseConflict?: RebaseConflict;       // set when agent needs to resolve merge conflicts
 }

@@ -327,11 +327,9 @@ describe("Executor auto-rebase on merge conflict", () => {
     await runPromise;
   });
 
-  it("marks needs-rebase when agent fails to resolve conflicts", async () => {
-    // First merge: conflict
-    // Rebase: conflict → agent started
-    // Agent completes → handleWorktreeCompletion called again (wasRebaseResolution=true)
-    // Second merge: still conflicts → needs-rebase (no infinite loop)
+  it("marks needs-rebase when agent fails to resolve conflicts after max rebase attempts", async () => {
+    // Merge always conflicts, rebase always conflicts → agents keep being started
+    // After 3 rebase attempts, step goes to needs-rebase
     mockMerge.mockResolvedValue({ merged: false, conflict: true, error: "CONFLICT" });
     mockAttemptRebase.mockResolvedValue({
       rebased: false,
@@ -355,26 +353,17 @@ describe("Executor auto-rebase on merge conflict", () => {
     const runPromise = executor.run();
     await new Promise((r) => setTimeout(r, 100));
 
-    // First agent completes → merge conflict → rebase conflict → agent re-queued
-    const sessionId1 = plan.steps[0].agentSessionId!;
-    mockSM.simulateCompletion(sessionId1);
-    await new Promise((r) => setTimeout(r, 300));
+    // Simulate agents completing — each time merge conflicts, rebase conflicts,
+    // new agent started. After 3 rebase attempts, should give up.
+    for (let i = 0; i < 4; i++) {
+      const currentStep = executor.getPlan().steps[0];
+      const sessionId = currentStep.agentSessionId;
+      if (!sessionId) break;
+      mockSM.simulateCompletion(sessionId);
+      await new Promise((r) => setTimeout(r, 300));
+    }
 
-    // The rebase resolution agent should have started
-    expect(mockSM.startCalls.length).toBeGreaterThanOrEqual(2);
-
-    // After recomputeAndContinue, the plan is a new object — use executor.getPlan()
-    let currentStep = executor.getPlan().steps[0];
-    const sessionId2 = currentStep.agentSessionId!;
-    expect(sessionId2).not.toBe(sessionId1); // Must be a different session
-
-    // Second agent (rebase resolver) completes → merge still conflicts
-    // wasRebaseResolution=true → skips auto-rebase → needs-rebase
-    mockSM.simulateCompletion(sessionId2);
-    await new Promise((r) => setTimeout(r, 300));
-
-    // Step should now be in needs-rebase since the rebase resolver also failed to merge
-    currentStep = executor.getPlan().steps[0];
+    const currentStep = executor.getPlan().steps[0];
     expect(currentStep.status).toBe("needs-rebase");
     expect(needsRebase).toContain("t1");
 
