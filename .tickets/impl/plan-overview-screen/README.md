@@ -1,7 +1,7 @@
 ---
 id: plan-overview-screen
 title: "TUI: Plan overview screen on creation"
-status: open
+status: closed
 type: feature
 priority: 1
 created: 2026-03-06

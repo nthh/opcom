@@ -1,7 +1,7 @@
 ---
 id: tui-health-view
 title: "TUI: health bar + health view (H key)"
-status: open
+status: closed
 type: feature
 priority: 1
 created: 2026-03-07
