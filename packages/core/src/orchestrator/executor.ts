@@ -1233,6 +1233,14 @@ export class Executor {
       const ticket = tickets.find((t) => t.id === step.ticketId);
       if (ticket) {
         await updateTicketStatus(ticket.filePath, newStatus);
+        // Stage and commit the ticket status change so it's not left as dirty state
+        try {
+          await execFileAsync("git", ["add", ticket.filePath], { cwd: project.path });
+          await execFileAsync("git", ["commit", "-m", `chore: ${newStatus} ${step.ticketId}`], { cwd: project.path });
+        } catch (commitErr) {
+          // Commit may fail if nothing changed (status was already target value) — that's fine
+          log.debug("ticket status commit skipped", { ticketId: step.ticketId, error: String(commitErr) });
+        }
       }
     } catch (err) {
       log.warn("failed to update ticket status", { ticketId: step.ticketId, error: String(err) });
