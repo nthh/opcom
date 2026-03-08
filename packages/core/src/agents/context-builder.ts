@@ -290,7 +290,8 @@ export function contextPacketToMarkdown(
   // Rebase conflict resolution context
   if (rebaseConflict) {
     lines.push(`## Merge Conflict Resolution`);
-    lines.push(`Your branch has conflicts with \`${rebaseConflict.baseBranch}\`. Resolve them.`);
+    lines.push(`Your branch has conflicts with \`${rebaseConflict.baseBranch}\` that need manual resolution.`);
+    lines.push(`A clean rebase was already attempted automatically and failed — you must resolve the conflicts.`);
     lines.push("");
     if (rebaseConflict.files.length > 0) {
       lines.push(`### Conflicting Files`);
@@ -300,12 +301,13 @@ export function contextPacketToMarkdown(
       lines.push("");
     }
     lines.push(`### Instructions`);
-    lines.push(`- Run \`git rebase ${rebaseConflict.baseBranch}\` to start the rebase.`);
-    lines.push(`- For each conflict, read the file, understand both sides, and resolve correctly.`);
-    lines.push(`- Do NOT drop changes from either side unless one is clearly obsolete.`);
-    lines.push(`- After resolving each file, \`git add <file>\` then \`git rebase --continue\`.`);
-    lines.push(`- Run tests relevant to the conflicting files to verify the resolution.`);
-    lines.push(`- Do not modify files that are not part of the conflict.`);
+    lines.push(`1. Run \`git rebase ${rebaseConflict.baseBranch}\` — this will stop at the first conflict.`);
+    lines.push(`2. For each conflicting file, read it, understand both sides, and edit to resolve the conflict markers.`);
+    lines.push(`3. Do NOT drop changes from either side unless one is clearly obsolete.`);
+    lines.push(`4. After resolving each file: \`git add <file>\``);
+    lines.push(`5. Then: \`git rebase --continue\` (repeat steps 2-5 if there are more conflicts).`);
+    lines.push(`6. After the rebase completes, run tests relevant to the conflicting files to verify.`);
+    lines.push(`7. Do not modify files that are not part of the conflict.`);
     lines.push("");
   }
 

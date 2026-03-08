@@ -1391,6 +1391,11 @@ export class Executor {
     const allowedBashTools = resolved.allowedBashPatterns.map((p) => `Bash(${p})`);
     const allowedTools = [...allowedBashTools, ...resolved.allowedTools];
 
+    // Rebase conflict agents need git rebase permissions
+    if (step.rebaseConflict) {
+      allowedTools.push("Bash(git rebase*)", "Bash(git add*)", "Bash(git diff*)");
+    }
+
     // Build system prompt with role-aware context (and retry feedback if applicable)
     const systemPrompt = contextPacketToMarkdown(
       contextPacket, resolved, step.previousVerification, step.rebaseConflict,
