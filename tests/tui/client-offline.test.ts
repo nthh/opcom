@@ -6,6 +6,11 @@ const sessionManagerHandlers = new Map<string, Function>();
 const mockStartSession = vi.fn();
 const mockStopSession = vi.fn();
 const mockPromptSession = vi.fn();
+const mockExecutorPause = vi.fn();
+const mockExecutorResume = vi.fn();
+let resolveExecutorRun: () => void;
+const mockExecutorRun = vi.fn().mockImplementation(() => new Promise<void>((resolve) => { resolveExecutorRun = resolve; }));
+const mockExecutorOn = vi.fn();
 
 vi.mock("@opcom/core", async () => {
   const actual = await vi.importActual<typeof import("@opcom/core")>("@opcom/core");
@@ -82,6 +87,13 @@ vi.mock("@opcom/core", async () => {
       warn: vi.fn(),
       error: vi.fn(),
     }),
+    Executor: vi.fn().mockImplementation(() => ({
+      pause: mockExecutorPause,
+      resume: mockExecutorResume,
+      run: mockExecutorRun,
+      on: mockExecutorOn,
+    })),
+    savePlan: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -95,6 +107,10 @@ describe("TuiClient offline mode", () => {
     mockStartSession.mockClear();
     mockStopSession.mockClear();
     mockPromptSession.mockClear();
+    mockExecutorPause.mockClear();
+    mockExecutorResume.mockClear();
+    mockExecutorRun.mockClear();
+    mockExecutorOn.mockClear();
 
     client = new TuiClient();
     await client.connect();
@@ -161,5 +177,63 @@ describe("TuiClient offline mode", () => {
     client.destroy();
     // Should not throw
     expect(client.connected).toBe(false);
+  });
+
+  describe("plan pause/resume in offline mode", () => {
+    const fakePlan = {
+      id: "plan-1",
+      name: "test plan",
+      status: "planning" as const,
+      scope: { projectIds: ["proj1"], query: "" },
+      steps: [{ ticketId: "t1", projectId: "proj1", status: "ready" as const }],
+      config: { worktree: false, pauseOnFailure: false, ticketTransitions: true, verification: { enabled: false, testCommand: "", autoRebase: false } },
+      createdAt: new Date().toISOString(),
+      context: "",
+    };
+
+    async function startExecutor() {
+      client.activePlan = { ...fakePlan, status: "planning" } as any;
+      await client.executePlan("plan-1");
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    it("executePlan creates an executor in offline mode", async () => {
+      await startExecutor();
+      const { Executor } = await import("@opcom/core");
+      expect(Executor).toHaveBeenCalledTimes(1);
+      expect(mockExecutorRun).toHaveBeenCalledTimes(1);
+    });
+
+    it("pause_plan calls executor.pause() in offline mode", async () => {
+      await startExecutor();
+
+      client.send({ type: "pause_plan", planId: "plan-1" } as any);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mockExecutorPause).toHaveBeenCalledTimes(1);
+    });
+
+    it("resume_plan calls executor.resume() in offline mode", async () => {
+      await startExecutor();
+
+      client.send({ type: "resume_plan", planId: "plan-1" } as any);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mockExecutorResume).toHaveBeenCalledTimes(1);
+    });
+
+    it("pause_plan is a no-op when no executor is active", async () => {
+      client.send({ type: "pause_plan", planId: "plan-1" } as any);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mockExecutorPause).not.toHaveBeenCalled();
+    });
+
+    it("resume_plan is a no-op when no executor is active", async () => {
+      client.send({ type: "resume_plan", planId: "plan-1" } as any);
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(mockExecutorResume).not.toHaveBeenCalled();
+    });
   });
 });

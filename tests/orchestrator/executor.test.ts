@@ -273,6 +273,79 @@ describe("Executor", () => {
     await runPromise;
   });
 
+  it("event loop stays alive while paused — resume works after pauseOnFailure", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+      { ticketId: "t2", projectId: "p", status: "ready", blockedBy: [] },
+    ], { pauseOnFailure: true, maxConcurrentAgents: 1 });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    let paused = false;
+    let resumed = false;
+    executor.on("plan_paused", () => { paused = true; });
+    executor.on("plan_updated", ({ plan: p }) => {
+      if (p.status === "executing" && paused) resumed = true;
+    });
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // t1 started
+    expect(mockSM.startCalls).toHaveLength(1);
+
+    // Simulate t1 failure
+    const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
+    mockSM.simulateError(sessionId);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(paused).toBe(true);
+    expect(plan.status).toBe("paused");
+    // t2 should still be ready (not started while paused)
+    expect(plan.steps.find((s) => s.ticketId === "t2")!.status).toBe("ready");
+
+    // Resume — event loop must still be alive for this to work
+    executor.resume();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(resumed).toBe(true);
+    expect(executor.getPlan().status).not.toBe("paused");
+    // t2 should have been started after resume
+    expect(mockSM.startCalls.length).toBeGreaterThan(1);
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("event loop stays alive when all steps are terminal and plan is paused", async () => {
+    // Single step — when it fails with pauseOnFailure, all steps are terminal.
+    // The event loop must NOT exit, so resume can re-enter.
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { pauseOnFailure: true });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Simulate failure
+    const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
+    mockSM.simulateError(sessionId);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(plan.status).toBe("paused");
+
+    // Verify run() has NOT resolved — the event loop is still alive
+    let runResolved = false;
+    runPromise.then(() => { runResolved = true; });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(runResolved).toBe(false);
+
+    executor.stop();
+    await runPromise;
+  });
+
   it("pause stops new starts, resume recomputes", async () => {
     const plan = makePlan([
       { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },

@@ -786,9 +786,11 @@ export class Station {
     executor.on("plan_paused", ({ plan: p }) => this.broadcast({ type: "plan_paused", plan: p }));
 
     // Run in background (don't await — the loop runs until done/stopped)
-    executor.run().catch(() => {
-      this.executors.delete(plan.id);
-    });
+    executor.run()
+      .catch(() => {})
+      .finally(() => {
+        this.executors.delete(plan.id);
+      });
   }
 
   private async initCICDPoller(): Promise<void> {

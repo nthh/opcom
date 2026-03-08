@@ -162,8 +162,8 @@ export class Executor {
       await this.startReadySteps();
       this.emit("plan_updated", { plan: this.plan });
 
-      // Event loop
-      while (this.running && !this.isPlanTerminal()) {
+      // Event loop — keep running while paused so resume can wake us
+      while (this.running && !this.shouldExitLoop()) {
         const event = await this.nextEvent();
         if (!event) continue;
 
@@ -1160,8 +1160,8 @@ export class Executor {
       await this.startReadySteps();
     }
 
-    // Check if plan is complete
-    if (this.isPlanTerminal()) {
+    // Check if plan is complete (but not while paused — user may resume)
+    if (this.plan.status !== "paused" && this.isPlanTerminal()) {
       // Mark final stage as completed if stages are active
       this.markCurrentStageCompleted();
 
@@ -1483,6 +1483,12 @@ export class Executor {
     const nextStage = this.plan.stages[nextIdx];
     nextStage.status = "executing";
     nextStage.startedAt = new Date().toISOString();
+  }
+
+  /** Don't exit the event loop while paused — resume needs a live loop. */
+  private shouldExitLoop(): boolean {
+    if (this.plan.status === "paused") return false;
+    return this.isPlanTerminal();
   }
 
   private isPlanTerminal(): boolean {

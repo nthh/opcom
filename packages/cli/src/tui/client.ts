@@ -66,6 +66,7 @@ export class TuiClient {
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
   private activeExecutorPlanId: string | null = null;
+  private activeExecutor: { pause(): void; resume(): void } | null = null;
 
   // File watchers for .tickets/ directories
   private ticketWatchers: FSWatcher[] = [];
@@ -523,6 +524,18 @@ export class TuiClient {
         break;
       }
 
+      case "pause_plan":
+        if (this.activeExecutor) {
+          this.activeExecutor.pause();
+        }
+        break;
+
+      case "resume_plan":
+        if (this.activeExecutor) {
+          this.activeExecutor.resume();
+        }
+        break;
+
       case "refresh_status":
         await this.reloadProjectData();
         break;
@@ -586,6 +599,7 @@ export class TuiClient {
       this.activeExecutorPlanId = planId;
       const { Executor } = await import("@opcom/core");
       const executor = new Executor(this.activePlan, this.localSessionManager, this.eventStore ?? undefined);
+      this.activeExecutor = executor;
 
       executor.on("plan_updated", ({ plan }) => {
         this.activePlan = plan;
@@ -607,6 +621,7 @@ export class TuiClient {
         })
         .finally(() => {
           this.activeExecutorPlanId = null;
+          this.activeExecutor = null;
         });
     }
   }
