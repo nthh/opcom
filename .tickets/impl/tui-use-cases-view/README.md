@@ -1,7 +1,7 @@
 ---
 id: tui-use-cases-view
 title: "TUI: use cases view (U key)"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-07
