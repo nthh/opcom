@@ -1,7 +1,7 @@
 ---
 id: integration-smoke-tests
 title: "Integration Smoke Tests: Build + Full Test Suite After Plan Completion"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
