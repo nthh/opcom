@@ -118,6 +118,17 @@ export class Executor {
       }
     }
 
+    // Reset needs-rebase steps so they can be retried (e.g. after resume)
+    for (const step of this.plan.steps) {
+      if (step.status === "needs-rebase") {
+        log.info("resetting needs-rebase step for retry", { ticketId: step.ticketId });
+        step.status = "ready";
+        step.error = undefined;
+        step.completedAt = undefined;
+        step.agentSessionId = undefined;
+      }
+    }
+
     // Wire SessionManager events
     const onStopped = (session: AgentSession) => {
       const ticketId = this.sessionToStep.get(session.id);
@@ -349,6 +360,16 @@ export class Executor {
 
       case "resume": {
         this.plan.status = "executing";
+        // Reset needs-rebase steps so auto-rebase can retry them
+        for (const step of this.plan.steps) {
+          if (step.status === "needs-rebase") {
+            step.status = "ready";
+            step.error = undefined;
+            step.completedAt = undefined;
+            step.agentSessionId = undefined;
+            log.info("resetting needs-rebase step for retry on resume", { ticketId: step.ticketId });
+          }
+        }
         this.logPlanEvent("plan_resumed");
         await this.recomputeAndContinue();
         break;
