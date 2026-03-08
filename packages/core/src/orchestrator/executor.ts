@@ -1583,6 +1583,8 @@ export class Executor {
     step.status = "in-progress";
     step.agentSessionId = session.id;
     step.startedAt = new Date().toISOString();
+    step.verifyingPhase = undefined;
+    step.verifyingPhaseStartedAt = undefined;
     this.sessionToStep.set(session.id, step.ticketId);
     this.stepVerification.set(step.ticketId, { runTests: resolved.runTests, runOracle: resolved.runOracle });
 
@@ -1852,6 +1854,8 @@ export class Executor {
     step.status = "failed";
     step.error = error;
     step.completedAt = new Date().toISOString();
+    step.verifyingPhase = undefined;
+    step.verifyingPhaseStartedAt = undefined;
     if (this.plan.config.ticketTransitions) {
       await this.updateTicketStatusSafe(step, "open");
     }
