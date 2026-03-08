@@ -221,8 +221,9 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
           const ds = step.rebaseConflict ? "rebasing" : step.status;
           const icon = stepStatusIcon(ds);
           const sColor = stepStatusColor(ds);
+          const reVerify = ds === "verifying" && (step.attempt ?? 1) > 1 ? "re-" : "";
           const phaseLabel = ds === "verifying" && step.verifyingPhase
-            ? ` ${step.verifyingPhase}...`
+            ? ` ${reVerify}${step.verifyingPhase}...`
             : "";
           const deps = step.blockedBy.length > 0
             ? dim(` \u2190 ${step.blockedBy.join(", ")}`)

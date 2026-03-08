@@ -151,6 +151,12 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
     phaseDetail = ` — ${phaseLabel}...${elapsed}${modelInfo}`;
   }
   lines.push(`${dim("Status:")}    ${color(sColor, `${icon} ${displayStatus}`)}${phaseDetail}`);
+  if ((step.attempt ?? 1) > 1) {
+    lines.push(`${dim("Attempt:")}   ${step.attempt} (retried after verification failure)`);
+  }
+  if ((step.rebaseAttempts ?? 0) > 0) {
+    lines.push(`${dim("Rebases:")}   ${step.rebaseAttempts}`);
+  }
   if (step.rebaseConflict) {
     lines.push(`${dim("Conflicts:")} ${step.rebaseConflict.files.join(", ")}`);
   }

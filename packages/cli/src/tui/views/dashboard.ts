@@ -313,8 +313,9 @@ function renderPlanPanel(
       const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
       const icon = planStepIcon(displayStatus);
       const sColor = planStatusColor(displayStatus);
+      const reVerify = displayStatus === "verifying" && (step.attempt ?? 1) > 1 ? "re-" : "";
       const phaseLabel = displayStatus === "verifying" && step.verifyingPhase
-        ? `${step.verifyingPhase}...`
+        ? `${reVerify}${step.verifyingPhase}...`
         : displayStatus;
       const statusStr = color(sColor, `${icon} ${phaseLabel}`);
       const verifyBadge = formatStepVerificationBadge(step);
@@ -332,22 +333,25 @@ function renderPlanPanel(
 
 /** Format a compact verification badge for a plan step in the dashboard list */
 export function formatStepVerificationBadge(step: PlanStep): string {
-  if (!step.verification) return "";
+  const attemptSuffix = (step.attempt ?? 1) > 1 ? dim(` #${step.attempt}`) : "";
+  const rebaseSuffix = (step.rebaseAttempts ?? 0) > 0 ? dim(` r${step.rebaseAttempts}`) : "";
+
+  if (!step.verification) return `${attemptSuffix}${rebaseSuffix}`;
   const v = step.verification;
   if (v.passed) {
     if (v.testGate) {
-      return ` ${color(ANSI.green, `\u2713 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}`;
+      return ` ${color(ANSI.green, `\u2713 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}${attemptSuffix}${rebaseSuffix}`;
     }
-    return ` ${color(ANSI.green, "\u2713 verified")}`;
+    return ` ${color(ANSI.green, "\u2713 verified")}${attemptSuffix}${rebaseSuffix}`;
   }
   // Failed
   if (v.testGate && !v.testGate.passed) {
-    return ` ${color(ANSI.red, `\u2717 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}`;
+    return ` ${color(ANSI.red, `\u2717 ${v.testGate.passedTests}/${v.testGate.totalTests}`)}${attemptSuffix}${rebaseSuffix}`;
   }
   if (v.oracle && !v.oracle.passed) {
-    return ` ${color(ANSI.red, "\u2717 oracle")}`;
+    return ` ${color(ANSI.red, "\u2717 oracle")}${attemptSuffix}${rebaseSuffix}`;
   }
-  return ` ${color(ANSI.red, "\u2717 verify")}`;
+  return ` ${color(ANSI.red, "\u2717 verify")}${attemptSuffix}${rebaseSuffix}`;
 }
 
 function renderAgentsPanel(
