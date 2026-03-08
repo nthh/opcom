@@ -799,6 +799,39 @@ describe("KubernetesAdapter.detect", () => {
     });
     expect(await adapter.detect(project)).toBe(false);
   });
+
+  it("detects when user configured kubernetes namespace", async () => {
+    const project = makeProject({
+      overrides: {
+        infrastructure: {
+          kubernetes: { namespace: "my-namespace" },
+        },
+      } as ProjectConfig["overrides"],
+    });
+    expect(await adapter.detect(project)).toBe(true);
+  });
+
+  it("detects when user configured kubernetes context", async () => {
+    const project = makeProject({
+      overrides: {
+        infrastructure: {
+          kubernetes: { context: "prod-cluster" },
+        },
+      } as ProjectConfig["overrides"],
+    });
+    expect(await adapter.detect(project)).toBe(true);
+  });
+
+  it("detects when user configured label selector", async () => {
+    const project = makeProject({
+      overrides: {
+        infrastructure: {
+          kubernetes: { labelSelector: "app=myapp" },
+        },
+      } as ProjectConfig["overrides"],
+    });
+    expect(await adapter.detect(project)).toBe(true);
+  });
 });
 
 // =============================================================================
