@@ -16,6 +16,7 @@ export interface Plan {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  smokeTestResult?: IntegrationTestResult;
 }
 
 export interface PlanScope {
@@ -190,4 +191,14 @@ export interface StageSummary {
   skipped: number;
   durationMs: number;
   testResults?: { passed: number; failed: number };
+  smokeTest?: IntegrationTestResult;
+}
+
+export interface IntegrationTestResult {
+  passed: boolean;
+  buildPassed: boolean;
+  testsPassed: boolean;
+  buildOutput: string;
+  testOutput: string;
+  durationMs: number;
 }

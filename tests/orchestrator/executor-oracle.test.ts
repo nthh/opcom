@@ -201,6 +201,10 @@ const { mockCreate, mockRemove, mockHasCommits, mockMerge, mockWriteLock } = vi.
   mockWriteLock: vi.fn(),
 }));
 
+vi.mock("../../packages/core/src/orchestrator/smoke-test.js", () => ({
+  runSmoke: vi.fn(async () => ({ passed: true, buildPassed: true, testsPassed: true, buildOutput: "", testOutput: "", durationMs: 0 })),
+}));
+
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
   const MockManager = vi.fn().mockImplementation(() => ({
     create: mockCreate,
