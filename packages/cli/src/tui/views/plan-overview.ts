@@ -154,6 +154,14 @@ export function createPlanOverviewState(plan: Plan, allTickets?: WorkItem[]): Pl
 
 // --- Display lines ---
 
+function formatElapsed(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60);
+  if (m > 0) return `${m}m${s % 60}s`;
+  return `${s}s`;
+}
+
 function stepStatusIcon(status: string): string {
   switch (status) {
     case "blocked": return "\u25cc"; // ◌
@@ -222,8 +230,9 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
           const icon = stepStatusIcon(ds);
           const sColor = stepStatusColor(ds);
           const reVerify = ds === "verifying" && (step.attempt ?? 1) > 1 ? "re-" : "";
+          const elapsed = step.verifyingPhaseStartedAt ? ` ${formatElapsed(step.verifyingPhaseStartedAt)}` : "";
           const phaseLabel = ds === "verifying" && step.verifyingPhase
-            ? ` ${reVerify}${step.verifyingPhase}...`
+            ? ` ${reVerify}${step.verifyingPhase}...${elapsed}`
             : "";
           const deps = step.blockedBy.length > 0
             ? dim(` \u2190 ${step.blockedBy.join(", ")}`)

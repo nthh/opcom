@@ -130,6 +130,9 @@ export class TuiApp {
   private healthViewState: HealthViewState = createHealthViewState();
   private healthData: HealthData | null = null;
 
+  // Periodic render timer
+  private tickTimer: ReturnType<typeof setInterval> | null = null;
+
   // Search mode
   private searchMode = false;
   private searchQuery = "";
@@ -191,6 +194,11 @@ export class TuiApp {
     // Initial render
     this.render();
 
+    // Periodic re-render for live elapsed timers (agents, verification)
+    this.tickTimer = setInterval(() => {
+      if (this.running) this.scheduleRender();
+    }, 5000);
+
     // Keep alive until quit
     await new Promise<void>((resolve) => {
       this._resolveQuit = resolve;
@@ -201,6 +209,7 @@ export class TuiApp {
 
   private quit(): void {
     this.running = false;
+    if (this.tickTimer) clearInterval(this.tickTimer);
 
     // Restore terminal
     if (process.stdin.isTTY) {

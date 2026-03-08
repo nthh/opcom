@@ -314,8 +314,11 @@ function renderPlanPanel(
       const icon = planStepIcon(displayStatus);
       const sColor = planStatusColor(displayStatus);
       const reVerify = displayStatus === "verifying" && (step.attempt ?? 1) > 1 ? "re-" : "";
+      const elapsed = step.verifyingPhaseStartedAt
+        ? ` ${formatDuration(step.verifyingPhaseStartedAt)}`
+        : "";
       const phaseLabel = displayStatus === "verifying" && step.verifyingPhase
-        ? `${reVerify}${step.verifyingPhase}...`
+        ? `${reVerify}${step.verifyingPhase}...${elapsed}`
         : displayStatus;
       const statusStr = color(sColor, `${icon} ${phaseLabel}`);
       const verifyBadge = formatStepVerificationBadge(step);
