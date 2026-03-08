@@ -533,6 +533,10 @@ export class TuiClient {
       case "resume_plan":
         if (this.activeExecutor) {
           this.activeExecutor.resume();
+        } else if (this.activePlan && this.activePlan.id === command.planId && this.activePlan.status === "paused") {
+          // No live executor — plan was paused in a previous session or executor exited.
+          // Re-create the executor to resume execution.
+          await this.executePlan(this.activePlan.id);
         }
         break;
 

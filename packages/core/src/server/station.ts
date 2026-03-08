@@ -717,7 +717,17 @@ export class Station {
         if (executor) {
           executor.resume();
         } else {
-          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+          // No live executor — plan was paused in a previous session or executor exited.
+          // Re-create the executor to resume.
+          const plan = await loadPlan(command.planId);
+          if (plan && plan.status === "paused") {
+            plan.status = "executing";
+            await savePlan(plan);
+            await this.startExecutor(plan);
+            this.broadcast({ type: "plan_updated", plan });
+          } else {
+            this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+          }
         }
         break;
       }

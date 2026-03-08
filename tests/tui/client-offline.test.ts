@@ -229,11 +229,25 @@ describe("TuiClient offline mode", () => {
       expect(mockExecutorPause).not.toHaveBeenCalled();
     });
 
-    it("resume_plan is a no-op when no executor is active", async () => {
+    it("resume_plan is a no-op when no executor and no paused plan", async () => {
       client.send({ type: "resume_plan", planId: "plan-1" } as any);
       await new Promise((r) => setTimeout(r, 50));
 
       expect(mockExecutorResume).not.toHaveBeenCalled();
+      expect(mockExecutorRun).not.toHaveBeenCalled();
+    });
+
+    it("resume_plan re-creates executor when plan is paused but executor is dead", async () => {
+      // Simulate a plan that was paused in a previous session (no executor running)
+      client.activePlan = { ...fakePlan, status: "paused" } as any;
+
+      client.send({ type: "resume_plan", planId: "plan-1" } as any);
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should have created a new executor via executePlan
+      const { Executor } = await import("@opcom/core");
+      expect(Executor).toHaveBeenCalled();
+      expect(mockExecutorRun).toHaveBeenCalled();
     });
   });
 });
