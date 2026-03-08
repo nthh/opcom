@@ -420,8 +420,58 @@ export class Executor {
 
       case "resume": {
         this.plan.status = "executing";
-        // Re-enter merge flow for needs-rebase steps (work is done, just retry merge)
+
         for (const step of this.plan.steps) {
+          // Restore worktree tracking for steps that need it (may have been
+          // lost if the executor was recreated from a saved plan).
+          if (this.plan.config.worktree && step.worktreePath && !this.worktreeManager.getInfo(step.ticketId)) {
+            const project = await loadProject(step.projectId);
+            if (project) {
+              this.worktreeManager.restore({
+                stepId: step.ticketId,
+                ticketId: step.ticketId,
+                projectPath: project.path,
+                worktreePath: step.worktreePath,
+                branch: step.worktreeBranch ?? `work/${step.ticketId}`,
+              });
+            }
+          }
+
+          // Recover stuck verifying steps — verification is not resumable,
+          // so re-enter the worktree completion flow from the start.
+          if (step.status === "verifying") {
+            const sessionAlive = step.agentSessionId
+              ? this.sessionManager.getSession(step.agentSessionId) !== undefined
+              : false;
+            if (!sessionAlive) {
+              step.verifyingPhase = undefined;
+              step.verifyingPhaseStartedAt = undefined;
+              if (this.plan.config.worktree && step.worktreePath) {
+                log.info("re-running verification for stuck step on resume", { ticketId: step.ticketId });
+                this.activeVerifications++;
+                this.handleWorktreeCompletion(step, { type: "agent_completed", ticketId: step.ticketId })
+                  .catch(async (err) => {
+                    log.error("re-verification failed on resume", { ticketId: step.ticketId, error: String(err) });
+                    if (step.status === "verifying") {
+                      await this.failStep(step, `Re-verification crashed: ${String(err)}`);
+                      this.emit("step_failed", { step, error: String(err) });
+                    }
+                  })
+                  .finally(async () => {
+                    this.activeVerifications--;
+                    await this.recomputeAndContinue();
+                    this.pushEvent({ type: "verification_done", ticketId: step.ticketId });
+                  });
+              } else {
+                log.warn("recovering stuck verifying step (no worktree) on resume", { ticketId: step.ticketId });
+                step.status = "ready";
+                step.attempt = (step.attempt ?? 1) + 1;
+                step.agentSessionId = undefined;
+              }
+            }
+          }
+
+          // Re-enter merge flow for needs-rebase steps (work is done, just retry merge)
           if (step.status === "needs-rebase") {
             if (this.plan.config.worktree && step.worktreePath) {
               step.rebaseAttempts = 0;
@@ -452,6 +502,7 @@ export class Executor {
             }
           }
         }
+
         this.logPlanEvent("plan_resumed");
         await this.recomputeAndContinue();
         break;
