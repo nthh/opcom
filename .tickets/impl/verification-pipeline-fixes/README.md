@@ -1,7 +1,7 @@
 ---
 id: verification-pipeline-fixes
 title: "Oracle as agent session + TUI verification rendering fixes"
-status: open
+status: closed
 type: feature
 priority: 1
 deps:
