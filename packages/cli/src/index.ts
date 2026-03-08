@@ -18,6 +18,7 @@ import { runAnalytics } from "./commands/analytics.js";
 import { runChanges } from "./commands/changes.js";
 import { runDiff } from "./commands/diff.js";
 import { runCI } from "./commands/ci.js";
+import { runInfra } from "./commands/infra.js";
 import { runSettingsList, runSettingsGet, runSettingsSet, runSettingsReset } from "./commands/settings.js";
 import { runIntegrationsList, runIntegrationsEnable, runIntegrationsDisable } from "./commands/integrations.js";
 import { runTicketList, runTicketCreate, runTicketShow } from "./commands/ticket.js";
@@ -309,6 +310,14 @@ async function main(): Promise<void> {
       return runCI(ciProject, { watch: ciWatch });
     }
 
+    case "infra": {
+      const infraProject = args[1];
+      const infraSub = args[2]; // pods, logs, restart
+      const infraTarget = args[3]; // pod name or deployment name
+      const infraFollow = args.includes("--follow") || args.includes("-f");
+      return runInfra(infraProject, infraSub, infraTarget, { follow: infraFollow });
+    }
+
     case "scaffold": {
       const scaffoldAll = args.includes("--all");
       const scaffoldDryRun = args.includes("--dry-run");
@@ -595,6 +604,10 @@ function printHelp(): void {
     graph drift [project]        Show drift signals (uncovered specs, untested files, etc.)
     ci [project]                 Show CI/CD pipeline status
     ci <project> --watch         Watch pipeline status live
+    infra [project]              Show infrastructure status (K8s)
+    infra <project> pods         List pods
+    infra <project> logs <pod>   Tail pod logs (--follow for streaming)
+    infra <project> restart <dep> Rollout restart a deployment
     schedule list                List scheduled tasks
     schedule add <n> <c> <cmd>   Add a scheduled task (name, cron, command)
     schedule remove <id>         Remove a scheduled task

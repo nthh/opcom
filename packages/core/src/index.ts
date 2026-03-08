@@ -333,3 +333,27 @@ export { TelegramChannel } from "./channels/telegram.js";
 export type { TelegramConfig } from "./channels/telegram.js";
 export { DiscordChannel } from "./channels/discord.js";
 export type { DiscordConfig } from "./channels/discord.js";
+
+// Infrastructure Monitoring
+export {
+  KubernetesAdapter,
+  mapDeploymentStatus,
+  mapStatefulSetStatus,
+  mapDaemonSetStatus,
+  mapPodStatus,
+  mapJobStatus,
+  mapCronJobStatus,
+  mapServiceStatus,
+  mapIngressStatus,
+  mapConditions,
+  mapContainerStatus,
+  parseLogLine,
+  resolveK8sConfig,
+  resolveNamespace,
+  resolveLabelSelector,
+  detectInfrastructure,
+  getInfraAdapters,
+  getInfraAdapter,
+  computeInfraHealthSummary,
+} from "./infra/index.js";
+export type { InfraDetectionResult } from "./infra/index.js";

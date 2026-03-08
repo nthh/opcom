@@ -29,6 +29,8 @@ import { GitHubActionsAdapter } from "../integrations/github-actions.js";
 import { CICDPoller } from "../integrations/cicd-poller.js";
 import type { ProjectCICDState } from "../integrations/cicd-poller.js";
 import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
+import { KubernetesAdapter, computeInfraHealthSummary } from "../infra/kubernetes.js";
+import { detectInfrastructure } from "../infra/detect.js";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -549,6 +551,91 @@ export class Station {
       if (!project) return { status: 404, data: { error: "Project not found" } };
       const signals = queryProjectDrift(project.name);
       return { status: 200, data: signals };
+    }
+
+    // --- Infrastructure endpoints ---
+
+    // GET /projects/:id/infrastructure
+    const infraListMatch = path.match(/^\/projects\/([^/]+)\/infrastructure$/);
+    if (method === "GET" && infraListMatch) {
+      const project = await loadProject(infraListMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 200, data: [] };
+        }
+        const resources = await adapters[0].listResources(project);
+        return { status: 200, data: resources };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to list infrastructure";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // GET /projects/:id/infrastructure/:resourceId
+    const infraGetMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)$/);
+    if (method === "GET" && infraGetMatch && !infraGetMatch[2].includes("/logs")) {
+      const project = await loadProject(infraGetMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 404, data: { error: "No infrastructure adapter" } };
+        }
+        const resource = await adapters[0].getResource(project, decodeURIComponent(infraGetMatch[2]));
+        return { status: 200, data: resource };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Resource not found";
+        return { status: 404, data: { error: msg } };
+      }
+    }
+
+    // GET /projects/:id/infrastructure/:resourceId/logs?tail=100&since=5m
+    const infraLogsMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)\/logs$/);
+    if (method === "GET" && infraLogsMatch) {
+      const project = await loadProject(infraLogsMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 404, data: { error: "No infrastructure adapter" } };
+        }
+        const tail = searchParams?.get("tail");
+        const since = searchParams?.get("since");
+        const container = searchParams?.get("container");
+        const logLines: import("@opcom/types").InfraLogLine[] = [];
+        for await (const line of adapters[0].streamLogs(
+          project,
+          decodeURIComponent(infraLogsMatch[2]),
+          {
+            tailLines: tail ? parseInt(tail, 10) : 100,
+            since: since ?? undefined,
+            container: container ?? undefined,
+          },
+        )) {
+          logLines.push(line);
+        }
+        return { status: 200, data: logLines };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to fetch logs";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // POST /projects/:id/infrastructure/:resourceId/restart
+    const infraRestartMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)\/restart$/);
+    if (method === "POST" && infraRestartMatch) {
+      const project = await loadProject(infraRestartMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const adapter = new KubernetesAdapter();
+        await adapter.rolloutRestart(project, decodeURIComponent(infraRestartMatch[2]));
+        return { status: 200, data: { restarted: true } };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to restart";
+        return { status: 502, data: { error: msg } };
+      }
     }
 
     // GET /changesets?ticketId=X&sessionId=Y&projectId=Z

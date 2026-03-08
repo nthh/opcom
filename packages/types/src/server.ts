@@ -5,6 +5,7 @@ import type { Pipeline, DeploymentStatus } from "./cicd.js";
 import type { ServiceInstance, EnvironmentStatus, PortAllocation } from "./environments.js";
 import type { GitInfo } from "./project.js";
 import type { WorkSummary } from "./work-items.js";
+import type { InfraResource, PodDetail, InfraHealthSummary } from "./infrastructure.js";
 
 // --- WebSocket: Client → Server ---
 
@@ -81,6 +82,11 @@ export type ServerEvent =
   | { type: "graph_built"; projectId: string; stats: { totalNodes: number; totalEdges: number } }
   | { type: "drift_detected"; projectId: string; signals: import("./agents.js").DriftSignal[] }
 
+  // Infrastructure events
+  | { type: "infra_resource_updated"; projectId: string; resource: InfraResource }
+  | { type: "infra_resource_deleted"; projectId: string; resourceId: string }
+  | { type: "pod_crash"; projectId: string; pod: PodDetail; container: string; reason: string }
+
   // Changeset responses
   | { type: "changesets"; changesets: import("./changeset.js").Changeset[] };
 
@@ -91,6 +97,7 @@ export interface ProjectStatusSnapshot {
   git: GitInfo | null;
   workSummary: WorkSummary | null;
   cloudHealthSummary?: CloudHealthSummary;
+  infraHealthSummary?: InfraHealthSummary;
 }
 
 export interface CloudHealthSummary {

@@ -122,4 +122,5 @@ export interface ProjectConfigOverrides {
   services: ServiceDefinition[];
   environments: EnvironmentConfig[];
   integrations: import("./integrations.js").IntegrationsConfig;
+  infrastructure: import("./infrastructure.js").InfraConfig;
 }
