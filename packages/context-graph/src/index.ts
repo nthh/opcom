@@ -4,6 +4,7 @@ export { GraphBuilder } from "./core/builder.js";
 export { SCHEMA, type GraphNode, type GraphEdge, type NodeType, type EdgeRelation, type TestResult, type RunSummary, type ParsedTestRun } from "./core/schema.js";
 export { type Analyzer, type AnalyzerContext, type AnalyzerResult } from "./core/analyzer.js";
 export { DriftEngine, type DriftSignal, type DriftSignalType, type TestType, type DriftAction, type DriftOptions, hasUiBehavior, hasApiBehavior, hasInteractionHandlers, isRouteFile } from "./core/drift.js";
+export { WorkspaceEngine, type ProjectGraphRef, type WorkspaceSignal, type SharedPattern, type ProjectHealth, type WorkspaceHealth, type CrossProjectEdge } from "./core/workspace.js";
 export { TriageEngine, type TriageResult, type TriageOptions, type LLMProvider, buildBatchPrompt, parseTriageResponse, isExpectedUntested, TRIAGE_SCHEMA } from "./core/triage.js";
 export {
   TestGenerationEngine,
