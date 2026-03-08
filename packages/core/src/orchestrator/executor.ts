@@ -721,17 +721,19 @@ export class Executor {
     }
 
     if (!mergeResult.merged) {
-      // Merge failed for non-conflict reason — keep worktree + branch
-      // so the agent's work can be retried without redoing everything.
-      const reason = `Merge failed: ${mergeResult.error}`;
-      await this.failStep(step, reason);
+      // Merge failed (non-conflict) — treat as needs-rebase since verification passed.
+      // The agent's work is valid; only the merge couldn't complete.
+      if (verification) step.verification = verification;
+      step.status = "needs-rebase";
+      step.error = `Merge failed: ${mergeResult.error}`;
+      step.completedAt = new Date().toISOString();
 
-      log.error("merge failed", { ticketId: step.ticketId, error: mergeResult.error });
-      this.emit("step_failed", { step, error: reason });
-      this.logPlanEvent("step_failed", {
+      log.warn("merge failed (treating as needs-rebase)", { ticketId: step.ticketId, error: mergeResult.error });
+      this.emit("step_needs_rebase", { step, error: step.error });
+      this.logPlanEvent("step_needs_rebase", {
         stepTicketId: step.ticketId,
         agentSessionId: event.sessionId,
-        detail: { error: reason },
+        detail: { error: step.error, conflict: false },
       });
 
       if (this.plan.config.pauseOnFailure) {

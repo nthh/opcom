@@ -412,7 +412,7 @@ describe("Executor with worktree isolation", () => {
     await runPromise;
   });
 
-  it("marks step as failed on non-conflict merge failure", async () => {
+  it("marks step as needs-rebase on non-conflict merge failure", async () => {
     mockHasCommits.mockResolvedValue(true);
     mockMerge.mockResolvedValue({ merged: false, conflict: false, error: "git error" });
 
@@ -429,7 +429,7 @@ describe("Executor with worktree isolation", () => {
     mockSM.simulateCompletion(sessionId);
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(plan.steps[0].status).toBe("failed");
+    expect(plan.steps[0].status).toBe("needs-rebase");
     expect(plan.steps[0].error).toContain("Merge failed");
     // Worktree should NOT be removed — kept for retry
     expect(mockRemove).not.toHaveBeenCalled();
