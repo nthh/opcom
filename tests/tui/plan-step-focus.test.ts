@@ -570,8 +570,8 @@ describe("verification phase visibility", () => {
 
     const state = createPlanStepFocusState(step, plan, null, null, [], []);
 
-    const hasRunningTests = state.displayLines.some((l) => l.includes("running tests"));
-    expect(hasRunningTests).toBe(true);
+    const hasTestingLabel = state.displayLines.some((l) => l.includes("Testing..."));
+    expect(hasTestingLabel).toBe(true);
   });
 
   it("shows oracle sub-phase when verifyingPhase is oracle", () => {
@@ -580,7 +580,7 @@ describe("verification phase visibility", () => {
 
     const state = createPlanStepFocusState(step, plan, null, null, [], []);
 
-    const hasOracleEval = state.displayLines.some((l) => l.includes("oracle evaluation"));
+    const hasOracleEval = state.displayLines.some((l) => l.includes("Oracle evaluation..."));
     expect(hasOracleEval).toBe(true);
   });
 
@@ -592,10 +592,61 @@ describe("verification phase visibility", () => {
 
     const hasVerifying = state.displayLines.some((l) => l.includes("verifying"));
     expect(hasVerifying).toBe(true);
-    const hasRunningTests = state.displayLines.some((l) => l.includes("running tests"));
-    const hasOracleEval = state.displayLines.some((l) => l.includes("oracle evaluation"));
-    expect(hasRunningTests).toBe(false);
+    const hasTestingLabel = state.displayLines.some((l) => l.includes("Testing..."));
+    const hasOracleEval = state.displayLines.some((l) => l.includes("Oracle evaluation..."));
+    expect(hasTestingLabel).toBe(false);
     expect(hasOracleEval).toBe(false);
+  });
+
+  it("shows elapsed time when verifyingPhaseStartedAt is set", () => {
+    const startedAt = new Date(Date.now() - 12000).toISOString(); // 12 seconds ago
+    const step = makePlanStep({
+      status: "verifying",
+      verifyingPhase: "testing",
+      verifyingPhaseStartedAt: startedAt,
+    });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    // Should show "Testing... (12s)" or similar elapsed time
+    const statusLine = state.displayLines.find((l) => l.includes("Testing..."));
+    expect(statusLine).toBeDefined();
+    expect(statusLine).toMatch(/\(\d+s\)/);
+  });
+
+  it("shows oracle model name when configured", () => {
+    const step = makePlanStep({ status: "verifying", verifyingPhase: "oracle" });
+    const plan = makePlan([step], {
+      config: {
+        maxConcurrentAgents: 2,
+        autoStart: false,
+        backend: "claude-code",
+        worktree: false,
+        pauseOnFailure: true,
+        ticketTransitions: true,
+        autoCommit: false,
+        verification: { runTests: true, runOracle: true, oracleModel: "claude-sonnet-4-5-20250514" },
+      },
+    });
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const statusLine = state.displayLines.find((l) => l.includes("Oracle evaluation..."));
+    expect(statusLine).toBeDefined();
+    expect(statusLine).toContain("claude-sonnet-4-5-20250514");
+  });
+
+  it("does not show model name when oracleModel is not configured", () => {
+    const step = makePlanStep({ status: "verifying", verifyingPhase: "oracle" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const statusLine = state.displayLines.find((l) => l.includes("Oracle evaluation..."));
+    expect(statusLine).toBeDefined();
+    // No brackets with model name
+    expect(statusLine).not.toMatch(/\[.*\]/);
   });
 });
 

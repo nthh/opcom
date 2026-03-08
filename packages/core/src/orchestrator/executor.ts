@@ -873,11 +873,12 @@ export class Executor {
     const testPath = step.worktreePath ?? project.path;
     if (verification.runTests && project.testing?.command) {
       step.verifyingPhase = "testing";
+      step.verifyingPhaseStartedAt = new Date().toISOString();
       await savePlan(this.plan);
       this.emit("plan_updated", { plan: this.plan });
       this.logPlanEvent("step_verify_phase", {
         stepTicketId: step.ticketId,
-        detail: { phase: "testing", startedAt: new Date().toISOString() },
+        detail: { phase: "testing", startedAt: step.verifyingPhaseStartedAt },
       });
       const testResult = await this.runTestGate(testPath, project.testing.command);
       result.testGate = testResult;
@@ -909,11 +910,12 @@ export class Executor {
     // --- Oracle (runs as agent session) ---
     if (verification.runOracle) {
       step.verifyingPhase = "oracle";
+      step.verifyingPhaseStartedAt = new Date().toISOString();
       await savePlan(this.plan);
       this.emit("plan_updated", { plan: this.plan });
       this.logPlanEvent("step_verify_phase", {
         stepTicketId: step.ticketId,
-        detail: { phase: "oracle", startedAt: new Date().toISOString() },
+        detail: { phase: "oracle", startedAt: step.verifyingPhaseStartedAt },
       });
       try {
         const tickets = await scanTickets(project.path);
@@ -972,6 +974,7 @@ export class Executor {
     }
 
     step.verifyingPhase = undefined;
+    step.verifyingPhaseStartedAt = undefined;
     await savePlan(this.plan);
     this.emit("plan_updated", { plan: this.plan });
 

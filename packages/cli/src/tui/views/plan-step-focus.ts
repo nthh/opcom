@@ -139,9 +139,17 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
   const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
   const icon = stepStatusIcon(displayStatus);
   const sColor = stepStatusColor(displayStatus);
-  const phaseDetail = displayStatus === "verifying" && step.verifyingPhase
-    ? ` (${step.verifyingPhase === "testing" ? "running tests" : "oracle evaluation"})`
-    : "";
+  let phaseDetail = "";
+  if (displayStatus === "verifying" && step.verifyingPhase) {
+    const phaseLabel = step.verifyingPhase === "testing" ? "Testing" : "Oracle evaluation";
+    const elapsed = step.verifyingPhaseStartedAt
+      ? ` (${formatDuration(step.verifyingPhaseStartedAt)})`
+      : "";
+    const modelInfo = step.verifyingPhase === "oracle" && state.plan.config.verification.oracleModel
+      ? ` [${state.plan.config.verification.oracleModel}]`
+      : "";
+    phaseDetail = ` — ${phaseLabel}...${elapsed}${modelInfo}`;
+  }
   lines.push(`${dim("Status:")}    ${color(sColor, `${icon} ${displayStatus}`)}${phaseDetail}`);
   if (step.rebaseConflict) {
     lines.push(`${dim("Conflicts:")} ${step.rebaseConflict.files.join(", ")}`);
