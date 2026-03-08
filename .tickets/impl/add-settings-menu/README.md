@@ -16,8 +16,8 @@ Add a settings menu to opcom that lets users view and modify workspace configura
 
 - [x] Define settings schema and available configuration keys
 - [x] Implement `opcom settings` CLI command with list/get/set subcommands
-- [ ] Add TUI settings panel accessible from the dashboard
-- [ ] Add `e` key on plan overview screen to edit plan-specific config before execution
+- [x] Add TUI settings panel accessible from the dashboard
+- [x] Add `e` key on plan overview screen to edit plan-specific config before execution
 - [x] Persist changes back to `~/.opcom/` YAML config files
 - [x] Add validation for setting values
 

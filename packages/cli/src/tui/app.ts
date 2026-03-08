@@ -90,8 +90,27 @@ import {
   scrollDown as planOverviewScrollDown,
   scrollToTop as planOverviewScrollToTop,
   scrollToBottom as planOverviewScrollToBottom,
+  enterEditMode as planOverviewEnterEdit,
+  exitEditMode as planOverviewExitEdit,
+  editMoveUp as planOverviewEditUp,
+  editMoveDown as planOverviewEditDown,
+  editToggleField as planOverviewEditToggle,
+  editAdjustField as planOverviewEditAdjust,
   type PlanOverviewState,
 } from "./views/plan-overview.js";
+import {
+  renderSettingsView,
+  createSettingsViewState,
+  moveUp as settingsMoveUp,
+  moveDown as settingsMoveDown,
+  enterEditMode as settingsEnterEdit,
+  applyEdit as settingsApplyEdit,
+  cancelEdit as settingsCancelEdit,
+  handleEditInput as settingsHandleEditInput,
+  toggleSetting as settingsToggle,
+  type SettingsViewState,
+} from "./views/settings-view.js";
+import { loadGlobalConfig, saveGlobalConfig, defaultSettings } from "@opcom/core";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -110,6 +129,7 @@ export class TuiApp {
   private planStepFocusState: PlanStepFocusState | null = null;
   private planOverviewState: PlanOverviewState | null = null;
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
+  private settingsViewState: SettingsViewState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -369,6 +389,8 @@ export class TuiApp {
             renderPlanOverview(this.buf, layout.panels[0], this.planOverviewState);
           } else if (this.cloudServiceDetailState) {
             renderCloudServiceDetail(this.buf, layout.panels[0], this.cloudServiceDetailState);
+          } else if (this.settingsViewState) {
+            renderSettingsView(this.buf, layout.panels[0], this.settingsViewState);
           }
           break;
       }
@@ -409,7 +431,7 @@ export class TuiApp {
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
           keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  H:health  f/F:project  /:search  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  H:health  O:settings  f/F:project  /:search  ?:help  q:quit");
         }
         break;
       case 2:
@@ -527,6 +549,8 @@ export class TuiApp {
           this.handlePlanOverviewInput(data);
         } else if (this.cloudServiceDetailState) {
           this.handleCloudServiceDetailInput(data);
+        } else if (this.settingsViewState) {
+          this.handleSettingsViewInput(data);
         }
         break;
     }
@@ -683,6 +707,10 @@ export class TuiApp {
 
       case "H":
         this.openHealthView();
+        return;
+
+      case "O":
+        this.openSettingsView();
         return;
     }
   }
@@ -1371,6 +1399,41 @@ export class TuiApp {
     const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
     const viewHeight = layout.panels[0].height - 2;
 
+    // Edit mode input routing
+    if (state.editMode) {
+      switch (data) {
+        case "\x1b": // Escape — exit edit mode
+          planOverviewExitEdit(state);
+          return;
+
+        case "j":
+        case "\x1b[B":
+          planOverviewEditDown(state);
+          return;
+
+        case "k":
+        case "\x1b[A":
+          planOverviewEditUp(state);
+          return;
+
+        case "\r":
+        case "\n":
+        case " ":
+          planOverviewEditToggle(state);
+          return;
+
+        case "+":
+        case "=":
+          planOverviewEditAdjust(state, 1);
+          return;
+
+        case "-":
+          planOverviewEditAdjust(state, -1);
+          return;
+      }
+      return;
+    }
+
     switch (data) {
       case "\x1b": // Escape
       case "q":
@@ -1411,7 +1474,11 @@ export class TuiApp {
         planOverviewScrollToTop(state);
         return;
 
-      // --- Plan config editing ---
+      case "e":
+        planOverviewEnterEdit(state);
+        return;
+
+      // --- Plan config quick-editing ---
       case "+":
       case "=":
         if (state.confirmed === null) {
@@ -1521,6 +1588,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {
@@ -1550,6 +1618,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
 
     // Load ticket content async — guard against stale state if user navigated away
     const stateRef = this.ticketFocusState;
@@ -1579,6 +1648,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
   }
 
   private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
@@ -1613,6 +1683,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
   }
 
   // --- L3: Cloud Service Detail Input ---
@@ -1670,6 +1741,97 @@ export class TuiApp {
     }
   }
 
+  // --- L3: Settings View Input ---
+
+  private handleSettingsViewInput(data: string): void {
+    if (!this.settingsViewState) return;
+    const state = this.settingsViewState;
+
+    // Edit mode — route text input
+    if (state.editMode) {
+      if (data === "\x1b") {
+        settingsCancelEdit(state);
+        return;
+      }
+      if (data === "\r" || data === "\n") {
+        const result = settingsApplyEdit(state);
+        if (result.success) {
+          this.saveSettings();
+        }
+        return;
+      }
+      settingsHandleEditInput(state, data);
+      return;
+    }
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        settingsMoveDown(state);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        settingsMoveUp(state);
+        return;
+
+      case "\r":
+      case "\n":
+        settingsEnterEdit(state);
+        this.saveSettings();
+        return;
+
+      case " ":
+        if (settingsToggle(state)) {
+          this.saveSettings();
+        }
+        return;
+    }
+  }
+
+  private openSettingsView(): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+
+    // Load settings from global config
+    loadGlobalConfig().then((config) => {
+      this.settingsViewState = createSettingsViewState(config.settings);
+      this.agentFocusState = null;
+      this.ticketFocusState = null;
+      this.planStepFocusState = null;
+      this.planOverviewState = null;
+      this.cloudServiceDetailState = null;
+      this.scheduleRender();
+    }).catch(() => {
+      // Fallback: use defaults
+      this.settingsViewState = createSettingsViewState(defaultSettings());
+      this.agentFocusState = null;
+      this.ticketFocusState = null;
+      this.planStepFocusState = null;
+      this.planOverviewState = null;
+      this.cloudServiceDetailState = null;
+      this.scheduleRender();
+    });
+  }
+
+  private saveSettings(): void {
+    if (!this.settingsViewState) return;
+    const settings = this.settingsViewState.settings;
+    loadGlobalConfig().then((config) => {
+      config.settings = settings;
+      return saveGlobalConfig(config);
+    }).catch(() => {});
+  }
+
   private navigateToCloudService(service: CloudService): void {
     this.navStack.push({
       level: this.level,
@@ -1683,6 +1845,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.planOverviewState = null;
+    this.settingsViewState = null;
   }
 
   private triggerMigration(): void {
@@ -1861,6 +2024,7 @@ export class TuiApp {
         this.planStepFocusState = null;
         this.planOverviewState = null;
         this.cloudServiceDetailState = null;
+        this.settingsViewState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -1875,6 +2039,7 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.settingsViewState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;
@@ -1937,6 +2102,7 @@ export function buildHelpLines(): string[] {
     "  f          Cycle project filter",
     "  F          Clear project filter",
     "  1-4        Filter by priority (0 to clear)",
+    "  O          Open settings",
     "",
     bold("Level 2: Project Detail"),
     "  j/k        Navigate up/down",
@@ -1978,8 +2144,16 @@ export function buildHelpLines(): string[] {
     "",
     bold("Level 3: Plan Overview"),
     "  j/k        Scroll up/down",
+    "  e          Edit plan config",
+    "  +/-        Adjust concurrent agents",
     "  Space      Confirm and start execution",
-    "  Esc        Cancel plan",
+    "  Esc        Cancel plan / exit edit",
+    "",
+    bold("Level 3: Settings"),
+    "  j/k        Navigate settings",
+    "  Enter      Edit / toggle setting",
+    "  Space      Toggle boolean / cycle enum",
+    "  Esc        Back to dashboard",
     "",
     dim("Press ? or Esc to close help"),
   ];

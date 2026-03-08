@@ -127,6 +127,67 @@ export function computeCriticalPath(steps: PlanStep[]): { length: number; path: 
   return { length: maxLen, path };
 }
 
+// --- Plan config field definitions ---
+
+export interface PlanConfigField {
+  key: string;
+  label: string;
+  type: "boolean" | "number" | "string";
+  get: (cfg: OrchestratorConfig) => unknown;
+  set: (cfg: OrchestratorConfig, raw: string) => void;
+  min?: number;
+  max?: number;
+}
+
+export const planConfigFields: PlanConfigField[] = [
+  {
+    key: "maxConcurrentAgents", label: "Max concurrent agents", type: "number",
+    get: (c) => c.maxConcurrentAgents,
+    set: (c, v) => { c.maxConcurrentAgents = Math.max(1, Math.min(32, Number(v))); },
+    min: 1, max: 32,
+  },
+  {
+    key: "backend", label: "Backend", type: "string",
+    get: (c) => c.backend,
+    set: (c, v) => { c.backend = v; },
+  },
+  {
+    key: "worktree", label: "Worktree mode", type: "boolean",
+    get: (c) => c.worktree,
+    set: (c, v) => { c.worktree = v === "true"; },
+  },
+  {
+    key: "autoCommit", label: "Auto-commit", type: "boolean",
+    get: (c) => c.autoCommit,
+    set: (c, v) => { c.autoCommit = v === "true"; },
+  },
+  {
+    key: "autoStart", label: "Auto-start", type: "boolean",
+    get: (c) => c.autoStart,
+    set: (c, v) => { c.autoStart = v === "true"; },
+  },
+  {
+    key: "pauseOnFailure", label: "Pause on failure", type: "boolean",
+    get: (c) => c.pauseOnFailure,
+    set: (c, v) => { c.pauseOnFailure = v === "true"; },
+  },
+  {
+    key: "ticketTransitions", label: "Ticket transitions", type: "boolean",
+    get: (c) => c.ticketTransitions,
+    set: (c, v) => { c.ticketTransitions = v === "true"; },
+  },
+  {
+    key: "verification.runTests", label: "Run tests", type: "boolean",
+    get: (c) => c.verification.runTests,
+    set: (c, v) => { c.verification.runTests = v === "true"; },
+  },
+  {
+    key: "verification.runOracle", label: "Run oracle", type: "boolean",
+    get: (c) => c.verification.runOracle,
+    set: (c, v) => { c.verification.runOracle = v === "true"; },
+  },
+];
+
 // --- State ---
 
 export interface PlanOverviewState {
@@ -136,6 +197,8 @@ export interface PlanOverviewState {
   displayLines: string[];
   wrapWidth: number;
   confirmed: boolean | null; // null = pending, true = confirmed, false = cancelled
+  editMode: boolean;
+  editFieldIndex: number;
 }
 
 export function createPlanOverviewState(plan: Plan, allTickets?: WorkItem[]): PlanOverviewState {
@@ -147,6 +210,8 @@ export function createPlanOverviewState(plan: Plan, allTickets?: WorkItem[]): Pl
     displayLines: [],
     wrapWidth: 0,
     confirmed: null,
+    editMode: false,
+    editFieldIndex: 0,
   };
   rebuildDisplayLines(state);
   return state;
@@ -240,22 +305,37 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
   }
 
   // --- Settings ---
-  lines.push(bold("Settings"));
-  const cfg = summary.config;
-  lines.push(`  ${dim("Max concurrent agents:")} ${cfg.maxConcurrentAgents}`);
-  lines.push(`  ${dim("Backend:")}              ${cfg.backend}`);
-  lines.push(`  ${dim("Worktree mode:")}        ${cfg.worktree ? "yes" : "no"}`);
-  lines.push(`  ${dim("Auto-commit:")}          ${cfg.autoCommit ? "yes" : "no"}`);
-  lines.push(`  ${dim("Auto-start:")}           ${cfg.autoStart ? "yes" : "no"}`);
-  lines.push(`  ${dim("Pause on failure:")}     ${cfg.pauseOnFailure ? "yes" : "no"}`);
-  lines.push(`  ${dim("Ticket transitions:")}   ${cfg.ticketTransitions ? "yes" : "no"}`);
+  lines.push(bold(state.editMode ? "Settings (editing)" : "Settings"));
+  if (state.editMode) {
+    for (let i = 0; i < planConfigFields.length; i++) {
+      const field = planConfigFields[i];
+      const value = field.get(summary.config);
+      const isSelected = i === state.editFieldIndex;
+      const cursor = isSelected ? color(ANSI.cyan, "▸ ") : "  ";
+      const label = isSelected ? color(ANSI.cyan, field.label + ":") : dim(field.label + ":");
+      const pad = " ".repeat(Math.max(1, 24 - field.label.length));
+      const valStr = field.type === "boolean"
+        ? (value ? color(ANSI.green, "yes") : color(ANSI.red, "no"))
+        : String(value);
+      lines.push(`${cursor}${label}${pad}${valStr}`);
+    }
+  } else {
+    const cfg = summary.config;
+    lines.push(`  ${dim("Max concurrent agents:")} ${cfg.maxConcurrentAgents}`);
+    lines.push(`  ${dim("Backend:")}              ${cfg.backend}`);
+    lines.push(`  ${dim("Worktree mode:")}        ${cfg.worktree ? "yes" : "no"}`);
+    lines.push(`  ${dim("Auto-commit:")}          ${cfg.autoCommit ? "yes" : "no"}`);
+    lines.push(`  ${dim("Auto-start:")}           ${cfg.autoStart ? "yes" : "no"}`);
+    lines.push(`  ${dim("Pause on failure:")}     ${cfg.pauseOnFailure ? "yes" : "no"}`);
+    lines.push(`  ${dim("Ticket transitions:")}   ${cfg.ticketTransitions ? "yes" : "no"}`);
 
-  // Verification
-  const v = cfg.verification;
-  const vParts: string[] = [];
-  if (v.runTests) vParts.push("tests");
-  if (v.runOracle) vParts.push(`oracle${v.oracleModel ? ` (${v.oracleModel})` : ""}`);
-  lines.push(`  ${dim("Verification:")}         ${vParts.length > 0 ? vParts.join(", ") : "none"}`);
+    // Verification
+    const v = cfg.verification;
+    const vParts: string[] = [];
+    if (v.runTests) vParts.push("tests");
+    if (v.runOracle) vParts.push(`oracle${v.oracleModel ? ` (${v.oracleModel})` : ""}`);
+    lines.push(`  ${dim("Verification:")}         ${vParts.length > 0 ? vParts.join(", ") : "none"}`);
+  }
   lines.push("");
 
   // --- Context ---
@@ -270,7 +350,7 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
   // --- Confirm prompt ---
   if (state.confirmed === null) {
     lines.push(bold(color(ANSI.yellow, "Press Space to start execution, or Esc to cancel.")));
-    lines.push(dim("+/-:agents  t:toggle tests  o:toggle oracle  w:toggle worktree"));
+    lines.push(dim("+/-:agents  t:toggle tests  o:toggle oracle  w:toggle worktree  e:edit config"));
   } else if (state.confirmed) {
     lines.push(bold(color(ANSI.green, "\u2713 Plan execution started.")));
   } else {
@@ -332,10 +412,73 @@ export function renderPlanOverview(
 
   // Footer
   const footerY = panel.y + panel.height - 1;
-  const keys = state.confirmed === null
-    ? dim("j/k:scroll  +/-:agents  t:tests  o:oracle  w:worktree  Space:start  Esc:cancel")
-    : dim("Esc:back");
+  let keys: string;
+  if (state.editMode) {
+    keys = dim("j/k:nav  Enter/Space:toggle  +/-:adjust  Esc:done editing");
+  } else if (state.confirmed === null) {
+    keys = dim("j/k:scroll  e:edit config  +/-:agents  t:tests  o:oracle  w:worktree  Space:start  Esc:cancel");
+  } else {
+    keys = dim("Esc:back");
+  }
   buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
+}
+
+// --- Edit mode helpers ---
+
+export function enterEditMode(state: PlanOverviewState): void {
+  if (state.confirmed !== null) return;
+  state.editMode = true;
+  state.editFieldIndex = 0;
+  rebuildDisplayLines(state, state.wrapWidth || 80);
+}
+
+export function exitEditMode(state: PlanOverviewState): void {
+  state.editMode = false;
+  rebuildDisplayLines(state, state.wrapWidth || 80);
+}
+
+export function editMoveUp(state: PlanOverviewState): void {
+  if (state.editFieldIndex > 0) {
+    state.editFieldIndex--;
+    rebuildDisplayLines(state, state.wrapWidth || 80);
+  }
+}
+
+export function editMoveDown(state: PlanOverviewState): void {
+  if (state.editFieldIndex < planConfigFields.length - 1) {
+    state.editFieldIndex++;
+    rebuildDisplayLines(state, state.wrapWidth || 80);
+  }
+}
+
+export function editToggleField(state: PlanOverviewState): void {
+  const field = planConfigFields[state.editFieldIndex];
+  if (!field) return;
+  const cfg = state.plan.config;
+
+  if (field.type === "boolean") {
+    const current = field.get(cfg) as boolean;
+    field.set(cfg, String(!current));
+  }
+
+  state.summary.config = cfg;
+  rebuildDisplayLines(state, state.wrapWidth || 80);
+}
+
+export function editAdjustField(state: PlanOverviewState, delta: number): void {
+  const field = planConfigFields[state.editFieldIndex];
+  if (!field) return;
+  const cfg = state.plan.config;
+
+  if (field.type === "number") {
+    const current = field.get(cfg) as number;
+    const next = current + delta;
+    const clamped = Math.max(field.min ?? 0, Math.min(field.max ?? 999, next));
+    field.set(cfg, String(clamped));
+  }
+
+  state.summary.config = cfg;
+  rebuildDisplayLines(state, state.wrapWidth || 80);
 }
 
 // --- Scroll helpers ---
