@@ -137,6 +137,10 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
   })),
 }));
 
+vi.mock("../../packages/core/src/orchestrator/smoke-test.js", () => ({
+  runSmoke: vi.fn(async () => ({ passed: true, buildPassed: true, testsPassed: true, buildOutput: "", testOutput: "", durationMs: 0 })),
+}));
+
 // Mock worktree manager
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
   return {

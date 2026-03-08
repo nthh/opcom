@@ -8,6 +8,7 @@ import type {
   PlanStep,
   PlanStage,
   StageSummary,
+  IntegrationTestResult,
   AgentSession,
   AgentState,
   NormalizedEvent,
@@ -30,6 +31,7 @@ import { collectOracleInputs, formatOraclePrompt, parseOracleResponse } from "..
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { createLogger } from "../logger.js";
 import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
+import { runSmoke } from "./smoke-test.js";
 
 const log = createLogger("executor");
 
@@ -39,6 +41,7 @@ export interface ExecutorEvents {
   step_failed: { step: PlanStep; error: string };
   step_needs_rebase: { step: PlanStep; error: string };
   stage_completed: { planId: string; stage: PlanStage; summary: StageSummary };
+  smoke_test: { planId: string; result: IntegrationTestResult; trigger: "stage" | "plan_completion"; stageIndex?: number };
   plan_completed: { plan: Plan };
   plan_paused: { plan: Plan };
   plan_updated: { plan: Plan };
@@ -1322,7 +1325,7 @@ export class Executor {
 
     if (this.plan.status === "executing") {
       // Check for stage completion before starting new steps
-      if (this.checkStageCompletion()) {
+      if (await this.checkStageCompletion()) {
         // Stage just completed — don't start new steps yet
         this.emit("plan_updated", { plan: this.plan });
         return;
@@ -1335,6 +1338,12 @@ export class Executor {
       // Mark final stage as completed if stages are active
       this.markCurrentStageCompleted();
 
+      // Run final smoke test before marking plan as done
+      const smokeResult = await this.runPlanCompletionSmokeTest();
+      if (smokeResult) {
+        this.plan.smokeTestResult = smokeResult;
+      }
+
       this.plan.status = "done";
       this.plan.completedAt = new Date().toISOString();
       await savePlan(this.plan);
@@ -1344,6 +1353,7 @@ export class Executor {
           done: this.plan.steps.filter((s) => s.status === "done").length,
           failed: this.plan.steps.filter((s) => s.status === "failed").length,
           skipped: this.plan.steps.filter((s) => s.status === "skipped").length,
+          smokeTest: smokeResult ?? undefined,
         },
       });
       this.running = false;
@@ -1575,11 +1585,11 @@ export class Executor {
   }
 
   /**
-   * Check if the current stage is complete. If so, emit stage_completed
-   * and either auto-continue or pause for approval.
+   * Check if the current stage is complete. If so, run smoke tests,
+   * emit stage_completed, and either auto-continue or pause for approval.
    * Returns true if a stage just completed (caller should not start new steps).
    */
-  private checkStageCompletion(): boolean {
+  private async checkStageCompletion(): Promise<boolean> {
     if (!this.plan.stages || this.plan.currentStage === undefined) return false;
 
     const stage = this.plan.stages[this.plan.currentStage];
@@ -1599,12 +1609,31 @@ export class Executor {
     this.markCurrentStageCompleted();
 
     const summary = computeStageSummary(stage, this.plan.steps);
+
+    // Run smoke test after batch (stage) completion
+    const smokeResult = await this.runStageSmokeTest(stage.index);
+    if (smokeResult) {
+      summary.smokeTest = smokeResult;
+    }
+
     stage.summary = summary;
 
     this.emit("stage_completed", { planId: this.plan.id, stage, summary });
     this.logPlanEvent("stage_completed", {
       detail: { stageIndex: stage.index, summary },
     });
+
+    // If smoke test failed, pause the plan with clear error
+    if (smokeResult && !smokeResult.passed) {
+      const reason = smokeResult.buildPassed
+        ? "Smoke test failed: tests failed after stage " + stage.index
+        : "Smoke test failed: build failed after stage " + stage.index;
+      this.plan.status = "paused";
+      await savePlan(this.plan);
+      this.emit("plan_paused", { plan: this.plan });
+      this.logPlanEvent("plan_paused", { detail: { reason, stageIndex: stage.index } });
+      return true;
+    }
 
     // Check if there's a next stage
     const nextIdx = this.plan.currentStage + 1;
@@ -1658,6 +1687,60 @@ export class Executor {
     const nextStage = this.plan.stages[nextIdx];
     nextStage.status = "executing";
     nextStage.startedAt = new Date().toISOString();
+  }
+
+  /**
+   * Run a smoke test after a stage (batch) completes.
+   * Returns null if no project path could be resolved.
+   */
+  private async runStageSmokeTest(stageIndex: number): Promise<IntegrationTestResult | null> {
+    const projectPath = await this.resolveProjectPath();
+    if (!projectPath) return null;
+
+    const testCommand = await this.resolveTestCommand();
+    log.info("running smoke test after stage", { stageIndex });
+
+    const result = await runSmoke(projectPath, testCommand);
+    this.emit("smoke_test", { planId: this.plan.id, result, trigger: "stage", stageIndex });
+    this.logPlanEvent("smoke_test", {
+      detail: { trigger: "stage", stageIndex, result },
+    });
+    return result;
+  }
+
+  /**
+   * Run a final smoke test when the plan completes.
+   * Returns null if no project path could be resolved.
+   */
+  private async runPlanCompletionSmokeTest(): Promise<IntegrationTestResult | null> {
+    const projectPath = await this.resolveProjectPath();
+    if (!projectPath) return null;
+
+    const testCommand = await this.resolveTestCommand();
+    log.info("running final smoke test on plan completion");
+
+    const result = await runSmoke(projectPath, testCommand);
+    this.emit("smoke_test", { planId: this.plan.id, result, trigger: "plan_completion" });
+    this.logPlanEvent("smoke_test", {
+      detail: { trigger: "plan_completion", result },
+    });
+    return result;
+  }
+
+  /** Resolve the primary project path from the plan's steps. */
+  private async resolveProjectPath(): Promise<string | null> {
+    const projectId = this.plan.steps[0]?.projectId;
+    if (!projectId) return null;
+    const project = await loadProject(projectId);
+    return project?.path ?? null;
+  }
+
+  /** Resolve the test command from the primary project. */
+  private async resolveTestCommand(): Promise<string> {
+    const projectId = this.plan.steps[0]?.projectId;
+    if (!projectId) return "npm test";
+    const project = await loadProject(projectId);
+    return project?.testing?.command ?? "npm test";
   }
 
   /** Don't exit the event loop while paused — resume needs a live loop. */

@@ -119,6 +119,10 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
   })),
 }));
 
+vi.mock("../../packages/core/src/orchestrator/smoke-test.js", () => ({
+  runSmoke: vi.fn(async () => ({ passed: true, buildPassed: true, testsPassed: true, buildOutput: "", testOutput: "", durationMs: 0 })),
+}));
+
 // Mock worktree manager: hasCommits returns true by default
 const mockHasCommits = vi.fn(async () => true);
 const mockMerge = vi.fn(async () => ({ merged: true, conflict: false }));
