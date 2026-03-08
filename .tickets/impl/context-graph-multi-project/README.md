@@ -1,7 +1,7 @@
 ---
 id: context-graph-multi-project
 title: "Cross-Project Analysis & Shared Patterns"
-status: open
+status: closed
 type: feature
 priority: 3
 created: 2026-03-05
