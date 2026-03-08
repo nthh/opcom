@@ -313,7 +313,10 @@ function renderPlanPanel(
       const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
       const icon = planStepIcon(displayStatus);
       const sColor = planStatusColor(displayStatus);
-      const statusStr = color(sColor, `${icon} ${displayStatus}`);
+      const phaseLabel = displayStatus === "verifying" && step.verifyingPhase
+        ? `${step.verifyingPhase}...`
+        : displayStatus;
+      const statusStr = color(sColor, `${icon} ${phaseLabel}`);
       const verifyBadge = formatStepVerificationBadge(step);
       const text = `  ${statusStr} ${step.ticketId}${verifyBadge}`;
       const isSelected = line.index === selected && focused;

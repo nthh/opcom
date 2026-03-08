@@ -221,10 +221,13 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
           const ds = step.rebaseConflict ? "rebasing" : step.status;
           const icon = stepStatusIcon(ds);
           const sColor = stepStatusColor(ds);
+          const phaseLabel = ds === "verifying" && step.verifyingPhase
+            ? ` ${step.verifyingPhase}...`
+            : "";
           const deps = step.blockedBy.length > 0
             ? dim(` \u2190 ${step.blockedBy.join(", ")}`)
             : "";
-          lines.push(`    ${color(sColor, icon)} ${ticketId}${deps}`);
+          lines.push(`    ${color(sColor, icon)} ${ticketId}${color(sColor, phaseLabel)}${deps}`);
         }
       }
     }

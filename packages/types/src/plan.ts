@@ -42,6 +42,8 @@ export interface PlanStep {
   rebaseAttempts?: number;               // count of auto-rebase attempts (capped at 3)
   previousVerification?: VerificationResult;  // feedback from last failed attempt
   rebaseConflict?: RebaseConflict;       // set when agent needs to resolve merge conflicts
+  verifyingPhase?: "testing" | "oracle"; // which verification sub-phase is active
+  verifyingPhaseStartedAt?: string;      // ISO timestamp when current sub-phase started
 }
 
 export interface RebaseConflict {

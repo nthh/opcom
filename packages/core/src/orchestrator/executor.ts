@@ -457,6 +457,52 @@ export class Executor {
     }
 
     if (!hasWork) {
+      // Zero-commit oracle arbitration: if oracle is enabled, ask it whether
+      // the acceptance criteria are already met (e.g. a previous step did the work).
+      const roleVerify = this.stepVerification.get(step.ticketId);
+      const zeroCommitVerification = roleVerify ?? this.plan.config.verification;
+
+      if (zeroCommitVerification.runOracle) {
+        log.info("zero-commit oracle arbitration", { ticketId: step.ticketId });
+        step.status = "verifying";
+        await savePlan(this.plan);
+        this.emit("plan_updated", { plan: this.plan });
+
+        const result = await this.runVerification(step, event, {
+          runTests: false,   // tests are irrelevant (no changes made)
+          runOracle: true,
+        });
+
+        if (result?.passed) {
+          // Oracle confirms criteria are met — step is done without commits
+          step.status = "done";
+          step.completedAt = new Date().toISOString();
+          step.verification = result;
+
+          // No merge needed — no commits to merge
+          await this.worktreeManager.remove(step.ticketId).catch(() => {});
+          step.worktreePath = undefined;
+          step.worktreeBranch = undefined;
+
+          if (this.plan.config.ticketTransitions) {
+            await this.updateTicketStatusSafe(step, "closed");
+          }
+
+          log.info("zero-commit oracle passed — step done (already implemented)", { ticketId: step.ticketId });
+          this.emit("step_completed", { step });
+          this.logPlanEvent("step_completed", {
+            stepTicketId: step.ticketId,
+            agentSessionId: event.sessionId,
+            detail: { mode: "worktree", zeroCommitOracle: true, verification: result },
+          });
+          return;
+        }
+        // Oracle says criteria unmet — fall through to failure
+        if (result) {
+          step.verification = result;
+        }
+      }
+
       const reason = "Agent exited without making any commits";
       await this.failStep(step, reason);
 
@@ -851,6 +897,14 @@ export class Executor {
     // Run tests in the worktree if available (verification runs before merge)
     const testPath = step.worktreePath ?? project.path;
     if (verification.runTests && project.testing?.command) {
+      step.verifyingPhase = "testing";
+      step.verifyingPhaseStartedAt = new Date().toISOString();
+      await savePlan(this.plan);
+      this.emit("plan_updated", { plan: this.plan });
+      this.logPlanEvent("step_verify_phase", {
+        stepTicketId: step.ticketId,
+        detail: { phase: "testing", startedAt: step.verifyingPhaseStartedAt },
+      });
       const testResult = await this.runTestGate(testPath, project.testing.command);
       result.testGate = testResult;
       if (!testResult.passed) {
@@ -880,6 +934,14 @@ export class Executor {
 
     // --- Oracle (runs as agent session) ---
     if (verification.runOracle) {
+      step.verifyingPhase = "oracle";
+      step.verifyingPhaseStartedAt = new Date().toISOString();
+      await savePlan(this.plan);
+      this.emit("plan_updated", { plan: this.plan });
+      this.logPlanEvent("step_verify_phase", {
+        stepTicketId: step.ticketId,
+        detail: { phase: "oracle", startedAt: step.verifyingPhaseStartedAt },
+      });
       try {
         const tickets = await scanTickets(project.path);
         const workItem = tickets.find((t) => t.id === step.ticketId);
@@ -935,6 +997,11 @@ export class Executor {
         log.warn("oracle evaluation failed", { ticketId: step.ticketId, error: String(err) });
       }
     }
+
+    step.verifyingPhase = undefined;
+    step.verifyingPhaseStartedAt = undefined;
+    await savePlan(this.plan);
+    this.emit("plan_updated", { plan: this.plan });
 
     this.logPlanEvent("step_verified", {
       stepTicketId: step.ticketId,
