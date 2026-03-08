@@ -1,7 +1,7 @@
 ---
 id: verification-pipeline-visibility
 title: "Verification Pipeline: Zero-Commit Oracle Arbitration and Live Progress Visibility"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
