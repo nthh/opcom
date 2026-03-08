@@ -363,28 +363,21 @@ describe("Executor", () => {
 
     expect(mockSM.startCalls).toHaveLength(1);
 
-    // Pause
+    // Pause — should stop running agent and reset step to ready
     executor.pause();
     await new Promise((r) => setTimeout(r, 100));
     expect(executor.getPlan().status).toBe("paused");
+    expect(executor.getPlan().steps.every((s) => s.status === "ready")).toBe(true);
 
-    // Complete first task (with write activity)
-    const sessionId = executor.getPlan().steps.find((s) => s.status === "in-progress")!.agentSessionId!;
-    mockSM.simulateWrite(sessionId);
-    mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    const startsBeforeResume = mockSM.startCalls.length;
 
-    // Still paused — t2 not started yet
-    const startsWhilePaused = mockSM.startCalls.length;
-
-    // Resume
+    // Resume — should restart agents
     executor.resume();
     await new Promise((r) => setTimeout(r, 200));
 
-    // After resume, plan should be executing (or done if t2 already completed)
+    // After resume, plan should be executing and agents restarted
     expect(["executing", "done"]).toContain(executor.getPlan().status);
-    // More agents should have been started after resume
-    expect(mockSM.startCalls.length).toBeGreaterThanOrEqual(startsWhilePaused);
+    expect(mockSM.startCalls.length).toBeGreaterThan(startsBeforeResume);
 
     executor.stop();
     await runPromise;

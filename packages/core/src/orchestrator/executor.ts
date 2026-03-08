@@ -412,6 +412,22 @@ export class Executor {
 
       case "pause": {
         this.plan.status = "paused";
+
+        // Stop all in-progress agent sessions so they don't keep running.
+        // Reset steps to ready so they restart cleanly on resume.
+        for (const step of this.plan.steps) {
+          if (step.status === "in-progress" && step.agentSessionId) {
+            log.info("stopping agent for paused step", { ticketId: step.ticketId, sessionId: step.agentSessionId });
+            this.sessionToStep.delete(step.agentSessionId);
+            this.sessionWrites.delete(step.agentSessionId);
+            await this.sessionManager.stopSession(step.agentSessionId).catch((err) => {
+              log.warn("failed to stop agent on pause", { ticketId: step.ticketId, error: String(err) });
+            });
+            step.status = "ready";
+            step.agentSessionId = undefined;
+          }
+        }
+
         await savePlan(this.plan);
         this.emit("plan_paused", { plan: this.plan });
         this.logPlanEvent("plan_paused", { detail: { reason: "user" } });

@@ -527,6 +527,12 @@ export class TuiClient {
       case "pause_plan":
         if (this.activeExecutor) {
           this.activeExecutor.pause();
+        } else if (this.activePlan && this.activePlan.id === command.planId && this.activePlan.status === "executing") {
+          // No live executor — plan was left executing from a previous session.
+          // Update status directly so user can resume cleanly.
+          this.activePlan.status = "paused";
+          await savePlan(this.activePlan);
+          this.handleServerEvent({ type: "plan_paused", plan: this.activePlan } as ServerEvent);
         }
         break;
 
