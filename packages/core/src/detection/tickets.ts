@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
-import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence } from "@opcom/types";
+import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence, VerificationMode } from "@opcom/types";
 
 export interface TicketDetectionResult {
   workSystem: WorkSystemInfo;
@@ -92,7 +92,18 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
       ...(Array.isArray(frontmatter.category) ? { category: frontmatter.category.map(String) } : {}),
     },
     role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
+    verification: parseVerificationMode(frontmatter.verification),
+    outputs: Array.isArray(frontmatter.outputs) ? frontmatter.outputs.map(String) : undefined,
   };
+}
+
+const VALID_VERIFICATION_MODES: Set<string> = new Set([
+  "test-gate", "oracle", "confirmation", "output-exists", "none",
+]);
+
+function parseVerificationMode(value: unknown): VerificationMode | undefined {
+  if (typeof value !== "string") return undefined;
+  return VALID_VERIFICATION_MODES.has(value) ? value as VerificationMode : undefined;
 }
 
 function normalizeStatus(raw?: string): WorkItem["status"] {

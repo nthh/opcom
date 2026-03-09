@@ -1,6 +1,7 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -17,6 +18,7 @@ import type {
   TestGateResult,
   RebaseResult,
   StallSignal,
+  VerificationMode,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
@@ -45,6 +47,7 @@ export interface ExecutorEvents {
   step_completed: { step: PlanStep };
   step_failed: { step: PlanStep; error: string };
   step_needs_rebase: { step: PlanStep; error: string };
+  step_pending_confirmation: { step: PlanStep };
   stage_completed: { planId: string; stage: PlanStage; summary: StageSummary };
   smoke_test: { planId: string; result: IntegrationTestResult; trigger: "stage" | "plan_completion"; stageIndex?: number };
   plan_completed: { plan: Plan };
@@ -56,7 +59,7 @@ export interface ExecutorEvents {
 type EventHandler<T> = (data: T) => void;
 
 interface ExecutorEvent {
-  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "retry" | "inject_context" | "advance_stage" | "verification_done" | "stall_check";
+  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "retry" | "inject_context" | "advance_stage" | "verification_done" | "stall_check" | "confirm_step" | "reject_step";
   sessionId?: string;
   ticketId?: string;
   error?: string;
@@ -322,6 +325,20 @@ export class Executor {
    */
   retryStep(ticketId: string): void {
     this.pushEvent({ type: "retry", ticketId });
+  }
+
+  /**
+   * Confirm a step in pending-confirmation status — mark it done.
+   */
+  confirmStep(ticketId: string): void {
+    this.pushEvent({ type: "confirm_step", ticketId });
+  }
+
+  /**
+   * Reject a step in pending-confirmation status — re-enter ready queue.
+   */
+  rejectStep(ticketId: string, reason?: string): void {
+    this.pushEvent({ type: "reject_step", ticketId, error: reason });
   }
 
   /**
@@ -637,6 +654,53 @@ export class Executor {
         await this.runStallChecks();
         break;
       }
+
+      case "confirm_step": {
+        const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
+        if (step && step.status === "pending-confirmation") {
+          step.status = "done";
+          step.completedAt = new Date().toISOString();
+
+          // Clean up worktree if present
+          if (this.plan.config.worktree && step.worktreePath) {
+            // Merge first if there are commits
+            const hasCommits = await this.worktreeManager.hasCommits(step.ticketId).catch(() => false);
+            if (hasCommits) {
+              await this.worktreeManager.merge(step.ticketId).catch(() => {});
+            }
+            await this.worktreeManager.remove(step.ticketId).catch(() => {});
+            step.worktreePath = undefined;
+            step.worktreeBranch = undefined;
+          }
+
+          if (this.plan.config.ticketTransitions) {
+            await this.updateTicketStatusSafe(step, "closed");
+          }
+
+          await this.updateSummary(step);
+          this.emit("step_completed", { step });
+          this.logPlanEvent("step_confirmed", { stepTicketId: step.ticketId });
+        }
+        await this.recomputeAndContinue();
+        break;
+      }
+
+      case "reject_step": {
+        const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
+        if (step && step.status === "pending-confirmation") {
+          step.status = "ready";
+          step.agentSessionId = undefined;
+          step.completedAt = undefined;
+          step.attempt = (step.attempt ?? 1) + 1;
+          step.error = event.error ?? "Rejected by user";
+          this.logPlanEvent("step_rejected", {
+            stepTicketId: step.ticketId,
+            detail: { reason: event.error },
+          });
+        }
+        await this.recomputeAndContinue();
+        break;
+      }
     }
   }
 
@@ -679,6 +743,123 @@ export class Executor {
     if (event.sessionId) {
       this.sessionToStep.delete(event.sessionId);
       this.sessionWrites.delete(event.sessionId);
+    }
+
+    // --- Per-work-item verification mode routing ---
+    // Only routes when an explicit verificationMode is set on the step (from work item frontmatter).
+    // When undefined, falls through to the existing verification pipeline (role + plan config).
+    const verificationMode = this.resolveVerificationMode(step);
+
+    // "none" mode: skip all verification, mark done immediately
+    if (verificationMode === "none") {
+      log.info("verification mode: none — skipping verification", { ticketId: step.ticketId });
+      if (hasWork) {
+        // Merge into main
+        const mergeResult = await this.worktreeManager.merge(step.ticketId);
+        if (!mergeResult.merged) {
+          step.status = "needs-rebase";
+          step.error = `Merge failed: ${mergeResult.error}`;
+          step.completedAt = new Date().toISOString();
+          this.emit("step_needs_rebase", { step, error: step.error });
+          this.logPlanEvent("step_needs_rebase", { stepTicketId: step.ticketId, detail: { error: step.error } });
+          return;
+        }
+      }
+      step.status = "done";
+      step.completedAt = new Date().toISOString();
+      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      step.worktreePath = undefined;
+      step.worktreeBranch = undefined;
+      if (this.plan.config.ticketTransitions) {
+        await this.updateTicketStatusSafe(step, "closed");
+      }
+      await this.updateSummary(step);
+      this.emit("step_completed", { step });
+      this.logPlanEvent("step_completed", { stepTicketId: step.ticketId, detail: { mode: "none" } });
+      return;
+    }
+
+    // "confirmation" mode: enter pending-confirmation status, wait for user
+    if (verificationMode === "confirmation") {
+      log.info("verification mode: confirmation — awaiting user confirmation", { ticketId: step.ticketId });
+      step.status = "pending-confirmation";
+      await savePlan(this.plan);
+      this.emit("step_pending_confirmation", { step });
+      this.emit("plan_updated", { plan: this.plan });
+      this.logPlanEvent("step_pending_confirmation", { stepTicketId: step.ticketId });
+      return;
+    }
+
+    // "output-exists" mode: check that expected files exist
+    if (verificationMode === "output-exists") {
+      log.info("verification mode: output-exists", { ticketId: step.ticketId });
+      step.status = "verifying";
+      step.verification = undefined;
+      await savePlan(this.plan);
+      this.emit("plan_updated", { plan: this.plan });
+
+      const result = await this.runOutputExistsVerification(step, event);
+      step.verification = result;
+
+      if (!result.passed) {
+        const attempt = step.attempt ?? 1;
+        const maxRetries = this.plan.config.verification.maxRetries ?? 2;
+        const maxAttempts = 1 + maxRetries;
+
+        if (attempt < maxAttempts) {
+          step.attempt = attempt + 1;
+          step.previousVerification = result;
+          step.status = "ready";
+          step.agentSessionId = undefined;
+          this.logPlanEvent("step_retry", { stepTicketId: step.ticketId, detail: { attempt: step.attempt, mode: "output-exists" } });
+          return;
+        }
+
+        const reason = `Output-exists verification failed: ${result.failureReasons.join("; ")}`;
+        await this.failStep(step, reason);
+        this.emit("step_failed", { step, error: reason });
+        this.logPlanEvent("step_failed", { stepTicketId: step.ticketId, detail: { error: reason, mode: "output-exists" } });
+        if (this.plan.config.pauseOnFailure) {
+          this.plan.status = "paused";
+          await savePlan(this.plan);
+          this.emit("plan_paused", { plan: this.plan });
+        }
+        return;
+      }
+
+      // Output-exists passed — proceed to merge if there are commits
+      if (hasWork) {
+        const mergeResult = await this.worktreeManager.merge(step.ticketId);
+        if (!mergeResult.merged) {
+          step.status = "needs-rebase";
+          step.error = `Merge failed: ${mergeResult.error}`;
+          step.completedAt = new Date().toISOString();
+          this.emit("step_needs_rebase", { step, error: step.error });
+          this.logPlanEvent("step_needs_rebase", { stepTicketId: step.ticketId, detail: { error: step.error } });
+          return;
+        }
+      }
+
+      step.status = "done";
+      step.completedAt = new Date().toISOString();
+      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      step.worktreePath = undefined;
+      step.worktreeBranch = undefined;
+      if (this.plan.config.ticketTransitions) {
+        await this.updateTicketStatusSafe(step, "closed");
+      }
+      await this.updateSummary(step);
+      this.emit("step_completed", { step });
+      this.logPlanEvent("step_completed", { stepTicketId: step.ticketId, detail: { mode: "output-exists" } });
+      return;
+    }
+
+    // "oracle" mode: skip test gate, run oracle only
+    // "test-gate" mode: run full pipeline (test gate + oracle if enabled)
+    // These flow through the existing verification pipeline below.
+    // For "oracle" mode, override the role verification to skip tests.
+    if (verificationMode === "oracle") {
+      this.stepVerification.set(step.ticketId, { runTests: false, runOracle: true });
     }
 
     if (!hasWork) {
@@ -1121,6 +1302,64 @@ export class Executor {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Resolve the effective verification mode for a step.
+   * Returns the explicit mode if set on the step (from work item frontmatter),
+   * or undefined to use the existing verification pipeline (role + plan config).
+   */
+  private resolveVerificationMode(step: PlanStep): VerificationMode | undefined {
+    return step.verificationMode;
+  }
+
+  /**
+   * Run output-exists verification: check that expected files exist and are non-empty.
+   */
+  private async runOutputExistsVerification(
+    step: PlanStep,
+    event: ExecutorEvent,
+  ): Promise<VerificationResult> {
+    const project = await loadProject(step.projectId);
+    const result: VerificationResult = {
+      stepTicketId: step.ticketId,
+      passed: true,
+      failureReasons: [],
+    };
+
+    // Find expected outputs from the ticket
+    const tickets = project ? await scanTickets(project.path) : [];
+    const workItem = tickets.find((t) => t.id === step.ticketId);
+    const expectedOutputs = workItem?.outputs ?? [];
+
+    if (expectedOutputs.length === 0) {
+      // No outputs specified — pass (agent produced something, we just can't check specific files)
+      log.info("output-exists: no outputs specified, passing by default", { ticketId: step.ticketId });
+      return result;
+    }
+
+    const basePath = step.worktreePath ?? project?.path ?? "";
+    for (const output of expectedOutputs) {
+      const fullPath = join(basePath, output);
+      try {
+        const st = await stat(fullPath);
+        if (st.size === 0) {
+          result.passed = false;
+          result.failureReasons.push(`Output file is empty: ${output}`);
+        }
+      } catch {
+        result.passed = false;
+        result.failureReasons.push(`Output file not found: ${output}`);
+      }
+    }
+
+    this.logPlanEvent("step_verified", {
+      stepTicketId: step.ticketId,
+      agentSessionId: event.sessionId,
+      detail: { verification: result, mode: "output-exists" },
+    });
+
+    return result;
   }
 
   /**
@@ -1761,6 +2000,11 @@ export class Executor {
     const tickets = await scanTickets(project.path);
     const workItem = tickets.find((t) => t.id === step.ticketId);
 
+    // Sync verification mode from work item (may have been added after plan creation)
+    if (workItem?.verification && !step.verificationMode) {
+      step.verificationMode = workItem.verification;
+    }
+
     // Resolve role early so buildContextPacket can match skills
     const roleId = step.role ?? workItem?.role ?? "engineer";
     const roleDef = await loadRole(roleId);
@@ -1809,7 +2053,7 @@ export class Executor {
 
     // Build system prompt with role-aware context (and retry feedback if applicable)
     const systemPrompt = contextPacketToMarkdown(
-      contextPacket, resolved, step.previousVerification, step.rebaseConflict, stallWarning ?? undefined,
+      contextPacket, resolved, step.previousVerification, step.rebaseConflict, stallWarning ?? undefined, step.verificationMode,
     );
 
     const session = await this.sessionManager.startSession(

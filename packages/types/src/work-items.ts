@@ -13,6 +13,8 @@ export interface WorkItem {
   links: string[];
   tags: Record<string, string[]>;
   role?: string;
+  verification?: import("./plan.js").VerificationMode;
+  outputs?: string[];
 }
 
 export interface WorkSummary {
@@ -39,4 +41,6 @@ export interface TicketFrontmatter {
   deps?: string[];
   assignee?: string;
   role?: string;
+  verification?: string;
+  outputs?: string[];
 }

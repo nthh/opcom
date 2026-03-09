@@ -737,3 +737,50 @@ describe("verification display with failed tests", () => {
     expect(hasOracleError).toBe(true);
   });
 });
+
+describe("pending-confirmation display", () => {
+  it("shows confirmation prompt when step is pending-confirmation", () => {
+    const step = makePlanStep({ status: "pending-confirmation" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasAwaitingHeader = state.displayLines.some((l) => l.includes("Awaiting Confirmation"));
+    const hasPrompt = state.displayLines.some((l) => l.includes("Confirm this task is done?"));
+    const hasKeys = state.displayLines.some((l) => l.includes("y") && l.includes("confirm") || l.includes("n") && l.includes("reject"));
+    expect(hasAwaitingHeader).toBe(true);
+    expect(hasPrompt).toBe(true);
+    expect(hasKeys).toBe(true);
+  });
+
+  it("shows pending-confirmation status in status line", () => {
+    const step = makePlanStep({ status: "pending-confirmation" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasStatus = state.displayLines.some((l) => l.includes("pending-confirmation"));
+    expect(hasStatus).toBe(true);
+  });
+
+  it("does not show confirmation prompt for other statuses", () => {
+    const step = makePlanStep({ status: "in-progress" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    const hasAwaitingHeader = state.displayLines.some((l) => l.includes("Awaiting Confirmation"));
+    expect(hasAwaitingHeader).toBe(false);
+  });
+
+  it("shows pending-confirmation icon correctly", () => {
+    const step = makePlanStep({ status: "pending-confirmation" });
+    const plan = makePlan([step]);
+
+    const state = createPlanStepFocusState(step, plan, null, null, [], []);
+
+    // ✉ (U+2709) is the pending-confirmation icon
+    const hasIcon = state.displayLines.some((l) => l.includes("\u2709"));
+    expect(hasIcon).toBe(true);
+  });
+});
