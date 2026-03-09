@@ -445,6 +445,117 @@ The existing L3 ticket focus view already shows the linked spec content. Traceab
 | `g` | Show gaps only for selected use case |
 | `Esc` | Back to dashboard |
 
+## Component Model {#component-model}
+
+Panels are self-contained, reusable components. A component owns its rendering, state slice, scrolling, and keybindings — views compose components into layouts rather than owning panel logic directly.
+
+### Component Interface
+
+Each component implements:
+
+```typescript
+interface TuiComponent<S> {
+  /** Unique component id (used for focus routing) */
+  id: string;
+  /** Initialize default state */
+  init(): S;
+  /** Render into a panel rect on the screen buffer */
+  render(buf: ScreenBuffer, panel: Panel, state: S, focused: boolean): void;
+  /** Handle a keypress when focused. Returns true if handled. */
+  handleKey(key: string, state: S): { handled: boolean; state: S };
+}
+```
+
+### Focus Management
+
+Views declare which components are present and their tab order. `Tab` cycles focus between components. The focused component receives keypress events first. Global keys (Esc, ?, r) are handled before component dispatch.
+
+### Existing Panels as Components
+
+All existing panels migrate to components incrementally:
+- `ProjectsListComponent` — project list with selection/scrolling
+- `WorkQueueComponent` — priority-sorted cross-project work items
+- `AgentsListComponent` — running agents with state indicators
+- `TicketListComponent` — per-project ticket list grouped by status
+- `StackComponent` — stack info display
+- `SpecsComponent` — spec coverage for a project
+- `AgentOutputComponent` — scrollable streaming agent output
+- `ChatComponent` — agent chat (see below)
+
+Migration is incremental — new components can coexist with legacy monolithic panel functions.
+
+## Chat Panel {#chat-panel}
+
+A persistent chat pane for talking to agents without leaving the dashboard or project view.
+
+### Layout
+
+The chat panel sits in the right column, below the agents panel:
+
+**Dashboard (L1):**
+```
+┌─────────────────────┬──────────────┐
+│ Projects            │ Agents       │
+│                     │              │
+│─────────────────────│──────────────│
+│ Work Queue          │ Chat         │
+│                     │ agent: mtnmap│
+│                     │ > _          │
+└─────────────────────┴──────────────┘
+```
+
+**Project Detail (L2):**
+```
+┌─────────────────────┬──────────────┐
+│ Tickets             │ Agents       │
+│                     │──────────────│
+│                     │ Stack / Specs│
+│                     │──────────────│
+│                     │ Chat         │
+│                     │ > _          │
+└─────────────────────┴──────────────┘
+```
+
+### Behavior
+
+- **Agent binding**: Chat targets the currently selected agent in the agents panel above. Switching agent selection switches chat context.
+- **Message display**: Shows the last N messages exchanged with the bound agent (user prompts + agent text responses). Scrollable with `j/k` when focused.
+- **Input**: When focused, a prompt line appears at the bottom (`> _`). `Enter` sends. `Esc` unfocuses back to previous component.
+- **Delivery**: Messages sent via the existing agent prompt mechanism (stdin to backend process). Uses `prompt` delivery mode for idle agents, `steer` for streaming agents.
+- **No agent selected**: Shows "Select an agent to chat" placeholder.
+- **Agent stops**: Chat history persists. New messages show "Agent stopped — press `w` to restart."
+
+### Keybindings
+
+| Key | Context | Action |
+|-----|---------|--------|
+| `c` | Global (L1, L2) | Focus the chat panel |
+| `Enter` | Chat focused | Send message |
+| `Esc` | Chat focused | Unfocus, return to previous component |
+| `j/k` | Chat focused | Scroll chat history |
+| `G/g` | Chat focused | Jump to bottom/top of history |
+
+### Chat State
+
+```typescript
+interface ChatState {
+  /** Agent session ID currently bound to */
+  boundAgentId: string | null;
+  /** Chat history per agent (prompt + response pairs) */
+  history: Map<string, ChatMessage[]>;
+  /** Current input buffer */
+  input: string;
+  /** Scroll offset in history */
+  scrollOffset: number;
+}
+
+interface ChatMessage {
+  role: 'user' | 'agent';
+  text: string;
+  timestamp: number;
+}
+```
+
 ## State Updates
 
 - Git state: refreshed when entering project view, every 30s background poll
