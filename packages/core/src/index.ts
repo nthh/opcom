@@ -44,6 +44,8 @@ export {
   rolePath,
   summariesDir,
   summaryPath,
+  templatesDir,
+  templateDir,
 } from "./config/paths.js";
 export { loadRole, resolveRoleConfig, writeBuiltinRoles, BUILTIN_ROLES, parseRoleYaml } from "./config/roles.js";
 export {
@@ -298,6 +300,13 @@ export {
   defaultConfig as defaultOrchestratorConfig,
 } from "./orchestrator/persistence.js";
 export { plansDir, planPath, planContextPath } from "./config/paths.js";
+
+// Templates
+export { BUILTIN_TEMPLATES } from "./templates/builtins.js";
+export { substituteVariables } from "./templates/substitution.js";
+export { loadTemplateFromDir, loadUserTemplates, loadAllTemplates, findTemplate } from "./templates/loader.js";
+export { scaffoldFromTemplate } from "./templates/scaffold.js";
+export type { ScaffoldOptions, ScaffoldResult } from "./templates/scaffold.js";
 
 // Phase 3: Channel Adapters
 export { parseCommand, formatStatusResponse, formatProjectResponse, formatAgentsResponse, formatAgentCompletedResponse } from "./channels/router.js";

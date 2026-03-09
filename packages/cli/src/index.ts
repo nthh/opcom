@@ -34,6 +34,7 @@ import {
 } from "./commands/plan.js";
 import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js";
 import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
+import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -357,6 +358,27 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "templates":
+    case "template": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+        case undefined:
+          return runTemplatesList();
+        case "show":
+          if (!args[2]) {
+            console.error("  Usage: opcom templates show <id>");
+            process.exit(1);
+          }
+          return runTemplatesShow(args[2]);
+        default:
+          console.error("  Usage: opcom templates [list|show <id>]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "dev": {
       if (!args[1]) {
         console.error("  Usage: opcom dev <project> [service]");
@@ -506,6 +528,8 @@ function printHelp(): void {
     uc [ls]                      List use cases with readiness %
     uc show <id>                 Show use case with requirement status
     uc gaps <id>                 Show unmet requirements for a use case
+    templates [list]             Show available project templates
+    templates show <id>          Show template details
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help
