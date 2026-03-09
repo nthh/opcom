@@ -52,7 +52,7 @@ export interface ExecutorEvents {
 type EventHandler<T> = (data: T) => void;
 
 interface ExecutorEvent {
-  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "inject_context" | "advance_stage" | "verification_done";
+  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "retry" | "inject_context" | "advance_stage" | "verification_done";
   sessionId?: string;
   ticketId?: string;
   error?: string;
@@ -290,6 +290,13 @@ export class Executor {
    */
   skipStep(ticketId: string): void {
     this.pushEvent({ type: "skip", ticketId });
+  }
+
+  /**
+   * Retry a failed or needs-rebase step — reset to ready for a fresh attempt.
+   */
+  retryStep(ticketId: string): void {
+    this.pushEvent({ type: "retry", ticketId });
   }
 
   /**
@@ -551,6 +558,27 @@ export class Executor {
             step.worktreePath = undefined;
             step.worktreeBranch = undefined;
           }
+        }
+        await this.recomputeAndContinue();
+        break;
+      }
+
+      case "retry": {
+        const step = this.plan.steps.find((s) => s.ticketId === event.ticketId);
+        if (step && (step.status === "failed" || step.status === "needs-rebase")) {
+          step.status = "ready";
+          step.error = undefined;
+          step.completedAt = undefined;
+          step.agentSessionId = undefined;
+          step.verification = undefined;
+          step.previousVerification = undefined;
+          step.rebaseAttempts = 0;
+          // Keep worktree if it exists — agent can pick up where it left off
+          this.logPlanEvent("step_retry", {
+            stepTicketId: step.ticketId,
+            detail: { reason: "manual_retry", previousAttempt: step.attempt },
+          });
+          step.attempt = 1;
         }
         await this.recomputeAndContinue();
         break;

@@ -23,6 +23,7 @@ export type ClientCommand =
   | { type: "pause_plan"; planId: string }
   | { type: "resume_plan"; planId: string }
   | { type: "skip_step"; planId: string; ticketId: string }
+  | { type: "retry_step"; planId: string; ticketId: string }
   | { type: "inject_context"; planId: string; text: string }
   | { type: "run_hygiene" }
   // Changeset queries

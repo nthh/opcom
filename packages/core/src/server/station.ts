@@ -742,6 +742,16 @@ export class Station {
         break;
       }
 
+      case "retry_step": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.retryStep(command.ticketId);
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
       case "inject_context": {
         const executor = this.executors.get(command.planId);
         if (executor) {
