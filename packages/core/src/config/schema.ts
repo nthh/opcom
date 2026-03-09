@@ -57,6 +57,7 @@ export function validateProjectConfig(data: unknown): ProjectConfig {
     id: obj.id,
     name: typeof obj.name === "string" ? obj.name : obj.id,
     path: obj.path,
+    description: typeof obj.description === "string" ? obj.description : undefined,
     stack: (obj.stack as StackInfo) ?? emptyStack(),
     git: (obj.git as ProjectConfig["git"]) ?? null,
     workSystem: (obj.workSystem as ProjectConfig["workSystem"]) ?? null,

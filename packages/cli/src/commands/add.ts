@@ -10,11 +10,12 @@ import {
 import type { ProjectConfig, DetectionResult } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
 
-export function detectionToProjectConfig(result: DetectionResult): ProjectConfig {
+export function detectionToProjectConfig(result: DetectionResult, opts?: { description?: string }): ProjectConfig {
   return {
     id: result.name,
     name: result.name,
     path: result.path,
+    description: opts?.description,
     stack: result.stack,
     git: result.git,
     workSystem: result.workSystem,
