@@ -14,6 +14,7 @@ import {
   getPanelItemCount as getDashboardItemCount,
   getPlanStepsInDisplayOrder,
   DASHBOARD_PANEL_COUNT,
+  aggregateDeployStatus,
   type DashboardState,
   type DashboardWorkItem,
 } from "./views/dashboard.js";
@@ -126,6 +127,7 @@ import {
 import { loadGlobalConfig, saveGlobalConfig, defaultSettings } from "@opcom/core";
 import {
   getPipelineAtIndex,
+  getDeploymentAtIndex,
 } from "./views/cicd-pane.js";
 import {
   renderPipelineDetail,
@@ -136,6 +138,16 @@ import {
   scrollToBottom as pipelineScrollToBottom,
   type PipelineDetailState,
 } from "./views/pipeline-detail.js";
+import {
+  renderDeploymentDetail,
+  createDeploymentDetailState,
+  rebuildDisplayLines as rebuildDeploymentDisplayLines,
+  scrollUp as deploymentScrollUp,
+  scrollDown as deploymentScrollDown,
+  scrollToTop as deploymentScrollToTop,
+  scrollToBottom as deploymentScrollToBottom,
+  type DeploymentDetailState,
+} from "./views/deployment-detail.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -156,6 +168,7 @@ export class TuiApp {
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
   private settingsViewState: SettingsViewState | null = null;
   private pipelineDetailState: PipelineDetailState | null = null;
+  private deploymentDetailState: DeploymentDetailState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -291,6 +304,17 @@ export class TuiApp {
     }
     this.dashboardState.workItems = allWorkItems;
 
+    // Aggregate deploy status per project
+    const deployStatuses = new Map<string, import("./views/dashboard.js").DashboardDeployStatus>();
+    for (const project of this.client.projects) {
+      const deployments = this.client.projectDeployments.get(project.id) ?? [];
+      const status = aggregateDeployStatus(deployments, project.id);
+      if (status) {
+        deployStatuses.set(project.id, status);
+      }
+    }
+    this.dashboardState.deployStatuses = deployStatuses;
+
     // Sync plan state
     if (this.client.activePlan) {
       this.dashboardState.planPanel = { plan: this.client.activePlan };
@@ -342,6 +366,16 @@ export class TuiApp {
       const updated = pipelines.find((p) => p.id === this.pipelineDetailState!.pipeline.id);
       if (updated) {
         this.pipelineDetailState.pipeline = updated;
+      }
+    }
+
+    // Update deployment detail if active (real-time deploy status)
+    if (this.deploymentDetailState && this.focusedProjectId) {
+      const deployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
+      if (deployments.length !== this.deploymentDetailState.deployments.length ||
+          deployments.some((d, i) => d.status !== this.deploymentDetailState!.deployments[i]?.status)) {
+        this.deploymentDetailState.deployments = deployments;
+        rebuildDeploymentDisplayLines(this.deploymentDetailState, this.termSize.cols - 4);
       }
     }
 
@@ -459,6 +493,8 @@ export class TuiApp {
             renderSettingsView(this.buf, layout.panels[0], this.settingsViewState);
           } else if (this.pipelineDetailState) {
             renderPipelineDetail(this.buf, layout.panels[0], this.pipelineDetailState);
+          } else if (this.deploymentDetailState) {
+            renderDeploymentDetail(this.buf, layout.panels[0], this.deploymentDetailState);
           }
           break;
       }
@@ -502,7 +538,7 @@ export class TuiApp {
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
           keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:deploys  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
         }
         break;
       case 2:
@@ -634,6 +670,8 @@ export class TuiApp {
           this.handleSettingsViewInput(data);
         } else if (this.pipelineDetailState) {
           this.handlePipelineDetailInput(data);
+        } else if (this.deploymentDetailState) {
+          this.handleDeploymentDetailInput(data);
         }
         break;
     }
@@ -728,6 +766,10 @@ export class TuiApp {
 
       case "C":
         this.enterCreateTicketMode();
+        return;
+
+      case "d":
+        this.drillDownToDeployments();
         return;
 
       case "P": { // Create plan for selected project
@@ -1065,10 +1107,15 @@ export class TuiApp {
         this.navigateToCloudService(service);
       }
     } else if (panel === 5) {
-      // Drill into pipeline
+      // Drill into pipeline or deployment
       const pipeline = getPipelineAtIndex(state.pipelines, state.deployments, selected);
       if (pipeline) {
         this.navigateToPipeline(pipeline);
+      } else {
+        const deployment = getDeploymentAtIndex(state.pipelines, state.deployments, selected);
+        if (deployment) {
+          this.navigateToDeploymentDetail(deployment.environment);
+        }
       }
     }
   }
@@ -1879,6 +1926,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {
@@ -1910,6 +1958,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
 
     // Load ticket content async — guard against stale state if user navigated away
     const stateRef = this.ticketFocusState;
@@ -1941,6 +1990,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
   }
 
   private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
@@ -1977,6 +2027,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
   }
 
   // --- L3: Cloud Service Detail Input ---
@@ -2135,6 +2186,8 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.pipelineDetailState = null;
+      this.deploymentDetailState = null;
       this.scheduleRender();
     }).catch(() => {
       // Fallback: use defaults
@@ -2144,6 +2197,8 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.pipelineDetailState = null;
+      this.deploymentDetailState = null;
       this.scheduleRender();
     });
   }
@@ -2172,6 +2227,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
   }
 
   private navigateToPipeline(pipeline: Pipeline): void {
@@ -2189,6 +2245,72 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.deploymentDetailState = null;
+  }
+
+  private drillDownToDeployments(): void {
+    const state = this.dashboardState;
+    const selected = state.selectedIndex[0];
+    const project = state.projects[selected];
+    if (!project) return;
+
+    // Set focused project so navigateToDeploymentDetail can use it
+    this.focusedProjectId = project.id;
+    this.navigateToDeploymentDetail("all");
+  }
+
+  private navigateToDeploymentDetail(environment: string): void {
+    if (!this.focusedProjectId) return;
+
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId,
+    });
+
+    this.level = 3;
+    const projectName = this.client.projects.find((p) => p.id === this.focusedProjectId)?.name ?? "";
+    // Show all deployments for this project (full history across environments)
+    const allDeployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
+    this.deploymentDetailState = createDeploymentDetailState(allDeployments, projectName);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
+    this.pipelineDetailState = null;
+  }
+
+  private handleDeploymentDetailInput(data: string): void {
+    if (!this.deploymentDetailState) return;
+    const state = this.deploymentDetailState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 4;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        deploymentScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        deploymentScrollUp(state, 1);
+        return;
+
+      case "G":
+        deploymentScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        deploymentScrollToTop(state);
+        return;
+    }
   }
 
   private triggerMigration(): void {
@@ -2369,6 +2491,7 @@ export class TuiApp {
         this.cloudServiceDetailState = null;
         this.settingsViewState = null;
         this.pipelineDetailState = null;
+        this.deploymentDetailState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -2385,6 +2508,7 @@ export class TuiApp {
       this.cloudServiceDetailState = null;
       this.settingsViewState = null;
       this.pipelineDetailState = null;
+      this.deploymentDetailState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;
@@ -2447,6 +2571,7 @@ export function buildHelpLines(): string[] {
     "  f          Cycle project filter",
     "  F          Clear project filter",
     "  1-4        Filter by priority (0 to clear)",
+    "  d          Drill into deploy history",
     "  O          Open settings",
     "",
     bold("Level 2: Project Detail"),

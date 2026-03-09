@@ -34,6 +34,8 @@ import {
   listPlans,
   computePlan,
   savePlan,
+  CICDPoller,
+  GitHubActionsAdapter,
 } from "@opcom/core";
 import type { TicketSet } from "@opcom/core";
 
@@ -73,6 +75,9 @@ export class TuiClient {
   private eventStore: EventStore | null = null;
   private activeExecutorPlanId: string | null = null;
   private activeExecutor: { pause(): void; resume(): void } | null = null;
+
+  // CI/CD poller for direct mode (real-time deployment tracking)
+  private cicdPoller: CICDPoller | null = null;
 
   // File watchers for .tickets/ directories
   private ticketWatchers: FSWatcher[] = [];
@@ -265,8 +270,46 @@ export class TuiClient {
 
       // Watch .tickets/ dirs for changes so new tickets appear automatically
       this.watchTicketDirs();
+
+      // Start CI/CD polling for real-time deployment status updates
+      this.initCICDPoller().catch((err) => {
+        log.warn("CI/CD poller init failed", { error: String(err) });
+      });
     } catch (err) {
       log.error("loadDirect failed", { error: String(err) });
+    }
+  }
+
+  private async initCICDPoller(): Promise<void> {
+    const adapter = new GitHubActionsAdapter();
+    this.cicdPoller = new CICDPoller(adapter);
+
+    // Forward CI/CD events into the same handler pipeline as WebSocket events
+    this.cicdPoller.onEvent((projectId, event) => {
+      if (event.type === "pipeline_updated") {
+        this.handleServerEvent({ type: "pipeline_updated", projectId, pipeline: event.pipeline });
+      } else if (event.type === "deployment_updated") {
+        this.handleServerEvent({ type: "deployment_updated", projectId, deployment: event.deployment });
+      }
+    });
+
+    // Track all projects that have CI/CD configured
+    for (const [, project] of this.projectConfigs) {
+      try {
+        const hasCI = await adapter.detect(project);
+        if (hasCI) {
+          const state = await this.cicdPoller.track(project);
+          // Seed initial data into caches
+          if (state.pipelines.length > 0) {
+            this.projectPipelines.set(project.id, state.pipelines);
+          }
+          if (state.deployments.length > 0) {
+            this.projectDeployments.set(project.id, state.deployments);
+          }
+        }
+      } catch (err) {
+        log.warn("CI/CD tracking failed for project", { projectId: project.id, error: String(err) });
+      }
     }
   }
 
@@ -923,6 +966,10 @@ export class TuiClient {
         // Ignore
       }
       this.ws = null;
+    }
+    if (this.cicdPoller) {
+      this.cicdPoller.dispose();
+      this.cicdPoller = null;
     }
     if (this.localSessionManager) {
       this.localSessionManager.shutdown().catch(() => {});

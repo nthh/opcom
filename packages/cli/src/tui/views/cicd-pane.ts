@@ -166,8 +166,10 @@ export function formatPipelineLine(pipeline: Pipeline, maxWidth: number): string
 export function formatDeploymentLine(deployment: DeploymentStatus, maxWidth: number): string {
   const icon = deploymentStateIcon(deployment.status);
   const timeStr = dim(` ${formatTimeAgo(deployment.updatedAt)}`);
+  const commitStr = deployment.ref ? dim(` ${deployment.ref.slice(0, 7)}`) : "";
+  const liveLabel = deployment.status === "active" ? color(ANSI.green, " LIVE") : "";
 
-  const line = `  ${icon} ${deployment.environment}: ${deployment.status}${timeStr}`;
+  const line = `  ${icon} ${deployment.environment}: ${deployment.status}${liveLabel}${commitStr}${timeStr}`;
   return truncate(line, maxWidth);
 }
 
