@@ -31,6 +31,7 @@ import type { ProjectCICDState } from "../integrations/cicd-poller.js";
 import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
 import { KubernetesAdapter, computeInfraHealthSummary } from "../infra/kubernetes.js";
 import { detectInfrastructure } from "../infra/detect.js";
+import type { Disposable, InfraEvent } from "@opcom/types";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -62,10 +63,11 @@ export class Station {
   private projectStatuses = new Map<string, ProjectStatus>();
   private executors = new Map<string, Executor>(); // planId → running Executor
   private cicdPoller: CICDPoller | null = null;
+  private infraWatchers = new Map<string, Disposable>(); // projectId → watcher disposable
   private port: number;
-  private options?: { skipCICD?: boolean; skipReconcile?: boolean };
+  private options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean };
 
-  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean }) {
+  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean }) {
     this.port = port;
     this.options = options;
   }
@@ -94,6 +96,11 @@ export class Station {
     // Initialize CI/CD polling for GitHub Actions projects (skip in test)
     if (!this.options?.skipCICD) {
       await this.initCICDPoller();
+    }
+
+    // Initialize infrastructure watchers for K8s projects (skip in test)
+    if (!this.options?.skipInfra) {
+      await this.initInfraWatchers();
     }
 
     // Wire up session events to broadcast
@@ -156,6 +163,12 @@ export class Station {
       this.cicdPoller.dispose();
       this.cicdPoller = null;
     }
+
+    // Stop infrastructure watchers
+    for (const watcher of this.infraWatchers.values()) {
+      try { watcher.dispose(); } catch {}
+    }
+    this.infraWatchers.clear();
 
     // Stop all running executors
     for (const executor of this.executors.values()) {
@@ -923,6 +936,49 @@ export class Station {
         }
       } catch {
         // Skip projects where detection fails (no git remote, etc.)
+      }
+    }
+  }
+
+  private async initInfraWatchers(): Promise<void> {
+    const projects = await listProjects();
+    for (const project of projects) {
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) continue;
+
+        const adapter = adapters[0];
+        const watcher = adapter.watch(project, (event: InfraEvent) => {
+          switch (event.type) {
+            case "resource_updated":
+              this.broadcast({
+                type: "infra_resource_updated",
+                projectId: project.id,
+                resource: event.resource,
+              });
+              break;
+            case "resource_deleted":
+              this.broadcast({
+                type: "infra_resource_deleted",
+                projectId: project.id,
+                resourceId: event.resourceId,
+              });
+              break;
+            case "pod_crash":
+              this.broadcast({
+                type: "pod_crash",
+                projectId: project.id,
+                pod: event.pod,
+                container: event.container,
+                reason: event.reason,
+              });
+              break;
+          }
+        });
+
+        this.infraWatchers.set(project.id, watcher);
+      } catch {
+        // Skip projects where infra detection/watch fails
       }
     }
   }

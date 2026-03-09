@@ -115,7 +115,7 @@ export async function runInfra(
   projectName?: string,
   subcommand?: string,
   target?: string,
-  opts?: { follow?: boolean },
+  opts?: { follow?: boolean; container?: string },
 ): Promise<void> {
   if (!projectName) {
     // All projects mode — show health summary
@@ -185,17 +185,19 @@ export async function runInfra(
     const resourceId = target.includes("/") ? target : `${ns}/${target}`;
 
     if (opts?.follow) {
-      console.log(`\n  Streaming logs for ${target}...\n`);
+      console.log(`\n  Streaming logs for ${target}${opts.container ? ` (container: ${opts.container})` : ""}...\n`);
       for await (const line of adapter.streamLogs(project, resourceId, {
         follow: true,
         tailLines: 100,
+        container: opts.container,
       })) {
         console.log(`  ${line.timestamp}  ${line.text}`);
       }
     } else {
-      console.log(`\n  Logs for ${target}\n`);
+      console.log(`\n  Logs for ${target}${opts?.container ? ` (container: ${opts.container})` : ""}\n`);
       for await (const line of adapter.streamLogs(project, resourceId, {
         tailLines: 100,
+        container: opts?.container,
       })) {
         console.log(`  ${line.timestamp}  ${line.text}`);
       }

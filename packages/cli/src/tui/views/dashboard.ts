@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal, DeploymentStatus } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal, DeploymentStatus, InfraHealthSummary } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -281,7 +281,12 @@ export function formatProjectLine(
     cloudStr = ` ${formatCloudDots(project.cloudHealthSummary)}`;
   }
 
-  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}`;
+  let infraStr = "";
+  if (project.infraHealthSummary && project.infraHealthSummary.total > 0) {
+    infraStr = ` ${formatInfraDots(project.infraHealthSummary)} K8s`;
+  }
+
+  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}${infraStr}`;
   return truncate(line, maxWidth);
 }
 
@@ -304,6 +309,17 @@ function formatCloudDots(summary: import("@opcom/types").CloudHealthSummary): st
   for (let i = 0; i < summary.degraded; i++) dots.push(color(ANSI.yellow, "\u25d0"));
   for (let i = 0; i < summary.unreachable; i++) dots.push(color(ANSI.red, "\u25cb"));
   for (let i = 0; i < summary.unknown; i++) dots.push(dim("\u25cc"));
+  return dots.join("");
+}
+
+export function formatInfraDots(summary: InfraHealthSummary): string {
+  const dots: string[] = [];
+  for (let i = 0; i < summary.healthy; i++) dots.push(color(ANSI.green, "\u25cf"));     // ●
+  for (let i = 0; i < summary.progressing; i++) dots.push(color(ANSI.cyan, "\u25d0"));   // ◐
+  for (let i = 0; i < summary.degraded; i++) dots.push(color(ANSI.yellow, "\u25d0"));    // ◐
+  for (let i = 0; i < summary.unhealthy; i++) dots.push(color(ANSI.red, "\u25cb"));      // ○
+  for (let i = 0; i < summary.suspended; i++) dots.push(dim("\u2013"));                   // –
+  for (let i = 0; i < summary.unknown; i++) dots.push(dim("?"));
   return dots.join("");
 }
 

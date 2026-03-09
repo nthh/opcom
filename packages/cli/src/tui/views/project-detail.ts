@@ -10,6 +10,9 @@ import type {
   CloudServiceKind,
   Pipeline,
   DeploymentStatus,
+  InfraResource,
+  PodDetail,
+  ResourceStatus,
 } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import type { SpecCoverageItem } from "../health-data.js";
@@ -35,6 +38,13 @@ import {
   type ChatState,
 } from "../components/chat.js";
 
+export interface InfraCrashEvent {
+  pod: PodDetail;
+  container: string;
+  reason: string;
+  timestamp: string;
+}
+
 export interface ProjectDetailState {
   project: ProjectStatusSnapshot;
   projectConfig: ProjectConfig | null;
@@ -44,7 +54,9 @@ export interface ProjectDetailState {
   projectSpecs: SpecCoverageItem[];
   pipelines: Pipeline[];
   deployments: DeploymentStatus[];
-  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd, 6=chat
+  infraResources: InfraResource[];
+  infraCrashEvents: InfraCrashEvent[];
+  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd, 6=infra, 7=chat
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
   agentsComponent: AgentsListState; // component state for agents panel
@@ -64,9 +76,11 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     projectSpecs: [],
     pipelines: [],
     deployments: [],
+    infraResources: [],
+    infraCrashEvents: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0, 0, 0, 0, 0],
-    scrollOffset: [0, 0, 0, 0, 0, 0, 0],
+    selectedIndex: [0, 0, 0, 0, 0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0, 0, 0, 0, 0],
     agentsComponent,
     chatComponent: ChatComponent.init(),
   };
@@ -83,6 +97,7 @@ export function renderProjectDetail(
   const stackPanel = panels.find((p) => p.id === "stack");
   const cloudPanel = panels.find((p) => p.id === "cloud");
   const cicdPanel = panels.find((p) => p.id === "cicd");
+  const infraPanel = panels.find((p) => p.id === "infra");
   const chatPanel = panels.find((p) => p.id === "chat");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
@@ -94,7 +109,8 @@ export function renderProjectDetail(
     buf, cicdPanel, state.pipelines, state.deployments,
     state.selectedIndex[5] ?? 0, state.scrollOffset[5] ?? 0, state.focusedPanel === 5,
   );
-  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 6);
+  if (infraPanel) renderInfraPanel(buf, infraPanel, state, state.focusedPanel === 6);
+  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 7);
 }
 
 // --- Tickets Panel ---
@@ -578,6 +594,159 @@ function formatTimeAgo(iso: string): string {
   }
 }
 
+// --- Infrastructure Panel ---
+
+const INFRA_STATUS_ICONS: Record<ResourceStatus, string> = {
+  healthy: "\u25CF",      // ●
+  degraded: "\u25D0",     // ◐
+  unhealthy: "\u25CB",    // ○
+  progressing: "\u25CC",  // ◌
+  suspended: "\u2013",    // –
+  unknown: "?",
+};
+
+function infraStatusColor(status: ResourceStatus): string {
+  switch (status) {
+    case "healthy": return ANSI.green;
+    case "degraded": return ANSI.yellow;
+    case "unhealthy": return ANSI.red;
+    case "progressing": return ANSI.cyan;
+    case "suspended": return ANSI.dim;
+    case "unknown": return ANSI.dim;
+  }
+}
+
+/** Flat list of infra resources for navigation. */
+export function getInfraResourcesList(state: ProjectDetailState): InfraResource[] {
+  return state.infraResources;
+}
+
+function renderInfraPanel(
+  buf: ScreenBuffer,
+  panel: Panel,
+  state: ProjectDetailState,
+  focused: boolean,
+): void {
+  const count = state.infraResources.length;
+  const crashes = state.infraCrashEvents.length;
+  const crashSuffix = crashes > 0 ? ` ${color(ANSI.red, `${crashes} crash${crashes > 1 ? "es" : ""}`)}` : "";
+  const title = count > 0 ? `Infrastructure (${count})${crashSuffix}` : "Infrastructure";
+  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
+
+  const contentWidth = panel.width - 4;
+  const maxRows = panel.height - 2;
+  const selected = state.selectedIndex[6] ?? 0;
+  const scroll = state.scrollOffset[6] ?? 0;
+
+  if (state.infraResources.length === 0 && state.infraCrashEvents.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No infrastructure detected"), contentWidth);
+    return;
+  }
+
+  // Build display rows: crash alerts first, then resources grouped by kind
+  interface InfraDisplayRow {
+    type: "header" | "resource" | "crash";
+    text?: string;
+    resource?: InfraResource;
+    crash?: InfraCrashEvent;
+    resourceIndex?: number;
+  }
+
+  const rows: InfraDisplayRow[] = [];
+
+  // Show recent crashes at top
+  if (state.infraCrashEvents.length > 0) {
+    rows.push({ type: "header", text: "CRASH ALERTS" });
+    for (const crash of state.infraCrashEvents.slice(-5)) {
+      rows.push({ type: "crash", crash });
+    }
+  }
+
+  // Group resources by kind
+  const deployments = state.infraResources.filter((r) => r.kind === "deployment" || r.kind === "statefulset" || r.kind === "daemonset");
+  const services = state.infraResources.filter((r) => r.kind === "service");
+  const pods = state.infraResources.filter((r) => r.kind === "pod");
+  const ingresses = state.infraResources.filter((r) => r.kind === "ingress");
+
+  let resIdx = 0;
+  if (deployments.length > 0) {
+    rows.push({ type: "header", text: "DEPLOYMENTS" });
+    for (const r of deployments) {
+      rows.push({ type: "resource", resource: r, resourceIndex: resIdx++ });
+    }
+  }
+  if (services.length > 0) {
+    rows.push({ type: "header", text: "SERVICES" });
+    for (const r of services) {
+      rows.push({ type: "resource", resource: r, resourceIndex: resIdx++ });
+    }
+  }
+  if (ingresses.length > 0) {
+    rows.push({ type: "header", text: "INGRESSES" });
+    for (const r of ingresses) {
+      rows.push({ type: "resource", resource: r, resourceIndex: resIdx++ });
+    }
+  }
+  if (pods.length > 0) {
+    rows.push({ type: "header", text: "PODS" });
+    for (const r of pods) {
+      rows.push({ type: "resource", resource: r, resourceIndex: resIdx++ });
+    }
+  }
+
+  for (let i = 0; i < maxRows && i + scroll < rows.length; i++) {
+    const rowIdx = i + scroll;
+    const row = rows[rowIdx];
+    const y = panel.y + 1 + i;
+
+    if (row.type === "header") {
+      buf.writeLine(y, panel.x + 2, bold(row.text ?? ""), contentWidth);
+    } else if (row.type === "crash" && row.crash) {
+      const line = formatCrashLine(row.crash, contentWidth);
+      buf.writeLine(y, panel.x + 2, line, contentWidth);
+    } else if (row.type === "resource" && row.resource) {
+      const isSelected = row.resourceIndex === selected && focused;
+      const line = formatInfraResourceLine(row.resource, contentWidth);
+      if (isSelected) {
+        buf.writeLine(y, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
+      } else {
+        buf.writeLine(y, panel.x + 2, line, contentWidth);
+      }
+    }
+  }
+}
+
+function formatInfraResourceLine(resource: InfraResource, maxWidth: number): string {
+  const sColor = infraStatusColor(resource.status);
+  const icon = color(sColor, INFRA_STATUS_ICONS[resource.status]);
+  const name = resource.name;
+
+  let detail = "";
+  if (resource.replicas) {
+    detail = `${resource.replicas.ready}/${resource.replicas.desired} ready`;
+  }
+  if (resource.kind === "pod") {
+    const pod = resource as PodDetail;
+    const phase = pod.phase ?? "";
+    const restarts = pod.restarts !== undefined ? `${pod.restarts} restarts` : "";
+    detail = `${phase}  ${restarts}`.trim();
+  }
+  if (resource.kind === "service" && resource.endpoints?.[0]) {
+    const ep = resource.endpoints[0];
+    detail = `${ep.type} ${ep.address}:${ep.port}`;
+  }
+
+  const detailStr = detail ? `  ${dim(detail)}` : "";
+  const line = `  ${icon} ${name}${detailStr}`;
+  return truncate(line, maxWidth);
+}
+
+function formatCrashLine(crash: InfraCrashEvent, maxWidth: number): string {
+  const icon = color(ANSI.red, "\u25CB"); // ○
+  const line = `  ${icon} ${crash.pod.name} ${color(ANSI.red, crash.reason)} (${crash.container})`;
+  return truncate(line, maxWidth);
+}
+
 // --- Navigation helpers ---
 
 export function getTicketsList(state: ProjectDetailState): WorkItem[] {
@@ -598,13 +767,14 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
     case 3: return 0; // stack is not navigable
     case 4: return getCloudServicesList(state).length;
     case 5: return getCICDItemCount(state.pipelines, state.deployments);
-    case 6: return 0; // chat panel uses component scrolling, not index-based
+    case 6: return getInfraResourcesList(state).length;
+    case 7: return 0; // chat panel uses component scrolling, not index-based
     default: return 0;
   }
 }
 
 /** Total number of panels for Tab cycling. */
-export const PANEL_COUNT = 7;
+export const PANEL_COUNT = 8;
 
 export function clampSelection(state: ProjectDetailState): void {
   // Ensure arrays are large enough for all panels

@@ -315,7 +315,9 @@ async function main(): Promise<void> {
       const infraSub = args[2]; // pods, logs, restart
       const infraTarget = args[3]; // pod name or deployment name
       const infraFollow = args.includes("--follow") || args.includes("-f");
-      return runInfra(infraProject, infraSub, infraTarget, { follow: infraFollow });
+      const infraContainerIdx = args.findIndex(a => a === "--container" || a === "-c");
+      const infraContainer = infraContainerIdx >= 0 ? args[infraContainerIdx + 1] : undefined;
+      return runInfra(infraProject, infraSub, infraTarget, { follow: infraFollow, container: infraContainer });
     }
 
     case "scaffold": {
