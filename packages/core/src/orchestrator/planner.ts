@@ -209,9 +209,22 @@ export function recomputePlan(plan: Plan, ticketSets: TicketSet[]): Plan {
   }
 
   const updatedSteps = plan.steps.map((step) => {
-    // Preserve sticky statuses
+    // Preserve sticky statuses — return the SAME object reference so that
+    // fire-and-forget functions (handleWorktreeCompletion, runVerification)
+    // that hold a reference to the step can still mutate it in place.
+    // Spreading ({ ...step }) would create a detached copy, and any
+    // subsequent mutations by those async functions would be silently lost.
     if (isSticky(step.status)) {
-      return { ...step };
+      return step;
+    }
+
+    // Auto-skip steps whose tickets have been closed externally (e.g. merged
+    // by a different plan execution).  Without this, closed tickets stay
+    // "ready" and waste agent time re-implementing already-done work.
+    const ownTicket = ticketStates.get(step.ticketId);
+    if (ownTicket?.status === "closed") {
+      step.status = "skipped";
+      return step;
     }
 
     // Check if all blockers are resolved
