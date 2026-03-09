@@ -74,3 +74,11 @@ export function templatesDir(): string {
 export function templateDir(id: string): string {
   return join(templatesDir(), id);
 }
+
+export function stateDir(): string {
+  return join(opcomRoot(), "state");
+}
+
+export function stateFilePath(concern: "decisions" | "metrics" | "artifacts"): string {
+  return join(stateDir(), `${concern}.jsonl`);
+}

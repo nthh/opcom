@@ -11,6 +11,7 @@ import {
   projectPath,
   opcomRoot,
   summariesDir,
+  stateDir,
 } from "./paths.js";
 import { validateGlobalConfig, validateWorkspaceConfig, validateProjectConfig } from "./schema.js";
 
@@ -98,4 +99,5 @@ export async function ensureOpcomDirs(): Promise<void> {
   await mkdir(workspacesDir(), { recursive: true });
   await mkdir(projectsDir(), { recursive: true });
   await mkdir(summariesDir(), { recursive: true });
+  await mkdir(stateDir(), { recursive: true });
 }

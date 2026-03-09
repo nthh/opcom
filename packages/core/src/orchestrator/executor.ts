@@ -36,6 +36,7 @@ import { createLogger } from "../logger.js";
 import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
 import { runSmoke } from "./smoke-test.js";
 import { StallDetector } from "./stall-detector.js";
+import { StateStore } from "../state/state-store.js";
 
 const log = createLogger("executor");
 
@@ -82,12 +83,14 @@ export class Executor {
   private worktreeManager = new WorktreeManager();
   private stallDetector: StallDetector;
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private stateStore: StateStore;
 
-  constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
+  constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore, stateStore?: StateStore) {
     this.plan = plan;
     this.sessionManager = sessionManager;
     this.eventStore = eventStore ?? null;
     this.stallDetector = new StallDetector(plan.config.stall);
+    this.stateStore = stateStore ?? new StateStore();
   }
 
   getPlan(): Plan {
@@ -946,6 +949,9 @@ export class Executor {
       agentSessionId: event.sessionId,
       detail: { mode: "worktree", verification },
     });
+
+    // Write artifact entries for changeset
+    await this.writeStepArtifacts(step);
   }
 
   /**
@@ -1062,6 +1068,7 @@ export class Executor {
           agentSessionId: event.sessionId,
           detail: { mode: "worktree", rebase: "clean", verification: reVerification },
         });
+        await this.writeStepArtifacts(step);
         return true;
       }
 
@@ -1252,6 +1259,9 @@ export class Executor {
       agentSessionId: event.sessionId,
       detail: { verification: result },
     });
+
+    // Write state entries for verification
+    await this.writeVerificationState(step, result);
 
     return result;
   }
@@ -1476,6 +1486,144 @@ export class Executor {
         agentSessionId: event.sessionId,
         detail: { writes },
       });
+
+      // Write artifact entries for changeset
+      await this.writeStepArtifacts(step);
+    }
+  }
+
+  // --- State file writing helpers ---
+
+  /**
+   * Write decision + metric entries after verification.
+   */
+  private async writeVerificationState(step: PlanStep, result: VerificationResult): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      // Oracle decision
+      if (result.oracle) {
+        await this.stateStore.appendDecision({
+          timestamp: now,
+          planId: this.plan.id,
+          stepId: step.ticketId,
+          agent: "oracle",
+          decision: result.oracle.passed ? "Approved step implementation" : "Rejected step implementation",
+          rationale: result.oracle.criteria.map((c) => `${c.met ? "✓" : "✗"} ${c.criterion}: ${c.reasoning}`).join("; "),
+          confidence: result.oracle.passed ? 1.0 : 0.0,
+        });
+      }
+
+      // Test gate metrics
+      if (result.testGate) {
+        await this.stateStore.appendMetric({
+          timestamp: now,
+          planId: this.plan.id,
+          stepId: step.ticketId,
+          metric: "test_pass_rate",
+          value: result.testGate.totalTests > 0 ? result.testGate.passedTests / result.testGate.totalTests : 0,
+          detail: `${result.testGate.passedTests}/${result.testGate.totalTests} tests passed`,
+        });
+
+        await this.stateStore.appendMetric({
+          timestamp: now,
+          planId: this.plan.id,
+          stepId: step.ticketId,
+          metric: "test_duration_ms",
+          value: result.testGate.durationMs,
+        });
+      }
+
+      // Step attempt count
+      if (step.attempt) {
+        await this.stateStore.appendMetric({
+          timestamp: now,
+          planId: this.plan.id,
+          stepId: step.ticketId,
+          metric: "attempts",
+          value: step.attempt,
+        });
+      }
+    } catch (err) {
+      log.warn("failed to write verification state", { ticketId: step.ticketId, error: String(err) });
+    }
+  }
+
+  /**
+   * Write artifact entries for a completed step.
+   */
+  private async writeStepArtifacts(step: PlanStep): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      // Step duration metric
+      if (step.startedAt && step.completedAt) {
+        const durationMs = new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime();
+        await this.stateStore.appendMetric({
+          timestamp: now,
+          planId: this.plan.id,
+          stepId: step.ticketId,
+          metric: "step_duration_ms",
+          value: durationMs,
+        });
+      }
+
+      // Merge artifact
+      await this.stateStore.appendArtifact({
+        timestamp: now,
+        planId: this.plan.id,
+        stepId: step.ticketId,
+        type: "merge",
+        path: "main",
+        agent: "executor",
+      });
+    } catch (err) {
+      log.warn("failed to write step artifacts", { ticketId: step.ticketId, error: String(err) });
+    }
+  }
+
+  /**
+   * Write plan completion metrics.
+   */
+  private async writePlanCompletionState(): Promise<void> {
+    const now = new Date().toISOString();
+
+    try {
+      const done = this.plan.steps.filter((s) => s.status === "done").length;
+      const failed = this.plan.steps.filter((s) => s.status === "failed").length;
+      const skipped = this.plan.steps.filter((s) => s.status === "skipped").length;
+      const total = this.plan.steps.length;
+
+      await this.stateStore.appendMetric({
+        timestamp: now,
+        planId: this.plan.id,
+        metric: "plan_progress",
+        value: total > 0 ? done / total : 0,
+        detail: `${done}/${total} steps done, ${failed} failed, ${skipped} skipped`,
+      });
+
+      // Plan duration
+      if (this.plan.createdAt && this.plan.completedAt) {
+        const durationMs = new Date(this.plan.completedAt).getTime() - new Date(this.plan.createdAt).getTime();
+        await this.stateStore.appendMetric({
+          timestamp: now,
+          planId: this.plan.id,
+          metric: "plan_duration_ms",
+          value: durationMs,
+        });
+      }
+
+      // Decision: plan completed
+      await this.stateStore.appendDecision({
+        timestamp: now,
+        planId: this.plan.id,
+        agent: "executor",
+        decision: "Plan completed",
+        rationale: `${done}/${total} steps done, ${failed} failed, ${skipped} skipped`,
+        confidence: 1.0,
+      });
+    } catch (err) {
+      log.warn("failed to write plan completion state", { planId: this.plan.id, error: String(err) });
     }
   }
 
@@ -1518,6 +1666,10 @@ export class Executor {
           smokeTest: smokeResult ?? undefined,
         },
       });
+
+      // Write plan completion metrics
+      await this.writePlanCompletionState();
+
       this.running = false;
     }
 
