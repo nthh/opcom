@@ -45,6 +45,7 @@ export interface PlanStep {
   rebaseConflict?: RebaseConflict;       // set when agent needs to resolve merge conflicts
   verifyingPhase?: "testing" | "oracle"; // which verification sub-phase is active
   verifyingPhaseStartedAt?: string;      // ISO timestamp when current sub-phase started
+  stallSignal?: StallSignal;             // active stall warning (cleared when step progresses)
 }
 
 export interface RebaseConflict {
@@ -76,6 +77,7 @@ export interface OrchestratorConfig {
   ticketTransitions: boolean;
   autoCommit: boolean;
   verification: VerificationConfig;
+  stall: StallConfig;
   allowedBashPatterns?: string[];
   autoContinue?: boolean;
   stages?: string[][];
@@ -201,4 +203,24 @@ export interface IntegrationTestResult {
   buildOutput: string;
   testOutput: string;
   durationMs: number;
+}
+
+// --- Stall Detection Types ---
+
+export type StallSignalType = "long-running" | "repeated-failure" | "plan-stall" | "repeated-action";
+
+export interface StallSignal {
+  type: StallSignalType;
+  stepId?: string;
+  sessionId?: string;
+  message: string;
+  suggestion: string;
+  durationMs: number;
+}
+
+export interface StallConfig {
+  enabled: boolean;              // default true
+  agentTimeoutMs: number;        // default 20 * 60 * 1000 (20 min)
+  planStallTimeoutMs: number;    // default 30 * 60 * 1000 (30 min)
+  maxIdenticalFailures: number;  // default 2 — same error pattern = stall
 }

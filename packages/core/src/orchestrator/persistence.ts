@@ -19,6 +19,12 @@ export function defaultConfig(): OrchestratorConfig {
       maxRetries: 2,
       autoRebase: true,
     },
+    stall: {
+      enabled: true,
+      agentTimeoutMs: 20 * 60 * 1000,  // 20 minutes
+      planStallTimeoutMs: 30 * 60 * 1000, // 30 minutes
+      maxIdenticalFailures: 2,
+    },
   };
 }
 

@@ -64,6 +64,7 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
       ticketTransitions: true,
       autoCommit: true,
       verification: { runTests: true, runOracle: false },
+      stall: { enabled: true, agentTimeoutMs: 1200000, planStallTimeoutMs: 1800000, maxIdenticalFailures: 2 },
     },
     context: "",
     createdAt: "2026-03-01T00:00:00Z",
