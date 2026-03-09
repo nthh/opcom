@@ -9,6 +9,7 @@ import {
   getChatMessages,
   extractMessagesFromEvents,
   buildDisplayLines,
+  getDeliveryMode,
   type ChatState,
   type ChatMessage,
 } from "../../packages/cli/src/tui/components/chat.js";
@@ -650,5 +651,33 @@ describe("edge cases", () => {
     const panel = makePanel();
     ChatComponent.render(buf, panel, state, true);
     // Should not crash
+  });
+});
+
+// --- Delivery mode (prompt vs steer) ---
+
+describe("getDeliveryMode", () => {
+  it("returns 'prompt' for idle agent", () => {
+    const agents = [makeAgent({ id: "agent-1", state: "idle" })];
+    expect(getDeliveryMode(agents, "agent-1")).toBe("prompt");
+  });
+
+  it("returns 'steer' for streaming agent", () => {
+    const agents = [makeAgent({ id: "agent-1", state: "streaming" })];
+    expect(getDeliveryMode(agents, "agent-1")).toBe("steer");
+  });
+
+  it("returns 'prompt' for waiting agent", () => {
+    const agents = [makeAgent({ id: "agent-1", state: "waiting" })];
+    expect(getDeliveryMode(agents, "agent-1")).toBe("prompt");
+  });
+
+  it("returns 'prompt' when agent not found", () => {
+    expect(getDeliveryMode([], "agent-unknown")).toBe("prompt");
+  });
+
+  it("returns 'prompt' for stopped agent", () => {
+    const agents = [makeAgent({ id: "agent-1", state: "stopped" })];
+    expect(getDeliveryMode(agents, "agent-1")).toBe("prompt");
   });
 });

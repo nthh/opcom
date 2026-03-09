@@ -1,7 +1,7 @@
 // ChatComponent — Persistent chat panel for agent interaction
 // Follows TuiComponent interface. Used on dashboard (L1) and project-detail (L2).
 
-import type { AgentSession, NormalizedEvent } from "@opcom/types";
+import type { AgentSession, NormalizedEvent, DeliveryMode } from "@opcom/types";
 import type { TuiComponent } from "./types.js";
 import type { Panel } from "../layout.js";
 import {
@@ -85,6 +85,12 @@ export function extractMessagesFromEvents(events: NormalizedEvent[]): ChatMessag
   }
 
   return messages;
+}
+
+/** Determine delivery mode based on agent state: 'steer' for streaming agents, 'prompt' for idle. */
+export function getDeliveryMode(agents: AgentSession[], agentId: string): DeliveryMode {
+  const agent = agents.find((a) => a.id === agentId);
+  return agent?.state === "streaming" ? "steer" : "prompt";
 }
 
 /** Wrap text to fit within a given width, returning wrapped lines. */

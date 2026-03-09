@@ -26,6 +26,7 @@ import {
   ChatComponent,
   addChatMessage,
   extractMessagesFromEvents,
+  getDeliveryMode,
   type ChatMessage,
 } from "./components/chat.js";
 import {
@@ -1516,11 +1517,17 @@ export class TuiApp {
           timestamp: Date.now(),
         });
 
-        // Send to agent via prompt mechanism
+        // Determine delivery mode based on agent state: steer for streaming, prompt for idle
+        const agents = this.level === 2 && this.projectDetailState
+          ? this.projectDetailState.agents
+          : this.dashboardState.agents;
+        const delivery = getDeliveryMode(agents, agentId);
+
         this.client.send({
           type: "prompt",
           agentId,
           text,
+          delivery,
         });
 
         chatState.input = "";

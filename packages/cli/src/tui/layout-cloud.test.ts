@@ -11,10 +11,10 @@ describe("L2 layout with cloud panel", () => {
     expect(cloudPanel!.height).toBeGreaterThan(0);
   });
 
-  it("has 6 panels in L2", () => {
+  it("has 7 panels in L2", () => {
     const layout = getLayout(2, 120, 40);
-    expect(layout.panels).toHaveLength(6);
-    expect(layout.panels.map((p) => p.id)).toEqual(["tickets", "agents", "specs", "stack", "cloud", "cicd"]);
+    expect(layout.panels).toHaveLength(7);
+    expect(layout.panels.map((p) => p.id)).toEqual(["tickets", "agents", "specs", "stack", "cloud", "cicd", "chat"]);
   });
 
   it("cloud panel is positioned below stack panel", () => {
@@ -30,17 +30,18 @@ describe("L2 layout with cloud panel", () => {
   it("panels fill the right column height", () => {
     const layout = getLayout(2, 120, 40);
     const agentsPanel = layout.panels.find((p) => p.id === "agents")!;
-    const cicdPanel = layout.panels.find((p) => p.id === "cicd")!;
+    const chatPanel = layout.panels.find((p) => p.id === "chat")!;
     const usableRows = 40 - 1; // minus status bar
 
     expect(agentsPanel.y).toBe(0);
-    expect(cicdPanel.y + cicdPanel.height).toBe(usableRows);
+    expect(chatPanel.y + chatPanel.height).toBe(usableRows);
   });
 
-  it("L1 layout is unchanged (no cloud panel)", () => {
+  it("L1 layout has no cloud panel", () => {
     const layout = getLayout(1, 120, 40);
-    expect(layout.panels).toHaveLength(3);
-    expect(layout.panels.map((p) => p.id)).toEqual(["projects", "workqueue", "agents"]);
+    expect(layout.panels).toHaveLength(4);
+    expect(layout.panels.map((p) => p.id)).toEqual(["projects", "workqueue", "agents", "chat"]);
+    expect(layout.panels.find((p) => p.id === "cloud")).toBeUndefined();
   });
 
   it("L3 layout is unchanged (single focus panel)", () => {
