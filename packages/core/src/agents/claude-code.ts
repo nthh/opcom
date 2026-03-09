@@ -84,6 +84,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       }
     }
 
+    // Log spawn details for debugging agent startup failures
+    const sanitizedArgs = args.map((a, i) =>
+      i === args.indexOf("-p") + 1 ? `<prompt ${a.length} chars>` : a,
+    );
+    log.info("spawning claude", { sessionId, cwd, args: sanitizedArgs });
+
     const proc = spawn("claude", args, {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
@@ -142,8 +148,12 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       });
     }
 
-    // Read stderr and emit as error events
+    // Read stderr — collect full output to avoid losing data when process exits quickly
+    let stderrBuf = "";
     if (proc.stderr) {
+      proc.stderr.on("data", (chunk: Buffer) => {
+        stderrBuf += chunk.toString();
+      });
       const stderrRl = createInterface({ input: proc.stderr });
       stderrRl.on("line", (line) => {
         if (!line.trim()) return;
@@ -188,6 +198,23 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     // Handle process exit
     proc.on("close", (code) => {
       clearTimeout(stallTimer);
+      if (code !== 0) {
+        log.warn("claude exited with error", {
+          sessionId,
+          pid: proc.pid,
+          code,
+          stderr: stderrBuf.slice(0, 2000),
+        });
+        // Emit stderr as error event if not already captured by readline
+        if (stderrBuf.trim()) {
+          this.emitEvent(sessionId, {
+            type: "error",
+            sessionId,
+            timestamp: new Date().toISOString(),
+            data: { reason: `stderr: ${stderrBuf.trim().slice(0, 1000)}` },
+          });
+        }
+      }
       const r = this.processes.get(sessionId);
       if (r) {
         r.session.state = "stopped";
@@ -435,6 +462,9 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       case "result": {
         // Tool result — carry forward the tool name from the matching tool_start
         const result = obj.result as string | undefined;
+        if (obj.is_error) {
+          log.warn("claude result error", { sessionId, result: result?.slice(0, 500), subtype: (obj as Record<string, unknown>).subtype });
+        }
         const proc = this.processes.get(sessionId);
         const toolName = proc?.pendingToolNames.shift();
         events.push({

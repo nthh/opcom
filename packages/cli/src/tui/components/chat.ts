@@ -72,6 +72,20 @@ export function extractMessagesFromEvents(events: NormalizedEvent[]): ChatMessag
         });
       }
       currentText = "";
+    } else if (event.type === "error" && event.data?.reason) {
+      // Surface errors in the chat so they're visible
+      messages.push({
+        role: "agent",
+        text: `[error] ${event.data.reason}`,
+        timestamp: new Date(event.timestamp).getTime(),
+      });
+    } else if (event.type === "agent_end" && event.data?.reason && event.data.reason !== "completed") {
+      // Show non-zero exit codes
+      messages.push({
+        role: "agent",
+        text: `[agent exited] ${event.data.reason}`,
+        timestamp: new Date(event.timestamp).getTime(),
+      });
     }
   }
 
