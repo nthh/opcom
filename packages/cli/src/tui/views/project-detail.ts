@@ -30,6 +30,10 @@ import {
   getVisibleAgents,
   type AgentsListState,
 } from "../components/agents-list.js";
+import {
+  ChatComponent,
+  type ChatState,
+} from "../components/chat.js";
 
 export interface ProjectDetailState {
   project: ProjectStatusSnapshot;
@@ -40,10 +44,11 @@ export interface ProjectDetailState {
   projectSpecs: SpecCoverageItem[];
   pipelines: Pipeline[];
   deployments: DeploymentStatus[];
-  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd
+  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd, 6=chat
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
   agentsComponent: AgentsListState; // component state for agents panel
+  chatComponent: ChatState; // component state for chat panel
 }
 
 export function createProjectDetailState(project: ProjectStatusSnapshot): ProjectDetailState {
@@ -60,9 +65,10 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     pipelines: [],
     deployments: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0, 0, 0, 0],
-    scrollOffset: [0, 0, 0, 0, 0, 0],
+    selectedIndex: [0, 0, 0, 0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0, 0, 0, 0],
     agentsComponent,
+    chatComponent: ChatComponent.init(),
   };
 }
 
@@ -77,6 +83,7 @@ export function renderProjectDetail(
   const stackPanel = panels.find((p) => p.id === "stack");
   const cloudPanel = panels.find((p) => p.id === "cloud");
   const cicdPanel = panels.find((p) => p.id === "cicd");
+  const chatPanel = panels.find((p) => p.id === "chat");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
   if (agentsPanel) AgentsListComponent.render(buf, agentsPanel, state.agentsComponent, state.focusedPanel === 1);
@@ -87,6 +94,7 @@ export function renderProjectDetail(
     buf, cicdPanel, state.pipelines, state.deployments,
     state.selectedIndex[5] ?? 0, state.scrollOffset[5] ?? 0, state.focusedPanel === 5,
   );
+  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 6);
 }
 
 // --- Tickets Panel ---
@@ -590,12 +598,13 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
     case 3: return 0; // stack is not navigable
     case 4: return getCloudServicesList(state).length;
     case 5: return getCICDItemCount(state.pipelines, state.deployments);
+    case 6: return 0; // chat panel uses component scrolling, not index-based
     default: return 0;
   }
 }
 
 /** Total number of panels for Tab cycling. */
-export const PANEL_COUNT = 6;
+export const PANEL_COUNT = 7;
 
 export function clampSelection(state: ProjectDetailState): void {
   // Ensure arrays are large enough for all panels

@@ -20,6 +20,10 @@ import {
   formatDuration,
   type AgentsListState,
 } from "../components/agents-list.js";
+import {
+  ChatComponent,
+  type ChatState,
+} from "../components/chat.js";
 
 // Re-export agent helpers for backward compatibility
 export { sortAgents, getPlanStepForAgent, getAgentSortTier };
@@ -38,7 +42,7 @@ export interface DashboardState {
   projects: ProjectStatusSnapshot[];
   agents: AgentSession[];
   workItems: DashboardWorkItem[];
-  focusedPanel: number; // 0=projects, 1=workqueue, 2=agents
+  focusedPanel: number; // 0=projects, 1=workqueue, 2=agents, 3=chat
   selectedIndex: number[]; // selected item per panel
   scrollOffset: number[]; // scroll offset per panel
   priorityFilter: number | null; // null = all, 0-4 = filter
@@ -46,7 +50,11 @@ export interface DashboardState {
   searchQuery: string;
   planPanel: PlanPanelState | null; // non-null when plan is active
   agentsComponent: AgentsListState; // component state for agents panel
+  chatComponent: ChatState; // component state for chat panel
 }
+
+/** Total number of panels in dashboard for Tab cycling. */
+export const DASHBOARD_PANEL_COUNT = 4;
 
 export function createDashboardState(): DashboardState {
   return {
@@ -54,13 +62,14 @@ export function createDashboardState(): DashboardState {
     agents: [],
     workItems: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0],
-    scrollOffset: [0, 0, 0],
+    selectedIndex: [0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0],
     priorityFilter: null,
     projectFilter: null,
     searchQuery: "",
     planPanel: null,
     agentsComponent: AgentsListComponent.init(),
+    chatComponent: ChatComponent.init(),
   };
 }
 
@@ -72,6 +81,7 @@ export function renderDashboard(
   const projectsPanel = panels.find((p) => p.id === "projects");
   const workqueuePanel = panels.find((p) => p.id === "workqueue");
   const agentsPanel = panels.find((p) => p.id === "agents");
+  const chatPanel = panels.find((p) => p.id === "chat");
 
   if (projectsPanel) renderProjectsPanel(buf, projectsPanel, state, state.focusedPanel === 0);
   if (workqueuePanel) {
@@ -82,6 +92,7 @@ export function renderDashboard(
     }
   }
   if (agentsPanel) AgentsListComponent.render(buf, agentsPanel, state.agentsComponent, state.focusedPanel === 2);
+  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 3);
 }
 
 function renderProjectsPanel(
@@ -405,6 +416,7 @@ export function getPanelItemCount(state: DashboardState, panelIndex: number): nu
       if (state.planPanel) return state.planPanel.plan.steps.length;
       return getFilteredWorkItems(state).length;
     case 2: return state.agents.length;
+    case 3: return 0; // chat panel uses component scrolling, not index-based
     default: return 0;
   }
 }
@@ -428,7 +440,7 @@ export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
 }
 
 export function clampSelection(state: DashboardState): void {
-  for (let p = 0; p < 3; p++) {
+  for (let p = 0; p < DASHBOARD_PANEL_COUNT; p++) {
     const count = getPanelItemCount(state, p);
     if (count === 0) {
       state.selectedIndex[p] = 0;

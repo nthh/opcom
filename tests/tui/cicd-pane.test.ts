@@ -370,9 +370,9 @@ describe("renderCICDPanel", () => {
 // --- Project detail CI/CD panel integration ---
 
 describe("project detail CI/CD integration", () => {
-  it("includes CI/CD panel count of 6", async () => {
+  it("includes CI/CD panel count of 7", async () => {
     const { PANEL_COUNT } = await import("../../packages/cli/src/tui/views/project-detail.js");
-    expect(PANEL_COUNT).toBe(6);
+    expect(PANEL_COUNT).toBe(7);
   });
 
   it("creates state with empty CI/CD data", async () => {
@@ -386,8 +386,8 @@ describe("project detail CI/CD integration", () => {
     });
     expect(state.pipelines).toEqual([]);
     expect(state.deployments).toEqual([]);
-    expect(state.selectedIndex).toHaveLength(6);
-    expect(state.scrollOffset).toHaveLength(6);
+    expect(state.selectedIndex).toHaveLength(7);
+    expect(state.scrollOffset).toHaveLength(7);
   });
 
   it("getPanelItemCount returns CI/CD item count for panel 5", async () => {
