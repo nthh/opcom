@@ -167,6 +167,14 @@ vi.mock("../../packages/core/src/graph/graph-service.js", () => ({
   ingestTestResults: vi.fn(),
 }));
 
+const mockUpdateProjectSummary = vi.fn(async () => {});
+vi.mock("../../packages/core/src/config/summary.js", () => ({
+  readProjectSummary: vi.fn(async () => null),
+  writeProjectSummary: vi.fn(async () => {}),
+  updateProjectSummary: (...args: unknown[]) => mockUpdateProjectSummary(...args),
+  createInitialSummaryFromDescription: vi.fn(() => ""),
+}));
+
 // Mock smoke test — this is the key mock for these tests
 const mockRunSmoke = vi.fn<[], Promise<IntegrationTestResult>>();
 vi.mock("../../packages/core/src/orchestrator/smoke-test.js", () => ({
@@ -576,6 +584,74 @@ describe("Executor smoke tests — non-staged plans", () => {
     expect(mockRunSmoke).toHaveBeenCalled();
     expect(currentPlan.smokeTestResult).toBeDefined();
     expect(currentPlan.smokeTestResult!.passed).toBe(true);
+
+    executor.stop();
+    await runPromise;
+  });
+});
+
+describe("Executor — project summary updates", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    mockSM = new MockSessionManager();
+    vi.clearAllMocks();
+    mockHasCommits.mockResolvedValue(true);
+    mockMerge.mockResolvedValue({ merged: true, conflict: false });
+  });
+
+  it("calls updateProjectSummary after step completion", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    const sessionId = plan.steps[0].agentSessionId!;
+    mockSM.simulateWrite(sessionId);
+    mockSM.simulateCompletion(sessionId);
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(mockUpdateProjectSummary).toHaveBeenCalledWith(
+      "p",
+      "p",
+      expect.objectContaining({
+        completedTicketId: "t1",
+      }),
+    );
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("calls updateProjectSummary for each step in multi-step plan", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+      { ticketId: "t2", projectId: "p", status: "ready", blockedBy: [] },
+    ], { maxConcurrentAgents: 2 });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await new Promise((r) => setTimeout(r, 50));
+
+    for (const step of plan.steps) {
+      const sid = step.agentSessionId!;
+      mockSM.simulateWrite(sid);
+      mockSM.simulateCompletion(sid);
+    }
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(mockUpdateProjectSummary).toHaveBeenCalledTimes(2);
+    expect(mockUpdateProjectSummary).toHaveBeenCalledWith(
+      "p", "p", expect.objectContaining({ completedTicketId: "t1" }),
+    );
+    expect(mockUpdateProjectSummary).toHaveBeenCalledWith(
+      "p", "p", expect.objectContaining({ completedTicketId: "t2" }),
+    );
 
     executor.stop();
     await runPromise;

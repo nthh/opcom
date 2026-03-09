@@ -153,6 +153,48 @@ describe("project summary", () => {
     expect(summary).not.toContain("## About");
   });
 
+  it("full lifecycle: init creates summary, update appends, result is human-readable markdown", async () => {
+    const { writeProjectSummary, updateProjectSummary, readProjectSummary, createInitialSummaryFromDescription, ensureOpcomDirs } = await import("@opcom/core");
+    await ensureOpcomDirs();
+
+    // 1. opcom init creates initial summary from description
+    const initial = createInitialSummaryFromDescription("MyApp", "A REST API for managing tasks");
+    await writeProjectSummary("lifecycle", initial);
+
+    const afterInit = await readProjectSummary("lifecycle");
+    expect(afterInit).not.toBeNull();
+    expect(afterInit).toContain("# MyApp — Project Summary");
+    expect(afterInit).toContain("## About");
+    expect(afterInit).toContain("A REST API for managing tasks");
+    expect(afterInit).toContain("## Recent Completions");
+    expect(afterInit).toContain("(none yet)");
+
+    // 2. Step completion updates the summary
+    await updateProjectSummary("lifecycle", "MyApp", {
+      completedTicketId: "add-auth",
+      completedTicketTitle: "Add authentication",
+      detail: "JWT-based auth with refresh tokens",
+    });
+
+    const afterUpdate = await readProjectSummary("lifecycle");
+    expect(afterUpdate).toContain("add-auth: Add authentication");
+    expect(afterUpdate).toContain("JWT-based auth with refresh tokens");
+    // "(none yet)" should be replaced
+    const recentIdx = afterUpdate!.indexOf("## Recent Completions");
+    const keyDecIdx = afterUpdate!.indexOf("## Key Decisions");
+    const recentSection = afterUpdate!.slice(recentIdx, keyDecIdx);
+    expect(recentSection).not.toContain("(none yet)");
+
+    // 3. Human-readable: valid markdown with expected sections
+    expect(afterUpdate).toContain("## Current State");
+    expect(afterUpdate).toContain("## Recent Completions");
+    expect(afterUpdate).toContain("## Key Decisions");
+    expect(afterUpdate).toContain("## Open Questions");
+    // Sections use standard markdown headers
+    const headers = afterUpdate!.match(/^## .+$/gm);
+    expect(headers!.length).toBeGreaterThanOrEqual(4);
+  });
+
   it("updateProjectSummary trims to 20 completions", async () => {
     const { writeProjectSummary, updateProjectSummary, readProjectSummary, ensureOpcomDirs } = await import("@opcom/core");
     await ensureOpcomDirs();
