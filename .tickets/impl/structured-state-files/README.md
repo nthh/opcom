@@ -1,7 +1,7 @@
 ---
 id: structured-state-files
 title: "Separate JSONL state files by concern (decisions, metrics, artifacts)"
-status: open
+status: closed
 type: feature
 priority: 3
 deps: []
