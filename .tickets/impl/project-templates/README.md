@@ -1,7 +1,7 @@
 ---
 id: project-templates
 title: "Project templates for opcom init scaffolding"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
