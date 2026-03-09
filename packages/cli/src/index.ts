@@ -35,6 +35,7 @@ import {
 import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js";
 import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
 import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
+import { runImportCalendar, runImportPaste } from "./commands/import.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -446,6 +447,37 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "import": {
+      const importSub = args[1];
+      switch (importSub) {
+        case "calendar": {
+          if (!args[2]) {
+            console.error("  Usage: opcom import calendar <file.ics> [--project <id>]");
+            process.exit(1);
+          }
+          let importProject: string | undefined;
+          for (let i = 3; i < args.length; i++) {
+            if (args[i] === "--project" && args[i + 1]) { importProject = args[++i]; }
+          }
+          return runImportCalendar(args[2], importProject);
+        }
+        case "paste": {
+          let pasteProject: string | undefined;
+          for (let i = 2; i < args.length; i++) {
+            if (args[i] === "--project" && args[i + 1]) { pasteProject = args[++i]; }
+          }
+          return runImportPaste(pasteProject);
+        }
+        default:
+          console.error("  Usage: opcom import <subcommand>");
+          console.error("  Subcommands:");
+          console.error("    calendar <file.ics>   Import events from an iCal file");
+          console.error("    paste                 Import events from pasted text");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -530,6 +562,8 @@ function printHelp(): void {
     uc gaps <id>                 Show unmet requirements for a use case
     templates [list]             Show available project templates
     templates show <id>          Show template details
+    import calendar <file.ics>   Import events from an iCal file
+    import paste                 Import events from pasted text
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help

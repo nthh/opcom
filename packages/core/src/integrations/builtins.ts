@@ -22,6 +22,7 @@ export const builtinModules: IntegrationModule[] = [
   stub("tickets", "work-sources", "Tickets Dir", "Read work items from .tickets/ directories"),
   stub("github-issues", "work-sources", "GitHub Issues", "Sync work items from GitHub Issues"),
   stub("jira", "work-sources", "Jira", "Sync work items from Jira"),
+  stub("calendar", "work-sources", "Calendar", "Import events from iCal files as work items"),
 
   // Notifications
   stub("desktop", "notifications", "Desktop Notifications", "macOS native notifications"),

@@ -7,6 +7,8 @@ export interface WorkItem {
   filePath: string;
   parent?: string;
   created?: string;
+  due?: string;
+  scheduled?: string;
   deps: string[];
   links: string[];
   tags: Record<string, string[]>;
@@ -28,6 +30,8 @@ export interface TicketFrontmatter {
   type?: string;
   priority?: number;
   created?: string;
+  due?: string;
+  scheduled?: string;
   milestone?: string;
   services?: string[];
   domains?: string[];

@@ -80,11 +80,16 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     filePath,
     parent: typeof frontmatter.milestone === "string" ? frontmatter.milestone : undefined,
     created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,
+    due: typeof frontmatter.due === "string" ? frontmatter.due : undefined,
+    scheduled: typeof frontmatter.scheduled === "string" ? frontmatter.scheduled : undefined,
     deps: Array.isArray(frontmatter.deps) ? frontmatter.deps.map(String) : [],
     links: Array.isArray(frontmatter.links) ? frontmatter.links.map(String) : [],
     tags: {
       ...(Array.isArray(frontmatter.services) ? { services: frontmatter.services.map(String) } : {}),
       ...(Array.isArray(frontmatter.domains) ? { domains: frontmatter.domains.map(String) } : {}),
+      ...(Array.isArray(frontmatter.source) ? { source: frontmatter.source.map(String) } : {}),
+      ...(Array.isArray(frontmatter.location) ? { location: frontmatter.location.map(String) } : {}),
+      ...(Array.isArray(frontmatter.category) ? { category: frontmatter.category.map(String) } : {}),
     },
     role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
   };
