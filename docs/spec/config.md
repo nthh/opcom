@@ -35,11 +35,48 @@ createdAt: "2026-02-27T00:00:00Z"
 
 Stores cached detection results plus user overrides. Re-populated on `opcom scan`.
 
+### Required Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique project identifier |
+| `name` | string | Display name |
+| `path` | string | Absolute path to the project directory |
+| `lastScannedAt` | ISO 8601 | When detection last ran |
+
+### Optional Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `description` | string | Freeform text describing what the project is about. Primary context for non-code projects; supplemental context for code projects. |
+| `stack` | StackInfo | Detected languages, frameworks, package managers, infrastructure, version managers |
+| `git` | object | Remote, branch, clean status |
+| `workSystem` | object | Work tracking system (trk, GitHub issues, etc.) |
+| `services` | Service[] | Runnable services with commands and ports |
+| `testing` | object | Test framework, command, test directory |
+| `linting` | Linter[] | Configured linters |
+| `environments` | object | Environment definitions (dev, staging, prod) |
+| `subProjects` | SubProject[] | Nested projects within a monorepo |
+| `cloudServices` | object | Cloud service configurations (databases, storage, serverless, hosting) |
+
+All optional fields default to absent. A valid project config needs only the four required fields.
+
+### Hybrid Projects
+
+There is no `kind` or `type` field on ProjectConfig. Projects are hybrid by default — a project can have detected code (stack, testing, linting), operational tasks (workSystem, description), or both. The presence of `stack` info reflects what detection found in the directory, not a categorization of the project.
+
+A project with no `stack` is still a fully valid project. It might be a planning effort, an ops runbook collection, a design project, or anything else that benefits from task tracking and agent orchestration. The `description` field carries the context that `stack` carries for code projects.
+
+### Examples
+
+Code project (detected stack, services, testing):
+
 ```yaml
 id: folia
 name: folia
 path: /Users/nathan/projects/folia
 lastScannedAt: "2026-02-27T00:00:00Z"
+description: "Multi-service app with FastAPI backend and TypeScript frontend, deployed on Vultr K8s"
 
 stack:
   languages:
@@ -90,4 +127,18 @@ linting:
     sourceFile: pyproject.toml
   - name: mypy
     sourceFile: pyproject.toml
+```
+
+Non-code project (no stack, description carries context):
+
+```yaml
+id: q2-launch
+name: "Q2 product launch"
+path: /Users/nathan/projects/q2-launch
+lastScannedAt: "2026-03-01T00:00:00Z"
+description: "Coordinate the Q2 product launch across marketing, docs, and eng. Track deliverables, review copy, manage timeline."
+
+workSystem:
+  type: trk
+  ticketDir: .tickets/impl
 ```

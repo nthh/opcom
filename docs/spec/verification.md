@@ -641,6 +641,118 @@ step_verify_phase: { stepTicketId, phase: "testing" | "oracle", startedAt }
 
 The TUI subscribes to these events to update the display in real time, rather than polling step state.
 
+## Per-Work-Item Verification Mode
+
+The plan-level `verification` config applies uniformly to all steps. But not all work items are code tasks — a plan might include operational tasks (book a venue, coordinate with a vendor, draft a document) alongside code tasks. Requiring test-gate + oracle for a booking confirmation is wrong; requiring only human confirmation for a code refactor is also wrong.
+
+Per-work-item verification mode lets each work item declare how it should be verified, overriding the plan-level default.
+
+### Verification Modes
+
+```typescript
+type VerificationMode = "test-gate" | "oracle" | "confirmation" | "output-exists" | "none";
+```
+
+| Mode | What it does | Typical use |
+|------|-------------|-------------|
+| `test-gate` | Run full project test suite, then oracle if enabled | Code changes (default for code projects) |
+| `oracle` | LLM checks output against acceptance criteria, no test suite | Spec writing, documentation, config changes |
+| `confirmation` | Human confirms the task is done via TUI prompt | Real-world tasks: bookings, coordination, purchases |
+| `output-exists` | Verify the agent produced an expected artifact or document | Report generation, file creation tasks |
+| `none` | No verification — mark done immediately on agent exit | Trivial or self-evident tasks |
+
+### Work Item Declaration
+
+Work items specify their verification mode via the `verification` field in frontmatter:
+
+```yaml
+---
+title: Book venue for offsite
+status: open
+verification: confirmation
+---
+```
+
+If `verification` is not specified, the work item inherits the plan-level config (which defaults to `test-gate` + `oracle` for code projects).
+
+### TicketFrontmatter Addition
+
+```typescript
+export interface TicketFrontmatter {
+  // ... existing fields ...
+  verification?: VerificationMode;
+}
+```
+
+The ticket scanner parses `verification` from frontmatter and stores it on `WorkItem.verification`.
+
+### Executor Routing
+
+The executor checks `workItem.verification` before running the verification pipeline and routes accordingly:
+
+```typescript
+// In handleWorktreeCompletion, determine verification behavior:
+const mode = step.verification ?? this.plan.config.verification;
+
+switch (mode) {
+  case "test-gate":
+    // Run full test suite → oracle (if enabled) → standard pipeline
+    break;
+  case "oracle":
+    // Skip test suite, run oracle only against acceptance criteria
+    break;
+  case "confirmation":
+    // Enter pending-confirmation status, wait for human input
+    step.status = "pending-confirmation";
+    await savePlan(this.plan);
+    this.emit("plan_updated", { plan: this.plan });
+    return;  // TUI will resolve this
+  case "output-exists":
+    // Check that expected artifact exists (path from acceptance criteria)
+    break;
+  case "none":
+    // Skip verification entirely, mark done
+    step.status = "done";
+    break;
+}
+```
+
+When a step has `verification: "test-gate"`, the executor runs the standard pipeline (test gate → oracle). When mode is `"oracle"`, it skips the test gate and runs only the oracle evaluation. When mode is `"confirmation"`, the step enters `"pending-confirmation"` status — neither done nor failed — and waits for the user.
+
+### Confirmation Mode
+
+For `confirmation` mode, the step enters `"pending-confirmation"` status after the agent exits. The TUI shows a prompt for the user to confirm:
+
+```
+◎ pending-confirmation — Book venue for offsite
+  Agent completed. Confirm this task is done? [y/n]
+```
+
+The user reviews the agent's output (or the real-world state) and confirms or rejects. On confirmation, the step moves to `"done"`. On rejection, the step moves to `"failed"` with a user-provided reason.
+
+### Output-Exists Mode
+
+For `output-exists` mode, the executor checks that the agent produced an expected artifact. The expected artifact path is derived from the ticket's acceptance criteria (e.g., `Output: docs/report.md`). If the file exists and is non-empty, verification passes. If not, the step fails with a structured error.
+
+### Step State Addition
+
+```typescript
+interface PlanStep {
+  // ... existing fields ...
+  verification?: VerificationMode;  // per-step override from work item frontmatter
+}
+```
+
+### Default Behavior
+
+The resolution order for verification mode:
+
+1. **Work item frontmatter** `verification` field — highest priority
+2. **Plan-level config** `verification` section — project-wide default
+3. **Built-in default** — `test-gate` (with oracle if `runOracle` is true)
+
+This means existing plans with no per-item `verification` fields behave exactly as they do today. The feature is purely additive.
+
 ## Non-Goals
 
 - **Unbounded retries** — max 2 retries by default, configurable but always finite
