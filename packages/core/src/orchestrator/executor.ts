@@ -29,6 +29,7 @@ import { commitStepChanges, captureChangeset } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
 import { collectOracleInputs, formatOraclePrompt, parseOracleResponse } from "../skills/oracle.js";
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
+import { updateProjectSummary } from "../config/summary.js";
 import { createLogger } from "../logger.js";
 import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
 import { runSmoke } from "./smoke-test.js";
@@ -638,6 +639,7 @@ export class Executor {
             await this.updateTicketStatusSafe(step, "closed");
           }
 
+          await this.updateSummary(step);
           log.info("zero-commit oracle passed — step done (already implemented)", { ticketId: step.ticketId });
           this.emit("step_completed", { step });
           this.logPlanEvent("step_completed", {
@@ -854,6 +856,9 @@ export class Executor {
       await this.updateTicketStatusSafe(step, "closed");
     }
 
+    // Update project summary with completion info
+    await this.updateSummary(step);
+
     this.emit("step_completed", { step });
     this.logPlanEvent("step_completed", {
       stepTicketId: step.ticketId,
@@ -966,6 +971,7 @@ export class Executor {
           await this.updateTicketStatusSafe(step, "closed");
         }
 
+        await this.updateSummary(step);
         this.emit("step_completed", { step });
         this.logPlanEvent("step_completed", {
           stepTicketId: step.ticketId,
@@ -1377,6 +1383,7 @@ export class Executor {
         }
       }
 
+      await this.updateSummary(step);
       this.emit("step_completed", { step });
       this.logPlanEvent("step_completed", {
         stepTicketId: step.ticketId,
@@ -1858,6 +1865,21 @@ export class Executor {
     step.verifyingPhaseStartedAt = undefined;
     if (this.plan.config.ticketTransitions) {
       await this.updateTicketStatusSafe(step, "open");
+    }
+  }
+
+  private async updateSummary(step: PlanStep): Promise<void> {
+    try {
+      const project = await loadProject(step.projectId);
+      if (!project) return;
+      const tickets = this.ticketCache.get(step.projectId);
+      const ticket = tickets?.find((t) => t.id === step.ticketId);
+      await updateProjectSummary(step.projectId, project.name, {
+        completedTicketId: step.ticketId,
+        completedTicketTitle: ticket?.title ?? step.ticketId,
+      });
+    } catch (err) {
+      log.warn("failed to update project summary", { ticketId: step.ticketId, error: String(err) });
     }
   }
 

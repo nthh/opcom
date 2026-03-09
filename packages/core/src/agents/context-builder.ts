@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
+import { readProjectSummary } from "../config/summary.js";
 
 export async function buildContextPacket(
   project: ProjectConfig,
@@ -108,6 +109,16 @@ export async function buildContextPacket(
     }
   }
 
+  // Load project summary
+  try {
+    const summary = await readProjectSummary(project.id);
+    if (summary) {
+      packet.summary = summary;
+    }
+  } catch {
+    // Summary not available — continue without it
+  }
+
   return packet;
 }
 
@@ -197,6 +208,13 @@ export function contextPacketToMarkdown(
       }
       lines.push("");
     }
+  }
+
+  // Project summary (cross-session context)
+  if (packet.summary) {
+    lines.push(`## Project Summary`);
+    lines.push(packet.summary);
+    lines.push("");
   }
 
   // Graph context

@@ -121,6 +121,7 @@ export interface ContextPacket {
   graph?: GraphContext;
   agentConfig?: string;
   memory?: string;
+  summary?: string;
 }
 
 /** Context pulled from the project's knowledge graph. */
