@@ -1,7 +1,7 @@
 // TUI Pod Detail View (Level 3)
 // Full-screen drill-down into a single pod with container status and logs
 
-import type { PodDetail, ContainerStatus, ResourceCondition } from "@opcom/types";
+import type { PodDetail, ContainerStatus, ResourceCondition, InfraLogLine } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -18,17 +18,24 @@ export interface PodDetailState {
   projectName: string;
   displayLines: string[];
   scrollOffset: number;
+  logLines: InfraLogLine[];
+  selectedContainer: string;
+  followMode: boolean;
 }
 
 export function createPodDetailState(
   pod: PodDetail,
   projectName: string,
 ): PodDetailState {
+  const selectedContainer = pod.containers.length > 0 ? pod.containers[0].name : "";
   const state: PodDetailState = {
     pod,
     projectName,
     displayLines: [],
     scrollOffset: 0,
+    logLines: [],
+    selectedContainer,
+    followMode: false,
   };
   rebuildDisplayLines(state, 80);
   return state;
@@ -81,9 +88,24 @@ export function rebuildDisplayLines(state: PodDetailState, wrapWidth: number): v
     }
   }
 
+  // Logs
+  lines.push("");
+  const followLabel = state.followMode ? " (following)" : "";
+  lines.push(bold(`LOGS (${state.selectedContainer})${followLabel}`));
+  lines.push(dim("\u2500".repeat(Math.min(60, wrapWidth - 4))));
+
+  if (state.logLines.length === 0) {
+    lines.push(dim("  No logs available"));
+  } else {
+    for (const logLine of state.logLines) {
+      const ts = logLine.timestamp ? dim(logLine.timestamp + "  ") : "";
+      lines.push(`  ${ts}${logLine.text}`);
+    }
+  }
+
   // Footer
   lines.push("");
-  lines.push(dim("esc:back  j/k:scroll"));
+  lines.push(dim("esc:back  f:follow logs  c:switch container  j/k:scroll"));
 
   state.displayLines = lines;
 }
@@ -184,4 +206,30 @@ export function scrollToTop(state: PodDetailState): void {
 
 export function scrollToBottom(state: PodDetailState, viewHeight: number): void {
   state.scrollOffset = Math.max(0, state.displayLines.length - viewHeight);
+}
+
+// --- Log and container helpers ---
+
+export function toggleFollow(state: PodDetailState): void {
+  state.followMode = !state.followMode;
+  rebuildDisplayLines(state, 80);
+}
+
+export function switchContainer(state: PodDetailState): void {
+  const containers = state.pod.containers;
+  if (containers.length <= 1) return;
+  const currentIdx = containers.findIndex(c => c.name === state.selectedContainer);
+  const nextIdx = (currentIdx + 1) % containers.length;
+  state.selectedContainer = containers[nextIdx].name;
+  state.logLines = [];
+  state.followMode = false;
+  rebuildDisplayLines(state, 80);
+}
+
+export function addLogLines(state: PodDetailState, lines: InfraLogLine[], viewHeight?: number): void {
+  state.logLines.push(...lines);
+  rebuildDisplayLines(state, 80);
+  if (state.followMode && viewHeight) {
+    scrollToBottom(state, viewHeight);
+  }
 }

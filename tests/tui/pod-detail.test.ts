@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { PodDetail } from "@opcom/types";
+import type { PodDetail, InfraLogLine } from "@opcom/types";
 import {
   createPodDetailState,
   rebuildDisplayLines,
@@ -8,6 +8,9 @@ import {
   scrollDown,
   scrollToTop,
   scrollToBottom,
+  toggleFollow,
+  switchContainer,
+  addLogLines,
 } from "../../packages/cli/src/tui/views/pod-detail.js";
 import { ScreenBuffer } from "../../packages/cli/src/tui/renderer.js";
 
@@ -203,5 +206,163 @@ describe("renderPodDetail", () => {
     const buf = new ScreenBuffer();
     const panel = { x: 0, y: 0, width: 80, height: 24 };
     expect(() => renderPodDetail(buf, panel, state)).not.toThrow();
+  });
+});
+
+describe("logs section", () => {
+  it("shows LOGS section with selected container name", () => {
+    const pod = makePod();
+    const state = createPodDetailState(pod, "folia");
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("LOGS (api)");
+  });
+
+  it("shows 'No logs available' when no logs", () => {
+    const pod = makePod();
+    const state = createPodDetailState(pod, "folia");
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("No logs available");
+  });
+
+  it("renders log lines with timestamps", () => {
+    const pod = makePod();
+    const state = createPodDetailState(pod, "folia");
+    const logs: InfraLogLine[] = [
+      { timestamp: "2026-03-01T12:00:00Z", text: "Starting server" },
+      { timestamp: "2026-03-01T12:00:01Z", text: "Listening on :8080" },
+    ];
+    addLogLines(state, logs);
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("Starting server");
+    expect(text).toContain("Listening on :8080");
+    expect(text).toContain("2026-03-01T12:00:00Z");
+  });
+
+  it("selects first container by default", () => {
+    const pod = makePod({
+      containers: [
+        { name: "web", image: "web:v1", ready: true, state: "running", restarts: 0 },
+        { name: "sidecar", image: "sidecar:v1", ready: true, state: "running", restarts: 0 },
+      ],
+    });
+    const state = createPodDetailState(pod, "folia");
+    expect(state.selectedContainer).toBe("web");
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("LOGS (web)");
+  });
+
+  it("shows updated footer with f and c keybindings", () => {
+    const pod = makePod();
+    const state = createPodDetailState(pod, "folia");
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("f:follow logs");
+    expect(text).toContain("c:switch container");
+  });
+});
+
+describe("toggleFollow", () => {
+  it("toggles follow mode on", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    expect(state.followMode).toBe(false);
+    toggleFollow(state);
+    expect(state.followMode).toBe(true);
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("(following)");
+  });
+
+  it("toggles follow mode off", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    toggleFollow(state);
+    toggleFollow(state);
+    expect(state.followMode).toBe(false);
+    const text = state.displayLines.join("\n");
+    expect(text).not.toContain("(following)");
+  });
+});
+
+describe("switchContainer", () => {
+  it("cycles to next container", () => {
+    const pod = makePod({
+      containers: [
+        { name: "api", image: "api:v1", ready: true, state: "running", restarts: 0 },
+        { name: "sidecar", image: "istio:1.20", ready: true, state: "running", restarts: 0 },
+      ],
+    });
+    const state = createPodDetailState(pod, "folia");
+    expect(state.selectedContainer).toBe("api");
+    switchContainer(state);
+    expect(state.selectedContainer).toBe("sidecar");
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("LOGS (sidecar)");
+  });
+
+  it("wraps around to first container", () => {
+    const pod = makePod({
+      containers: [
+        { name: "api", image: "api:v1", ready: true, state: "running", restarts: 0 },
+        { name: "sidecar", image: "istio:1.20", ready: true, state: "running", restarts: 0 },
+      ],
+    });
+    const state = createPodDetailState(pod, "folia");
+    switchContainer(state); // api -> sidecar
+    switchContainer(state); // sidecar -> api
+    expect(state.selectedContainer).toBe("api");
+  });
+
+  it("does nothing with single container", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    const before = state.selectedContainer;
+    switchContainer(state);
+    expect(state.selectedContainer).toBe(before);
+  });
+
+  it("clears logs and follow mode on switch", () => {
+    const pod = makePod({
+      containers: [
+        { name: "api", image: "api:v1", ready: true, state: "running", restarts: 0 },
+        { name: "sidecar", image: "istio:1.20", ready: true, state: "running", restarts: 0 },
+      ],
+    });
+    const state = createPodDetailState(pod, "folia");
+    addLogLines(state, [{ timestamp: "t1", text: "line1" }]);
+    toggleFollow(state);
+    expect(state.logLines.length).toBe(1);
+    expect(state.followMode).toBe(true);
+    switchContainer(state);
+    expect(state.logLines.length).toBe(0);
+    expect(state.followMode).toBe(false);
+  });
+});
+
+describe("addLogLines", () => {
+  it("appends log lines to state", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    addLogLines(state, [{ timestamp: "t1", text: "first" }]);
+    addLogLines(state, [{ timestamp: "t2", text: "second" }]);
+    expect(state.logLines.length).toBe(2);
+    const text = state.displayLines.join("\n");
+    expect(text).toContain("first");
+    expect(text).toContain("second");
+  });
+
+  it("auto-scrolls to bottom in follow mode", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    toggleFollow(state);
+    addLogLines(state, [
+      { timestamp: "t1", text: "line1" },
+      { timestamp: "t2", text: "line2" },
+      { timestamp: "t3", text: "line3" },
+    ], 5);
+    const maxOffset = Math.max(0, state.displayLines.length - 5);
+    expect(state.scrollOffset).toBe(maxOffset);
+  });
+
+  it("does not auto-scroll when not in follow mode", () => {
+    const state = createPodDetailState(makePod(), "folia");
+    addLogLines(state, [
+      { timestamp: "t1", text: "line1" },
+      { timestamp: "t2", text: "line2" },
+    ], 5);
+    expect(state.scrollOffset).toBe(0);
   });
 });
