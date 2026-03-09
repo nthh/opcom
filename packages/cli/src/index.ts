@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { runInit } from "./commands/init.js";
+import { runInit, runInitFolder } from "./commands/init.js";
 import { runAdd } from "./commands/add.js";
 import { runScan } from "./commands/scan.js";
 import { runStatus } from "./commands/status.js";
@@ -41,6 +41,9 @@ const command = args[0];
 async function main(): Promise<void> {
   switch (command) {
     case "init":
+      if (args[1]) {
+        return runInitFolder({ folder: args[1] });
+      }
       return runInit();
 
     case "add":
@@ -449,6 +452,7 @@ function printHelp(): void {
 
   Commands:
     init                         Interactive workspace setup
+    init <folder>                Initialize a project in a folder
     add <path>                   Add a project to the workspace
     scan [project]               Re-run detection for one or all projects
     status [--project <name>]    Show workspace dashboard (default)

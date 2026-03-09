@@ -5,6 +5,7 @@ export interface ProjectConfig {
   id: string;
   name: string;
   path: string;
+  description?: string;
   stack: StackInfo;
   git: GitInfo | null;
   workSystem: WorkSystemInfo | null;
