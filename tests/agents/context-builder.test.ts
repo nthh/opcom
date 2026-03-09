@@ -81,6 +81,31 @@ describe("buildContextPacket", () => {
     expect(packet.git.clean).toBe(true);
   });
 
+  it("loads summary into packet when summary file exists", async () => {
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { writeProjectSummary, ensureOpcomDirs } = await import("@opcom/core");
+
+    const tempDir = await mkdtemp(join(tmpdir(), "opcom-ctx-summary-"));
+    const originalHome = process.env.HOME!;
+    process.env.HOME = tempDir;
+
+    try {
+      await ensureOpcomDirs();
+      const summaryContent = "# test-project — Project Summary\n\n## Current State\n- Last activity: 2026-03-09\n";
+      await writeProjectSummary("test-project", summaryContent);
+
+      const project = makeProject();
+      const packet = await buildContextPacket(project);
+
+      expect(packet.summary).toBe(summaryContent);
+    } finally {
+      process.env.HOME = originalHome;
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it("handles empty stack gracefully", async () => {
     const project = makeProject({
       stack: {
