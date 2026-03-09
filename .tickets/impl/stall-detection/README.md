@@ -1,7 +1,7 @@
 ---
 id: stall-detection
 title: "Stall detection and circuit-breaking for stuck agents"
-status: open
+status: closed
 type: feature
 priority: 2
 deps: []
