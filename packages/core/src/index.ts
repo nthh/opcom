@@ -85,6 +85,13 @@ export type { JiraConfig } from "./adapters/jira.js";
 export { loadJiraAuth, saveJiraAuth, buildAuthHeader } from "./adapters/jira-auth.js";
 export type { JiraAuthConfig } from "./adapters/jira-auth.js";
 
+// Calendar Adapter
+export { CalendarAdapter, importICalFile } from "./adapters/calendar.js";
+export { parseICalEvents, parseICalToWorkItems, parseICalDate, icalEventToWorkItem, eventToId } from "./adapters/calendar-parser.js";
+export type { ICalEvent } from "./adapters/calendar-parser.js";
+export { workItemToMarkdown, writeWorkItemsToTickets } from "./adapters/ticket-writer.js";
+export type { WriteResult } from "./adapters/ticket-writer.js";
+
 // Phase 6: LLM Skills
 export {
   collectBriefingSignals,

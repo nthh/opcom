@@ -63,7 +63,7 @@ export interface GitInfo {
   uncommittedCount?: number;
 }
 
-export type WorkSystemType = "trk" | "tickets-dir" | "github-issues" | "jira" | "linear";
+export type WorkSystemType = "trk" | "tickets-dir" | "github-issues" | "jira" | "linear" | "calendar";
 
 export interface WorkSystemInfo {
   type: WorkSystemType;
