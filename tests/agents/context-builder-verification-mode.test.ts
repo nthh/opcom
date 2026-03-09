@@ -25,7 +25,7 @@ function makePacket(): ContextPacket {
 describe("contextPacketToMarkdown with verificationMode", () => {
   it("includes test instructions for test-gate mode", () => {
     const packet = makePacket();
-    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, "test-gate");
+    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, "test-gate");
 
     expect(md).toContain("All changes MUST include tests");
     expect(md).toContain("Run tests relevant to your changes");
@@ -42,7 +42,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
 
   it("omits test instructions for confirmation mode", () => {
     const packet = makePacket();
-    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, "confirmation");
+    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, "confirmation");
 
     expect(md).not.toContain("All changes MUST include tests");
     expect(md).not.toContain("Do not mark work as complete if tests are failing");
@@ -50,7 +50,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
 
   it("omits test instructions for none mode", () => {
     const packet = makePacket();
-    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, "none");
+    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, "none");
 
     expect(md).not.toContain("All changes MUST include tests");
     expect(md).not.toContain("Do not mark work as complete if tests are failing");
@@ -58,7 +58,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
 
   it("omits test instructions for oracle mode", () => {
     const packet = makePacket();
-    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, "oracle");
+    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, "oracle");
 
     expect(md).not.toContain("All changes MUST include tests");
     expect(md).not.toContain("Do not mark work as complete if tests are failing");
@@ -66,7 +66,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
 
   it("omits test instructions for output-exists mode", () => {
     const packet = makePacket();
-    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, "output-exists");
+    const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, "output-exists");
 
     expect(md).not.toContain("All changes MUST include tests");
     expect(md).not.toContain("Do not mark work as complete if tests are failing");
@@ -76,7 +76,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
     const modes: VerificationMode[] = ["test-gate", "oracle", "confirmation", "output-exists", "none"];
     for (const mode of modes) {
       const packet = makePacket();
-      const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, mode);
+      const md = contextPacketToMarkdown(packet, undefined, undefined, undefined, undefined, mode);
 
       expect(md).toContain("Never use `git stash`");
       expect(md).toContain("When committing, use a simple single-line commit message");
@@ -99,7 +99,7 @@ describe("contextPacketToMarkdown with verificationMode", () => {
     };
 
     // Even in test-gate mode, role instructions override default test instructions
-    const md = contextPacketToMarkdown(packet, roleConfig, undefined, undefined, "test-gate");
+    const md = contextPacketToMarkdown(packet, roleConfig, undefined, undefined, undefined, "test-gate");
     expect(md).toContain("Research and document findings.");
     expect(md).not.toContain("All changes MUST include tests");
   });
