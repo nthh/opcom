@@ -17,6 +17,11 @@ import {
   type DashboardWorkItem,
 } from "./views/dashboard.js";
 import {
+  AgentsListComponent,
+  clampAgentsSelection,
+  getVisibleAgents,
+} from "./components/agents-list.js";
+import {
   renderProjectDetail,
   createProjectDetailState,
   clampSelection as clampProjectDetail,
@@ -284,6 +289,12 @@ export class TuiApp {
 
     clampDashboard(this.dashboardState);
 
+    // Sync agents component state (dashboard)
+    this.dashboardState.agentsComponent.agents = this.dashboardState.agents;
+    this.dashboardState.agentsComponent.projects = this.dashboardState.projects;
+    this.dashboardState.agentsComponent.plan = this.dashboardState.planPanel?.plan ?? null;
+    clampAgentsSelection(this.dashboardState.agentsComponent);
+
     // Update project detail if active
     if (this.projectDetailState && this.focusedProjectId) {
       const project = this.client.projects.find((p) => p.id === this.focusedProjectId);
@@ -301,6 +312,11 @@ export class TuiApp {
         this.projectDetailState.pipelines = pipelines;
         const deployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
         this.projectDetailState.deployments = deployments;
+        // Sync agents component state (project-detail)
+        this.projectDetailState.agentsComponent.agents = this.client.agents;
+        this.projectDetailState.agentsComponent.projectId = this.focusedProjectId;
+        clampAgentsSelection(this.projectDetailState.agentsComponent);
+
         clampProjectDetail(this.projectDetailState);
       }
     }
@@ -605,6 +621,15 @@ export class TuiApp {
     const panel = state.focusedPanel;
     const itemCount = getDashboardItemCount(state, panel);
 
+    // Dispatch to focused component first (agents panel = component)
+    if (panel === 2) {
+      const result = AgentsListComponent.handleKey(data, state.agentsComponent);
+      if (result.handled) {
+        state.agentsComponent = result.state;
+        return;
+      }
+    }
+
     switch (data) {
       case "q":
       case "\x03": // Ctrl+C
@@ -783,8 +808,9 @@ export class TuiApp {
         }
       }
     } else if (panel === 2) {
-      // Drill into agent
-      const agent = state.agents[selected];
+      // Drill into agent (uses component state)
+      const agents = getVisibleAgents(state.agentsComponent);
+      const agent = agents[state.agentsComponent.selectedIndex];
       if (agent) {
         this.navigateToAgent(agent);
       }
@@ -825,7 +851,8 @@ export class TuiApp {
   private stopAgentFromDashboard(): void {
     const state = this.dashboardState;
     if (state.focusedPanel === 2) {
-      const agent = state.agents[state.selectedIndex[2]];
+      const agents = getVisibleAgents(state.agentsComponent);
+      const agent = agents[state.agentsComponent.selectedIndex];
       if (agent && agent.state !== "stopped") {
         this.client.send({ type: "stop_agent", agentId: agent.id });
       }
@@ -839,6 +866,15 @@ export class TuiApp {
     const state = this.projectDetailState;
     const panel = state.focusedPanel;
     const itemCount = getProjectItemCount(state, panel);
+
+    // Dispatch to focused component first (agents panel = component)
+    if (panel === 1) {
+      const result = AgentsListComponent.handleKey(data, state.agentsComponent);
+      if (result.handled) {
+        state.agentsComponent = result.state;
+        return;
+      }
+    }
 
     switch (data) {
       case "q":
@@ -940,9 +976,9 @@ export class TuiApp {
         this.navigateToTicket(ticket);
       }
     } else if (panel === 1) {
-      // Drill into agent
-      const projectAgents = state.agents.filter((a) => a.projectId === state.project.id);
-      const agent = projectAgents[selected];
+      // Drill into agent (uses component state)
+      const agents = getVisibleAgents(state.agentsComponent);
+      const agent = agents[state.agentsComponent.selectedIndex];
       if (agent) {
         this.navigateToAgent(agent);
       }

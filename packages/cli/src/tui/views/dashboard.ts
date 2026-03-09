@@ -10,10 +10,19 @@ import {
   bold,
   dim,
   color,
-  stateColor,
   truncate,
-  progressBar,
 } from "../renderer.js";
+import {
+  AgentsListComponent,
+  sortAgents,
+  getPlanStepForAgent,
+  getAgentSortTier,
+  formatDuration,
+  type AgentsListState,
+} from "../components/agents-list.js";
+
+// Re-export agent helpers for backward compatibility
+export { sortAgents, getPlanStepForAgent, getAgentSortTier };
 
 export interface PlanPanelState {
   plan: Plan;
@@ -36,6 +45,7 @@ export interface DashboardState {
   projectFilter: string | null; // null = all, string = projectId
   searchQuery: string;
   planPanel: PlanPanelState | null; // non-null when plan is active
+  agentsComponent: AgentsListState; // component state for agents panel
 }
 
 export function createDashboardState(): DashboardState {
@@ -50,6 +60,7 @@ export function createDashboardState(): DashboardState {
     projectFilter: null,
     searchQuery: "",
     planPanel: null,
+    agentsComponent: AgentsListComponent.init(),
   };
 }
 
@@ -70,7 +81,7 @@ export function renderDashboard(
       renderWorkQueuePanel(buf, workqueuePanel, state, state.focusedPanel === 1);
     }
   }
-  if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 2);
+  if (agentsPanel) AgentsListComponent.render(buf, agentsPanel, state.agentsComponent, state.focusedPanel === 2);
 }
 
 function renderProjectsPanel(
@@ -357,130 +368,6 @@ export function formatStepVerificationBadge(step: PlanStep): string {
   return ` ${color(ANSI.red, "\u2717 verify")}${attemptSuffix}${rebaseSuffix}`;
 }
 
-function renderAgentsPanel(
-  buf: ScreenBuffer,
-  panel: Panel,
-  state: DashboardState,
-  focused: boolean,
-): void {
-  const { agents } = state;
-  const activeAgents = agents.filter((a) => a.state !== "stopped");
-  const title = `Agents (${activeAgents.length})`;
-
-  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
-
-  const contentWidth = panel.width - 4;
-  const maxItems = panel.height - 2;
-  const selected = state.selectedIndex[2] ?? 0;
-  const scroll = state.scrollOffset[2] ?? 0;
-
-  if (agents.length === 0) {
-    buf.writeLine(panel.y + 1, panel.x + 2, dim("No agents running"), contentWidth);
-    buf.writeLine(panel.y + 2, panel.x + 2, dim("Press 'w' on a project to start one"), contentWidth);
-    return;
-  }
-
-  const sorted = sortAgents(agents, state.planPanel?.plan ?? null);
-
-  for (let i = 0; i < maxItems && i + scroll < sorted.length; i++) {
-    const idx = i + scroll;
-    const agent = sorted[idx];
-    const row = panel.y + 1 + i;
-    const isSelected = idx === selected && focused;
-
-    const lines = formatAgentLines(agent, state.projects, state.planPanel?.plan ?? null, contentWidth);
-    if (isSelected) {
-      buf.writeLine(row, panel.x + 2, ANSI.reverse + lines[0] + ANSI.reset, contentWidth);
-    } else {
-      buf.writeLine(row, panel.x + 2, lines[0], contentWidth);
-    }
-
-    // If there's room, show detail line
-    if (i + 1 < maxItems && lines.length > 1) {
-      i++;
-      const detailRow = panel.y + 1 + i;
-      buf.writeLine(detailRow, panel.x + 4, lines[1], contentWidth - 2);
-    }
-  }
-}
-
-function formatAgentLines(
-  agent: AgentSession,
-  projects: ProjectStatusSnapshot[],
-  plan: Plan | null,
-  maxWidth: number,
-): string[] {
-  const project = projects.find((p) => p.id === agent.projectId);
-  const projectName = project?.name ?? agent.projectId.slice(0, 8);
-  const sColor = stateColor(agent.state);
-  const stateStr = color(sColor, agent.state);
-
-  const duration = formatDuration(agent.startedAt, agent.stoppedAt);
-
-  // Show plan step ticket ID prominently if agent is executing a plan step
-  const planStep = getPlanStepForAgent(agent, plan);
-  const planLabel = planStep ? color(ANSI.yellow, ` [step:${planStep.ticketId}]`) : "";
-
-  const line1 = `${bold(projectName)} ${stateStr}${planLabel} ${dim(duration)}`;
-
-  // Detail line: context usage + last activity
-  const parts: string[] = [];
-  if (agent.contextUsage) {
-    const ctx = agent.contextUsage;
-    const pct = Math.round(ctx.percentage);
-    const bar = progressBar(ctx.tokensUsed, ctx.maxTokens, 10);
-    parts.push(`${bar} ${pct}%`);
-  }
-  if (agent.workItemId) {
-    parts.push(dim(`ticket:${agent.workItemId}`));
-  }
-  const line2 = parts.join("  ");
-
-  return line2 ? [truncate(line1, maxWidth), truncate(line2, maxWidth - 2)] : [truncate(line1, maxWidth)];
-}
-
-// --- Agent sorting helpers ---
-
-/** Find the in-progress plan step assigned to this agent, if any */
-export function getPlanStepForAgent(agent: AgentSession, plan: Plan | null): PlanStep | undefined {
-  if (!plan) return undefined;
-  return plan.steps.find(
-    (s) => s.agentSessionId === agent.id && s.status === "in-progress",
-  );
-}
-
-/**
- * Returns sort tier for an agent: 0 = plan-active, 1 = other-active, 2 = idle, 3 = stopped.
- * Lower tier = higher priority in the list.
- */
-export function getAgentSortTier(agent: AgentSession, plan: Plan | null): 0 | 1 | 2 | 3 {
-  if (agent.state === "stopped") return 3;
-  if (agent.state === "idle") return 2;
-  // Agent is active (streaming, waiting, error) — check if plan-active
-  if (getPlanStepForAgent(agent, plan)) return 0;
-  return 1;
-}
-
-/** Sort agents by four tiers: plan-active > other-active > idle > stopped. Stable within tiers. */
-export function sortAgents(agents: AgentSession[], plan: Plan | null): AgentSession[] {
-  return [...agents].sort((a, b) => {
-    return getAgentSortTier(a, plan) - getAgentSortTier(b, plan);
-  });
-}
-
-function formatDuration(startedAt: string, stoppedAt?: string): string {
-  const start = new Date(startedAt).getTime();
-  const end = stoppedAt ? new Date(stoppedAt).getTime() : Date.now();
-  const diffMs = end - start;
-
-  const seconds = Math.floor(diffMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-
-  if (hours > 0) return `${hours}h${minutes % 60}m`;
-  if (minutes > 0) return `${minutes}m${seconds % 60}s`;
-  return `${seconds}s`;
-}
 
 // --- Navigation helpers ---
 
