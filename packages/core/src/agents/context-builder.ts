@@ -127,6 +127,7 @@ export function contextPacketToMarkdown(
   roleConfig?: ResolvedRoleConfig,
   previousVerification?: VerificationResult,
   rebaseConflict?: RebaseConflict,
+  stallWarning?: string,
 ): string {
   const lines: string[] = [];
 
@@ -303,6 +304,11 @@ export function contextPacketToMarkdown(
     lines.push(`- Run the specific failing tests to verify your fix.`);
     lines.push(`- Do not modify unrelated code.`);
     lines.push("");
+  }
+
+  // Stall warning (injected when agent is repeating the same failure)
+  if (stallWarning) {
+    lines.push(stallWarning);
   }
 
   // Rebase conflict resolution context

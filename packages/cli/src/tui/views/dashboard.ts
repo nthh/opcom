@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -18,6 +18,7 @@ import {
   getPlanStepForAgent,
   getAgentSortTier,
   formatDuration,
+  formatStallBadge,
   type AgentsListState,
 } from "../components/agents-list.js";
 import {
@@ -26,7 +27,7 @@ import {
 } from "../components/chat.js";
 
 // Re-export agent helpers for backward compatibility
-export { sortAgents, getPlanStepForAgent, getAgentSortTier };
+export { sortAgents, getPlanStepForAgent, getAgentSortTier, formatStallBadge };
 
 export interface PlanPanelState {
   plan: Plan;
@@ -291,7 +292,10 @@ function renderPlanPanel(
     verifyStr = ` [${parts.join(" ")}]`;
   }
 
-  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}`;
+  const planStallStr = plan.steps.some((s) => s.stallSignal?.type === "plan-stall")
+    ? color(ANSI.orange, " \u26a0 stalled")
+    : "";
+  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${planStallStr}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -344,7 +348,10 @@ function renderPlanPanel(
         : displayStatus;
       const statusStr = color(sColor, `${icon} ${phaseLabel}`);
       const verifyBadge = formatStepVerificationBadge(step);
-      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}`;
+      const stallBadge = step.stallSignal
+        ? color(ANSI.orange, ` \u26a0 ${formatStallBadge(step.stallSignal)}`)
+        : "";
+      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}${stallBadge}`;
       const isSelected = line.index === selected && focused;
 
       if (isSelected) {
@@ -378,7 +385,6 @@ export function formatStepVerificationBadge(step: PlanStep): string {
   }
   return ` ${color(ANSI.red, "\u2717 verify")}${attemptSuffix}${rebaseSuffix}`;
 }
-
 
 // --- Navigation helpers ---
 

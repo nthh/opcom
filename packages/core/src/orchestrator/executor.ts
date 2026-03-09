@@ -16,6 +16,7 @@ import type {
   VerificationResult,
   TestGateResult,
   RebaseResult,
+  StallSignal,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
@@ -34,6 +35,7 @@ import { updateProjectSummary } from "../config/summary.js";
 import { createLogger } from "../logger.js";
 import { ingestTestResults, queryGraphContext } from "../graph/graph-service.js";
 import { runSmoke } from "./smoke-test.js";
+import { StallDetector } from "./stall-detector.js";
 
 const log = createLogger("executor");
 
@@ -47,12 +49,13 @@ export interface ExecutorEvents {
   plan_completed: { plan: Plan };
   plan_paused: { plan: Plan };
   plan_updated: { plan: Plan };
+  stall_detected: { signal: StallSignal };
 }
 
 type EventHandler<T> = (data: T) => void;
 
 interface ExecutorEvent {
-  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "retry" | "inject_context" | "advance_stage" | "verification_done";
+  type: "agent_completed" | "agent_failed" | "pause" | "resume" | "skip" | "retry" | "inject_context" | "advance_stage" | "verification_done" | "stall_check";
   sessionId?: string;
   ticketId?: string;
   error?: string;
@@ -77,11 +80,14 @@ export class Executor {
   private stepFiles = new Map<string, string[]>(); // ticketId → related file paths (cached from graph)
   private ticketCache = new Map<string, import("@opcom/types").WorkItem[]>(); // projectId → tickets
   private worktreeManager = new WorktreeManager();
+  private stallDetector: StallDetector;
+  private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore) {
     this.plan = plan;
     this.sessionManager = sessionManager;
     this.eventStore = eventStore ?? null;
+    this.stallDetector = new StallDetector(plan.config.stall);
   }
 
   getPlan(): Plan {
@@ -91,6 +97,11 @@ export class Executor {
   /** Exposed for testing. */
   getWorktreeManager(): WorktreeManager {
     return this.worktreeManager;
+  }
+
+  /** Exposed for testing. */
+  getStallDetector(): StallDetector {
+    return this.stallDetector;
   }
 
   /**
@@ -234,6 +245,13 @@ export class Executor {
     this.sessionManager.on("state_change", onStateChange);
     this.sessionManager.on("agent_event", onAgentEvent);
 
+    // Start periodic stall detection timer (every 60s)
+    if (this.plan.config.stall.enabled) {
+      this.stallCheckTimer = setInterval(() => {
+        this.pushEvent({ type: "stall_check" });
+      }, 60_000);
+    }
+
     try {
       // Load ticket data for priority sorting and file-overlap detection
       await this.loadCurrentTickets();
@@ -255,6 +273,10 @@ export class Executor {
         await this.handleEvent(event);
       }
     } finally {
+      if (this.stallCheckTimer) {
+        clearInterval(this.stallCheckTimer);
+        this.stallCheckTimer = null;
+      }
       this.sessionManager.off("session_stopped", onStopped);
       this.sessionManager.off("state_change", onStateChange);
       this.sessionManager.off("agent_event", onAgentEvent);
@@ -304,6 +326,10 @@ export class Executor {
    */
   stop(): void {
     this.running = false;
+    if (this.stallCheckTimer) {
+      clearInterval(this.stallCheckTimer);
+      this.stallCheckTimer = null;
+    }
     // Resolve any pending event wait
     if (this.eventResolve) {
       this.eventResolve();
@@ -603,6 +629,11 @@ export class Executor {
         // No-op — recomputeAndContinue was already called in the finally block.
         // This event just wakes the event loop so it can re-check isPlanTerminal.
         break;
+
+      case "stall_check": {
+        await this.runStallChecks();
+        break;
+      }
     }
   }
 
@@ -657,6 +688,7 @@ export class Executor {
         log.info("zero-commit oracle arbitration", { ticketId: step.ticketId });
         step.status = "verifying";
         step.verification = undefined;
+        this.stallDetector.recordStepTransition();
         await savePlan(this.plan);
         this.emit("plan_updated", { plan: this.plan });
 
@@ -670,6 +702,8 @@ export class Executor {
           step.status = "done";
           step.completedAt = new Date().toISOString();
           step.verification = result;
+          step.stallSignal = undefined;
+          this.stallDetector.recordStepTransition();
 
           // No merge needed — no commits to merge
           await this.worktreeManager.remove(step.ticketId).catch(() => {});
@@ -728,6 +762,7 @@ export class Executor {
     // This prevents bad code from landing on main if tests fail.
     step.status = "verifying";
     step.verification = undefined;
+    this.stallDetector.recordStepTransition();
     await savePlan(this.plan);
     this.emit("plan_updated", { plan: this.plan });
 
@@ -862,6 +897,8 @@ export class Executor {
     step.status = "done";
     step.completedAt = new Date().toISOString();
     if (verification) step.verification = verification;
+    step.stallSignal = undefined;
+    this.stallDetector.recordStepTransition();
 
     // Capture changeset before worktree cleanup
     if (event.sessionId) {
@@ -939,6 +976,7 @@ export class Executor {
 
       step.status = "verifying";
       step.verification = undefined;
+      this.stallDetector.recordStepTransition();
       await savePlan(this.plan);
       this.emit("plan_updated", { plan: this.plan });
 
@@ -991,6 +1029,8 @@ export class Executor {
         step.status = "done";
         step.completedAt = new Date().toISOString();
         if (reVerification) step.verification = reVerification;
+        step.stallSignal = undefined;
+        this.stallDetector.recordStepTransition();
 
         if (event.sessionId) {
           const project = await loadProject(step.projectId);
@@ -1389,6 +1429,8 @@ export class Executor {
     } else {
       step.status = "done";
       step.completedAt = new Date().toISOString();
+      step.stallSignal = undefined;
+      this.stallDetector.recordStepTransition();
       if (event.sessionId) {
         this.sessionToStep.delete(event.sessionId);
         this.sessionWrites.delete(event.sessionId);
@@ -1608,9 +1650,12 @@ export class Executor {
       allowedTools.push("Bash(git rebase*)", "Bash(git add*)", "Bash(git diff*)");
     }
 
+    // Build stall warning if the agent is repeating the same failure
+    const stallWarning = this.stallDetector.buildStallWarning(step);
+
     // Build system prompt with role-aware context (and retry feedback if applicable)
     const systemPrompt = contextPacketToMarkdown(
-      contextPacket, resolved, step.previousVerification, step.rebaseConflict,
+      contextPacket, resolved, step.previousVerification, step.rebaseConflict, stallWarning ?? undefined,
     );
 
     const session = await this.sessionManager.startSession(
@@ -1636,7 +1681,9 @@ export class Executor {
     step.startedAt = new Date().toISOString();
     step.verifyingPhase = undefined;
     step.verifyingPhaseStartedAt = undefined;
+    step.stallSignal = undefined; // Clear any previous stall signal
     this.sessionToStep.set(session.id, step.ticketId);
+    this.stallDetector.recordStepTransition();
     this.stepVerification.set(step.ticketId, { runTests: resolved.runTests, runOracle: resolved.runOracle });
 
     // Write lock file so cleanupOrphaned() won't remove this worktree
@@ -1901,12 +1948,59 @@ export class Executor {
    * Mark a step as failed and reset the ticket back to open so the planner
    * picks it up on the next run.
    */
+  /**
+   * Run periodic stall detection checks.
+   * Emits stall_detected events and annotates steps with stall signals.
+   */
+  private async runStallChecks(): Promise<void> {
+    if (this.plan.status !== "executing") return;
+
+    const signals = this.stallDetector.checkAll(this.plan);
+    let updated = false;
+
+    for (const signal of signals) {
+      // Annotate the step with the stall signal for TUI display
+      if (signal.stepId) {
+        const step = this.plan.steps.find((s) => s.ticketId === signal.stepId);
+        if (step && !step.stallSignal) {
+          step.stallSignal = signal;
+          updated = true;
+        }
+      }
+
+      log.warn("stall detected", { type: signal.type, stepId: signal.stepId, message: signal.message });
+      this.emit("stall_detected", { signal });
+      this.logPlanEvent("stall_detected", {
+        stepTicketId: signal.stepId,
+        agentSessionId: signal.sessionId,
+        detail: { signal },
+      });
+    }
+
+    // Pause plan on plan-level stall if pauseOnFailure is enabled
+    const planStall = signals.find((s) => s.type === "plan-stall");
+    if (planStall && this.plan.config.pauseOnFailure) {
+      this.plan.status = "paused";
+      await savePlan(this.plan);
+      this.emit("plan_paused", { plan: this.plan });
+      this.logPlanEvent("plan_paused", { detail: { reason: "plan_stalled" } });
+      return;
+    }
+
+    if (updated) {
+      await savePlan(this.plan);
+      this.emit("plan_updated", { plan: this.plan });
+    }
+  }
+
   private async failStep(step: PlanStep, error: string): Promise<void> {
     step.status = "failed";
     step.error = error;
     step.completedAt = new Date().toISOString();
     step.verifyingPhase = undefined;
     step.verifyingPhaseStartedAt = undefined;
+    step.stallSignal = undefined;
+    this.stallDetector.recordStepTransition();
     if (this.plan.config.ticketTransitions) {
       await this.updateTicketStatusSafe(step, "open");
     }
