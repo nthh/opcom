@@ -1,7 +1,7 @@
 ---
 id: consensus-relay
 title: "Mutable project summary document for cross-session context"
-status: closed
+status: open
 type: feature
 priority: 2
 deps: []
