@@ -37,6 +37,7 @@ import {
   listPlans,
   computePlan,
   savePlan,
+  deletePlan,
   CICDPoller,
   GitHubActionsAdapter,
 } from "@opcom/core";
@@ -329,7 +330,11 @@ export class TuiClient {
       const active = plans.find((p) =>
         p.status === "executing" || p.status === "paused" || p.status === "planning",
       );
-      this.activePlan = active ?? plans[0] ?? null;
+      // Only fall back to non-terminal plans — skip cancelled/done/failed
+      const fallback = plans.find((p) =>
+        p.status !== "cancelled" && p.status !== "done" && p.status !== "failed",
+      );
+      this.activePlan = active ?? fallback ?? null;
     } catch {
       // Plans dir may not exist yet
     }
@@ -396,6 +401,20 @@ export class TuiClient {
       case "plan_completed":
       case "plan_paused":
         this.activePlan = event.plan;
+        break;
+
+      case "plan_cancelled":
+        if (this.activePlan?.id === event.planId) {
+          this.activePlan = null;
+          this.loadActivePlan().catch(() => {});
+        }
+        break;
+
+      case "plan_deleted":
+        if (this.activePlan?.id === event.planId) {
+          this.activePlan = null;
+          this.loadActivePlan().catch(() => {});
+        }
         break;
 
       case "cloud_service_updated": {
@@ -680,6 +699,43 @@ export class TuiClient {
         this.activeExecutor?.rejectStep?.(command.ticketId, command.reason);
         break;
 
+      case "cancel_plan": {
+        if (this.activePlan && this.activePlan.id === command.planId) {
+          // Stop executor if running
+          if (this.activeExecutorPlanId === command.planId && this.activeExecutor) {
+            // The executor stop is handled by the run() promise .finally()
+            this.activeExecutorPlanId = null;
+            this.activeExecutor = null;
+          }
+          this.activePlan.status = "cancelled";
+          this.activePlan.updatedAt = new Date().toISOString();
+          await savePlan(this.activePlan);
+          this.handleServerEvent({ type: "plan_cancelled", planId: command.planId } as ServerEvent);
+          // Reload to pick up next active plan
+          await this.loadActivePlan();
+        }
+        break;
+      }
+
+      case "delete_plan": {
+        if (this.activePlan && this.activePlan.id === command.planId) {
+          // Stop executor if running
+          if (this.activeExecutorPlanId === command.planId && this.activeExecutor) {
+            this.activeExecutorPlanId = null;
+            this.activeExecutor = null;
+          }
+          await deletePlan(command.planId);
+          this.handleServerEvent({ type: "plan_deleted", planId: command.planId } as ServerEvent);
+          // Reload to pick up next active plan
+          await this.loadActivePlan();
+        } else {
+          // Deleting a non-active plan
+          await deletePlan(command.planId);
+          this.handleServerEvent({ type: "plan_deleted", planId: command.planId } as ServerEvent);
+        }
+        break;
+      }
+
       case "refresh_status":
         await this.reloadProjectData();
         break;
@@ -688,6 +744,14 @@ export class TuiClient {
         // subscribe, ping — no-ops in offline mode
         break;
     }
+  }
+
+  cancelPlan(planId: string): void {
+    this.send({ type: "cancel_plan", planId });
+  }
+
+  deletePlanById(planId: string): void {
+    this.send({ type: "delete_plan", planId });
   }
 
   async createPlan(projectId: string): Promise<Plan | null> {
