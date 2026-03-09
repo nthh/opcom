@@ -13,6 +13,7 @@ import {
   getFilteredWorkItems,
   getPanelItemCount as getDashboardItemCount,
   getPlanStepsInDisplayOrder,
+  DASHBOARD_PANEL_COUNT,
   type DashboardState,
   type DashboardWorkItem,
 } from "./views/dashboard.js";
@@ -21,6 +22,12 @@ import {
   clampAgentsSelection,
   getVisibleAgents,
 } from "./components/agents-list.js";
+import {
+  ChatComponent,
+  addChatMessage,
+  extractMessagesFromEvents,
+  type ChatMessage,
+} from "./components/chat.js";
 import {
   renderProjectDetail,
   createProjectDetailState,
@@ -181,6 +188,9 @@ export class TuiApp {
   private createTicketProjectId: string | null = null;
   private chatTicketWorkItemId: string | null = null; // non-null = chatting about existing ticket
 
+  // Chat input mode (chat panel focused and accepting text input)
+  private chatInputMode = false;
+
 
   constructor() {
     this.client = new TuiClient();
@@ -294,6 +304,9 @@ export class TuiApp {
     this.dashboardState.agentsComponent.projects = this.dashboardState.projects;
     this.dashboardState.agentsComponent.plan = this.dashboardState.planPanel?.plan ?? null;
     clampAgentsSelection(this.dashboardState.agentsComponent);
+
+    // Sync chat agent binding — auto-bind to selected agent
+    this.syncChatAgentBinding();
 
     // Update project detail if active
     if (this.projectDetailState && this.focusedProjectId) {
@@ -476,23 +489,29 @@ export class TuiApp {
     let keysStr = "";
     switch (this.level) {
       case 1:
-        if (this.createTicketMode) {
+        if (this.chatInputMode) {
+          const chatAgent = this.dashboardState.chatComponent.boundAgentId?.slice(0, 12) ?? "";
+          keysStr = dim(`Chat [${chatAgent}]: ${this.dashboardState.chatComponent.input}_  (Enter send, Esc cancel)`);
+        } else if (this.createTicketMode) {
           keysStr = dim(this.ticketPromptLabel());
         } else if (this.searchMode) {
           keysStr = dim(`Search: ${this.searchQuery}_  (Enter confirm, Esc cancel)`);
         } else if (this.dashboardState.planPanel) {
           const ps = this.dashboardState.planPanel.plan.status;
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
-          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  H:health  ?:help  q:quit`);
+          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  H:health  O:settings  f/F:project  /:search  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
         }
         break;
       case 2:
-        if (this.createTicketMode) {
+        if (this.chatInputMode && this.projectDetailState) {
+          const chatAgent = this.projectDetailState.chatComponent.boundAgentId?.slice(0, 12) ?? "";
+          keysStr = dim(`Chat [${chatAgent}]: ${this.projectDetailState.chatComponent.input}_  (Enter send, Esc cancel)`);
+        } else if (this.createTicketMode) {
           keysStr = dim(this.ticketPromptLabel());
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  v:cloud  M:migrate  Esc:back  ?:help");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  v:cloud  M:migrate  Esc:back  ?:help");
         }
         break;
       case 3:
@@ -533,6 +552,13 @@ export class TuiApp {
     // Handle prompt mode input first
     if (this.level === 3 && this.agentFocusState?.promptMode) {
       this.handlePromptInput(data);
+      this.scheduleRender();
+      return;
+    }
+
+    // Handle chat input mode
+    if (this.chatInputMode) {
+      this.handleChatInput(data);
       this.scheduleRender();
       return;
     }
@@ -630,6 +656,15 @@ export class TuiApp {
       }
     }
 
+    // Dispatch to chat component when focused
+    if (panel === 3) {
+      const result = ChatComponent.handleKey(data, state.chatComponent);
+      if (result.handled) {
+        state.chatComponent = result.state;
+        return;
+      }
+    }
+
     switch (data) {
       case "q":
       case "\x03": // Ctrl+C
@@ -641,11 +676,11 @@ export class TuiApp {
         return;
 
       case "\t": // Tab
-        state.focusedPanel = (state.focusedPanel + 1) % 3;
+        state.focusedPanel = (state.focusedPanel + 1) % DASHBOARD_PANEL_COUNT;
         return;
 
       case "\x1b[Z": // Shift+Tab
-        state.focusedPanel = (state.focusedPanel + 2) % 3;
+        state.focusedPanel = (state.focusedPanel + DASHBOARD_PANEL_COUNT - 1) % DASHBOARD_PANEL_COUNT;
         return;
 
       case "j":
@@ -666,6 +701,11 @@ export class TuiApp {
 
       case "\r": // Enter
       case "\n":
+        if (panel === 3 && state.chatComponent.boundAgentId) {
+          // Enter on chat panel activates input mode
+          this.enterChatInputMode();
+          return;
+        }
         this.dashboardDrillDown();
         return;
 
@@ -682,6 +722,10 @@ export class TuiApp {
         return;
 
       case "c":
+        this.focusChatPanel();
+        return;
+
+      case "C":
         this.enterCreateTicketMode();
         return;
 
@@ -876,6 +920,15 @@ export class TuiApp {
       }
     }
 
+    // Dispatch to chat component when focused
+    if (panel === 6) {
+      const result = ChatComponent.handleKey(data, state.chatComponent);
+      if (result.handled) {
+        state.chatComponent = result.state;
+        return;
+      }
+    }
+
     switch (data) {
       case "q":
       case "\x1b": // Escape
@@ -908,6 +961,10 @@ export class TuiApp {
 
       case "\r":
       case "\n":
+        if (panel === 6 && state.chatComponent.boundAgentId) {
+          this.enterChatInputMode();
+          return;
+        }
         this.projectDetailDrillDown();
         return;
 
@@ -916,6 +973,10 @@ export class TuiApp {
         return;
 
       case "c":
+        this.focusChatPanel();
+        return;
+
+      case "C":
         this.enterCreateTicketMode();
         return;
 
@@ -1185,7 +1246,7 @@ export class TuiApp {
         this.startAgentFromTicket();
         return;
 
-      case "c":
+      case "C":
         this.enterCreateTicketMode();
         return;
 
@@ -1407,6 +1468,139 @@ export class TuiApp {
         this.scheduleRender();
       }
     });
+  }
+
+  // --- Chat panel methods ---
+
+  private focusChatPanel(): void {
+    if (this.level === 1) {
+      this.dashboardState.focusedPanel = 3;
+      this.syncChatAgentBinding();
+    } else if (this.level === 2 && this.projectDetailState) {
+      this.projectDetailState.focusedPanel = 6;
+      this.syncChatAgentBinding();
+    }
+  }
+
+  private enterChatInputMode(): void {
+    const chatState = this.getActiveChatState();
+    if (!chatState || !chatState.boundAgentId) return;
+    chatState.inputActive = true;
+    this.chatInputMode = true;
+  }
+
+  private handleChatInput(data: string): void {
+    const chatState = this.getActiveChatState();
+    if (!chatState) {
+      this.chatInputMode = false;
+      return;
+    }
+
+    if (data === "\x1b") {
+      // Escape — exit chat input mode
+      chatState.inputActive = false;
+      this.chatInputMode = false;
+      return;
+    }
+
+    if (data === "\r" || data === "\n") {
+      // Enter — send message
+      if (chatState.input.trim() && chatState.boundAgentId) {
+        const text = chatState.input.trim();
+        const agentId = chatState.boundAgentId;
+
+        // Add user message to chat history
+        addChatMessage(chatState, agentId, {
+          role: "user",
+          text,
+          timestamp: Date.now(),
+        });
+
+        // Send to agent via prompt mechanism
+        this.client.send({
+          type: "prompt",
+          agentId,
+          text,
+        });
+
+        chatState.input = "";
+        // Auto-scroll to bottom
+        this.scrollChatToBottom(chatState);
+      }
+      return;
+    }
+
+    if (data === "\x7f" || data === "\b") {
+      // Backspace
+      chatState.input = chatState.input.slice(0, -1);
+      return;
+    }
+
+    // Regular character
+    if (data.length === 1 && data.charCodeAt(0) >= 32) {
+      chatState.input += data;
+    }
+  }
+
+  private getActiveChatState(): import("./components/chat.js").ChatState | null {
+    if (this.level === 1) {
+      return this.dashboardState.chatComponent;
+    }
+    if (this.level === 2 && this.projectDetailState) {
+      return this.projectDetailState.chatComponent;
+    }
+    return null;
+  }
+
+  private scrollChatToBottom(chatState: import("./components/chat.js").ChatState): void {
+    const messages = chatState.boundAgentId
+      ? (chatState.history.get(chatState.boundAgentId) ?? [])
+      : [];
+    const displayLines = messages.length; // approximate
+    const visibleLines = chatState.panelHeight - 3;
+    chatState.scrollOffset = Math.max(0, displayLines - visibleLines);
+  }
+
+  /** Sync the chat component's boundAgentId with the currently selected agent. */
+  private syncChatAgentBinding(): void {
+    const agents = this.client.agents;
+    if (agents.length === 0) return;
+
+    if (this.level === 1) {
+      const agentState = this.dashboardState.agentsComponent;
+      const visible = getVisibleAgents(agentState);
+      const selectedAgent = visible[agentState.selectedIndex];
+      if (selectedAgent) {
+        this.dashboardState.chatComponent.boundAgentId = selectedAgent.id;
+        this.syncChatHistory(this.dashboardState.chatComponent, selectedAgent.id);
+      }
+    } else if (this.level === 2 && this.projectDetailState) {
+      const agentState = this.projectDetailState.agentsComponent;
+      const visible = getVisibleAgents(agentState);
+      const selectedAgent = visible[agentState.selectedIndex];
+      if (selectedAgent) {
+        this.projectDetailState.chatComponent.boundAgentId = selectedAgent.id;
+        this.syncChatHistory(this.projectDetailState.chatComponent, selectedAgent.id);
+      }
+    }
+  }
+
+  /** Extract agent messages from event stream and merge into chat history. */
+  private syncChatHistory(chatState: import("./components/chat.js").ChatState, agentId: string): void {
+    const events = this.client.agentEvents.get(agentId);
+    if (!events) return;
+
+    const agentMessages = extractMessagesFromEvents(events);
+
+    // Get existing user messages (user-sent prompts) from history
+    const existingHistory = chatState.history.get(agentId) ?? [];
+    const userMessages = existingHistory.filter((m) => m.role === "user");
+
+    // Merge: interleave user messages and agent messages by timestamp
+    const merged: ChatMessage[] = [...userMessages, ...agentMessages];
+    merged.sort((a, b) => a.timestamp - b.timestamp);
+
+    chatState.history.set(agentId, merged);
   }
 
   // --- L3: Plan Step Focus Input ---

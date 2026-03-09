@@ -24,11 +24,11 @@ const MIN_PANEL_HEIGHT = 4;
  *
  * Level 1 (Dashboard):
  *   Left column (60%): Projects (top 50%) | Work Queue (bottom 50%)
- *   Right column (40%): Agents
+ *   Right column (40%): Agents (top 50%) | Chat (bottom 50%)
  *
  * Level 2 (Project Detail):
  *   Left column (55%): Tickets
- *   Right column (45%): Agents (top 33%) | Stack (mid 33%) | Cloud (bottom 33%)
+ *   Right column (45%): Agents | Specs | Stack | Cloud | CI/CD | Chat
  *
  * Level 3 (Agent/Ticket Focus):
  *   Full-screen single panel
@@ -53,6 +53,10 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
   const topHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.5));
   const bottomHeight = Math.max(MIN_PANEL_HEIGHT, rows - topHeight);
 
+  // Right column: agents top, chat bottom
+  const rightTopHeight = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.5));
+  const rightBottomHeight = Math.max(MIN_PANEL_HEIGHT, rows - rightTopHeight);
+
   return {
     panels: [
       {
@@ -76,8 +80,16 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
         x: leftWidth,
         y: 0,
         width: rightWidth,
-        height: rows,
+        height: rightTopHeight,
         title: "Agents",
+      },
+      {
+        id: "chat",
+        x: leftWidth,
+        y: rightTopHeight,
+        width: rightWidth,
+        height: rightBottomHeight,
+        title: "Chat",
       },
     ],
     statusBarY,
@@ -87,11 +99,13 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
-  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
-  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
-  const rightH4 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
-  const rightH5 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4);
+  // 6 right-column panels: agents, specs, stack, cloud, cicd, chat
+  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
+  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
+  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
+  const rightH4 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
+  const rightH5 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
+  const rightH6 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4 - rightH5);
 
   return {
     panels: [
@@ -142,6 +156,14 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         width: rightWidth,
         height: rightH5,
         title: "CI/CD",
+      },
+      {
+        id: "chat",
+        x: leftWidth,
+        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5,
+        width: rightWidth,
+        height: rightH6,
+        title: "Chat",
       },
     ],
     statusBarY,

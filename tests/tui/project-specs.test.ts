@@ -182,18 +182,18 @@ describe("ProjectDetailState with specs", () => {
     expect(state.projectSpecs).toEqual([]);
   });
 
-  it("has 6 panel slots in selectedIndex and scrollOffset", () => {
+  it("has 7 panel slots in selectedIndex and scrollOffset", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(6);
-    expect(state.scrollOffset).toHaveLength(6);
+    expect(state.selectedIndex).toHaveLength(7);
+    expect(state.scrollOffset).toHaveLength(7);
   });
 });
 
 // --- PANEL_COUNT ---
 
 describe("PANEL_COUNT", () => {
-  it("is 6 (tickets, agents, specs, stack, cloud, cicd)", () => {
-    expect(PANEL_COUNT).toBe(6);
+  it("is 7 (tickets, agents, specs, stack, cloud, cicd, chat)", () => {
+    expect(PANEL_COUNT).toBe(7);
   });
 });
 
@@ -294,11 +294,11 @@ describe("L2 layout includes specs panel", () => {
     expect(specsPanel).toBeDefined();
   });
 
-  it("has 6 panels in level 2 layout", () => {
+  it("has 7 panels in level 2 layout", () => {
     const layout = getLayout(2, 120, 40);
-    expect(layout.panels).toHaveLength(6);
+    expect(layout.panels).toHaveLength(7);
     expect(layout.panels.map((p) => p.id)).toEqual([
-      "tickets", "agents", "specs", "stack", "cloud", "cicd",
+      "tickets", "agents", "specs", "stack", "cloud", "cicd", "chat",
     ]);
   });
 
