@@ -51,6 +51,14 @@ export function rolePath(id: string): string {
   return join(rolesDir(), `${id}.yaml`);
 }
 
+export function skillsDir(): string {
+  return join(opcomRoot(), "skills");
+}
+
+export function skillPath(id: string): string {
+  return join(skillsDir(), id, "SKILL.md");
+}
+
 export function summariesDir(): string {
   return join(opcomRoot(), "summaries");
 }

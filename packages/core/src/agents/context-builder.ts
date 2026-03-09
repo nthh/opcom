@@ -1,14 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
 import { readProjectSummary } from "../config/summary.js";
+import { matchSkills } from "../config/skills.js";
 
 export async function buildContextPacket(
   project: ProjectConfig,
   workItem?: WorkItem,
+  role?: RoleDefinition,
 ): Promise<ContextPacket> {
   const packet: ContextPacket = {
     project: {
@@ -117,6 +119,16 @@ export async function buildContextPacket(
     }
   } catch {
     // Summary not available — continue without it
+  }
+
+  // Match and include relevant skills
+  try {
+    const skills = await matchSkills(workItem, role, project.id);
+    if (skills.length > 0) {
+      packet.skills = skills.map(s => ({ name: s.name, content: s.content }));
+    }
+  } catch {
+    // Skills not available — continue without them
   }
 
   return packet;
@@ -333,6 +345,16 @@ export function contextPacketToMarkdown(
     lines.push(`6. After the rebase completes, run tests relevant to the conflicting files to verify.`);
     lines.push(`7. Do not modify files that are not part of the conflict.`);
     lines.push("");
+  }
+
+  // Skills
+  if (packet.skills && packet.skills.length > 0) {
+    lines.push(`## Skills`);
+    for (const skill of packet.skills) {
+      lines.push(`### ${skill.name}`);
+      lines.push(skill.content);
+      lines.push("");
+    }
   }
 
   // Agent config

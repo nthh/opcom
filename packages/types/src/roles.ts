@@ -11,6 +11,7 @@ export interface RoleDefinition {
   doneCriteria?: string;
   runTests?: boolean;
   runOracle?: boolean | null;
+  skills?: string[];
 }
 
 export interface ResolvedRoleConfig {

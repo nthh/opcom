@@ -42,12 +42,15 @@ export {
   projectPath,
   rolesDir,
   rolePath,
+  skillsDir,
+  skillPath,
   summariesDir,
   summaryPath,
   templatesDir,
   templateDir,
 } from "./config/paths.js";
 export { loadRole, resolveRoleConfig, writeBuiltinRoles, BUILTIN_ROLES, parseRoleYaml } from "./config/roles.js";
+export { loadSkill, listSkills, matchSkills, writeBuiltinSkills, createSkill, BUILTIN_SKILLS, parseSkillMd } from "./config/skills.js";
 export {
   readProjectSummary,
   writeProjectSummary,
