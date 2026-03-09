@@ -58,3 +58,11 @@ export function summariesDir(): string {
 export function summaryPath(projectId: string): string {
   return join(summariesDir(), `${projectId}.md`);
 }
+
+export function templatesDir(): string {
+  return join(opcomRoot(), "templates");
+}
+
+export function templateDir(id: string): string {
+  return join(templatesDir(), id);
+}

@@ -11,3 +11,4 @@ export * from "./environments.js";
 export * from "./changeset.js";
 export * from "./roles.js";
 export * from "./integrations.js";
+export * from "./templates.js";

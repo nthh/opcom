@@ -14,8 +14,10 @@ import {
   emptyStack,
   writeProjectSummary,
   createInitialSummaryFromDescription,
+  loadAllTemplates,
+  scaffoldFromTemplate,
 } from "@opcom/core";
-import type { WorkspaceConfig, ProjectConfig } from "@opcom/types";
+import type { WorkspaceConfig, ProjectConfig, ProjectTemplate } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
 import { detectionToProjectConfig } from "./add.js";
 
@@ -135,19 +137,72 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       console.log("  No code detected — that's fine, not every project has code.\n");
     }
 
-    // 5. Create .tickets/ directory
-    const ticketsDir = resolve(folderPath, ".tickets/impl");
-    if (!existsSync(ticketsDir)) {
-      await mkdir(ticketsDir, { recursive: true });
-      console.log("  Created .tickets/impl/");
+    // 5. Template selection
+    const templates = await loadAllTemplates();
+    let selectedTemplate: ProjectTemplate | null = null;
+
+    if (templates.length > 0) {
+      console.log("  Use a template?");
+      templates.forEach((t, i) => {
+        console.log(`  [${i + 1}] ${t.id} — ${t.description}`);
+      });
+      console.log(`  [${templates.length + 1}] none — Start empty`);
+      console.log("");
+
+      const templateChoice = (await ask("  > ")).trim();
+      const choiceNum = parseInt(templateChoice, 10);
+
+      if (choiceNum >= 1 && choiceNum <= templates.length) {
+        selectedTemplate = templates[choiceNum - 1];
+      }
+      console.log("");
     }
 
-    // 6. Create minimal AGENTS.md if none exists
-    const agentsMdPath = resolve(folderPath, "AGENTS.md");
-    if (!existsSync(agentsMdPath)) {
-      const agentsContent = `# ${name}\n\n${description || `Project: ${name}`}\n`;
-      await writeFile(agentsMdPath, agentsContent, "utf-8");
-      console.log("  Created AGENTS.md");
+    // 6. Prompt for template variables and scaffold
+    const templateVars: Record<string, string> = { name, description: description || `Project: ${name}` };
+
+    if (selectedTemplate) {
+      // Prompt for template-specific variables
+      if (selectedTemplate.variables) {
+        for (const v of selectedTemplate.variables) {
+          const defaultHint = v.default ? ` [${v.default}]` : "";
+          const answer = (await ask(`  ${v.prompt}${defaultHint} `)).trim();
+          templateVars[v.name] = answer || v.default || "";
+        }
+        console.log("");
+      }
+
+      const result = await scaffoldFromTemplate({
+        projectDir: folderPath,
+        template: selectedTemplate,
+        variables: templateVars,
+      });
+
+      if (result.directoriesCreated.length > 0) {
+        for (const dir of result.directoriesCreated) {
+          console.log(`  Created ${dir}/`);
+        }
+      }
+      if (result.ticketCount > 0) {
+        console.log(`  ${result.ticketCount} ticket(s) created from template`);
+      }
+      if (result.agentsMdWritten) {
+        console.log("  Created AGENTS.md");
+      }
+    } else {
+      // No template — create minimal scaffolding
+      const ticketsDir = resolve(folderPath, ".tickets/impl");
+      if (!existsSync(ticketsDir)) {
+        await mkdir(ticketsDir, { recursive: true });
+        console.log("  Created .tickets/impl/");
+      }
+
+      const agentsMdPath = resolve(folderPath, "AGENTS.md");
+      if (!existsSync(agentsMdPath)) {
+        const agentsContent = `# ${name}\n\n${description || `Project: ${name}`}\n`;
+        await writeFile(agentsMdPath, agentsContent, "utf-8");
+        console.log("  Created AGENTS.md");
+      }
     }
 
     // 7. Build and save project config
