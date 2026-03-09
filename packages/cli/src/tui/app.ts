@@ -141,6 +141,7 @@ import {
 import {
   renderDeploymentDetail,
   createDeploymentDetailState,
+  rebuildDisplayLines as rebuildDeploymentDisplayLines,
   scrollUp as deploymentScrollUp,
   scrollDown as deploymentScrollDown,
   scrollToTop as deploymentScrollToTop,
@@ -368,6 +369,16 @@ export class TuiApp {
       }
     }
 
+    // Update deployment detail if active (real-time deploy status)
+    if (this.deploymentDetailState && this.focusedProjectId) {
+      const deployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
+      if (deployments.length !== this.deploymentDetailState.deployments.length ||
+          deployments.some((d, i) => d.status !== this.deploymentDetailState!.deployments[i]?.status)) {
+        this.deploymentDetailState.deployments = deployments;
+        rebuildDeploymentDisplayLines(this.deploymentDetailState, this.termSize.cols - 4);
+      }
+    }
+
     // Update cloud service detail if active
     if (this.cloudServiceDetailState && this.focusedProjectId) {
       const services = this.client.projectCloudServices.get(this.focusedProjectId) ?? [];
@@ -527,7 +538,7 @@ export class TuiApp {
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
           keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:deploys  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
         }
         break;
       case 2:
@@ -755,6 +766,10 @@ export class TuiApp {
 
       case "C":
         this.enterCreateTicketMode();
+        return;
+
+      case "d":
+        this.drillDownToDeployments();
         return;
 
       case "P": { // Create plan for selected project
@@ -2233,6 +2248,17 @@ export class TuiApp {
     this.deploymentDetailState = null;
   }
 
+  private drillDownToDeployments(): void {
+    const state = this.dashboardState;
+    const selected = state.selectedIndex[0];
+    const project = state.projects[selected];
+    if (!project) return;
+
+    // Set focused project so navigateToDeploymentDetail can use it
+    this.focusedProjectId = project.id;
+    this.navigateToDeploymentDetail("all");
+  }
+
   private navigateToDeploymentDetail(environment: string): void {
     if (!this.focusedProjectId) return;
 
@@ -2545,6 +2571,7 @@ export function buildHelpLines(): string[] {
     "  f          Cycle project filter",
     "  F          Clear project filter",
     "  1-4        Filter by priority (0 to clear)",
+    "  d          Drill into deploy history",
     "  O          Open settings",
     "",
     bold("Level 2: Project Detail"),

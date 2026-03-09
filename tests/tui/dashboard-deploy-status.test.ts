@@ -6,6 +6,7 @@ import {
   formatDeployIndicator,
   createDashboardState,
   type DashboardDeployStatus,
+  type DashboardState,
 } from "../../packages/cli/src/tui/views/dashboard.js";
 import {
   formatDeploymentLine,
@@ -447,5 +448,193 @@ describe("deployment detail scrolling", () => {
     const state = createDeploymentDetailState(deployments, "folia");
     scrollToBottom(state, 5);
     expect(state.scrollOffset).toBe(state.displayLines.length - 5);
+  });
+});
+
+// --- Real-time deploy status updates ---
+
+describe("real-time deploy status updates", () => {
+  it("re-aggregates deploy status when deployments change", () => {
+    // Simulate: deployment starts as in_progress, then transitions to active
+    const initialDeployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "in_progress", ref: "abc123" }),
+    ];
+    const status1 = aggregateDeployStatus(initialDeployments, "proj-1");
+    expect(status1!.state).toBe("deploying");
+
+    // Deployment progresses to active
+    const updatedDeployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123" }),
+    ];
+    const status2 = aggregateDeployStatus(updatedDeployments, "proj-1");
+    expect(status2!.state).toBe("healthy");
+    expect(status2!.commitSha).toBe("abc123");
+  });
+
+  it("updates dashboard deployStatuses map from project deployments", () => {
+    const state: DashboardState = createDashboardState();
+    state.projects = [
+      makeProject({ id: "proj-1", name: "folia" }),
+      makeProject({ id: "proj-2", name: "mtnmap" }),
+    ];
+
+    // Simulate client.projectDeployments being populated by deployment_updated events
+    const projectDeployments = new Map<string, DeploymentStatus[]>();
+    projectDeployments.set("proj-1", [
+      makeDeployment({ id: "d1", projectId: "proj-1", environment: "production", status: "active", ref: "abc123" }),
+    ]);
+    projectDeployments.set("proj-2", [
+      makeDeployment({ id: "d2", projectId: "proj-2", environment: "staging", status: "in_progress", ref: "def456" }),
+    ]);
+
+    // Re-aggregate (mirrors what syncData does on every event)
+    const deployStatuses = new Map<string, DashboardDeployStatus>();
+    for (const project of state.projects) {
+      const deployments = projectDeployments.get(project.id) ?? [];
+      const status = aggregateDeployStatus(deployments, project.id);
+      if (status) {
+        deployStatuses.set(project.id, status);
+      }
+    }
+    state.deployStatuses = deployStatuses;
+
+    expect(state.deployStatuses.size).toBe(2);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("healthy");
+    expect(state.deployStatuses.get("proj-1")!.commitSha).toBe("abc123");
+    expect(state.deployStatuses.get("proj-2")!.state).toBe("deploying");
+  });
+
+  it("deploy status transitions from deploying to healthy on event", () => {
+    // Simulate event-driven update: pending → in_progress → active
+    const stages: Array<{ status: DeploymentStatus["status"]; expectedState: DashboardDeployStatus["state"] }> = [
+      { status: "pending", expectedState: "deploying" },
+      { status: "in_progress", expectedState: "deploying" },
+      { status: "active", expectedState: "healthy" },
+    ];
+
+    for (const { status, expectedState } of stages) {
+      const deployments = [makeDeployment({ status, ref: "commit-abc" })];
+      const result = aggregateDeployStatus(deployments, "proj-1");
+      expect(result!.state).toBe(expectedState);
+    }
+  });
+
+  it("deploy status transitions to failing on error event", () => {
+    // Start healthy, then error event arrives
+    const healthy = [makeDeployment({ status: "active", ref: "commit1" })];
+    expect(aggregateDeployStatus(healthy, "proj-1")!.state).toBe("healthy");
+
+    // Error deployment arrives (e.g., new deploy failed)
+    const withError = [
+      makeDeployment({ id: "d1", status: "active", ref: "commit1" }),
+      makeDeployment({ id: "d2", status: "error", ref: "commit2" }),
+    ];
+    expect(aggregateDeployStatus(withError, "proj-1")!.state).toBe("failing");
+  });
+});
+
+// --- Deployment detail view: live commit rendering ---
+
+describe("deployment detail live commit display", () => {
+  it("shows live commit SHA prominently", () => {
+    const deployments = [
+      makeDeployment({ environment: "production", status: "active", ref: "abc123def456" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("Live commit:");
+    expect(text).toContain("abc123d"); // First 7 chars of commit SHA
+  });
+
+  it("does not show live commit when no active deployment", () => {
+    const deployments = [
+      makeDeployment({ environment: "production", status: "failed", ref: "abc123def456" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).not.toContain("Live commit:");
+  });
+
+  it("shows live commit per environment", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "prod-commit" }),
+      makeDeployment({ id: "d2", environment: "staging", status: "active", ref: "staging-commit" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("prod-co"); // 7 char truncation
+    expect(text).toContain("staging"); // 7 chars
+  });
+
+  it("rebuilds display lines on deployment change (real-time update)", () => {
+    // Start with in_progress deployment
+    const deployments = [
+      makeDeployment({ environment: "production", status: "in_progress", ref: "abc123" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text1 = state.displayLines.map(stripAnsi).join("\n");
+    expect(text1).not.toContain("LIVE");
+    expect(text1).not.toContain("Live commit:");
+
+    // Simulate deployment_updated event: status changes to active
+    state.deployments = [
+      makeDeployment({ environment: "production", status: "active", ref: "abc123" }),
+    ];
+    rebuildDisplayLines(state, 80);
+    const text2 = state.displayLines.map(stripAnsi).join("\n");
+    expect(text2).toContain("LIVE");
+    expect(text2).toContain("Live commit:");
+    expect(text2).toContain("abc123");
+  });
+});
+
+// --- Dashboard drill-down to deployment detail ---
+
+describe("dashboard drill-down to deployment detail", () => {
+  it("deployment detail state is creatable from project deployments", () => {
+    // Simulates what drillDownToDeployments does: takes project deployments and creates detail state
+    const projectDeployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123",
+        updatedAt: new Date(Date.now() - 60_000).toISOString() }),
+      makeDeployment({ id: "d2", environment: "production", status: "inactive", ref: "old456",
+        updatedAt: new Date(Date.now() - 3600_000).toISOString() }),
+      makeDeployment({ id: "d3", environment: "staging", status: "active", ref: "stg789",
+        updatedAt: new Date(Date.now() - 120_000).toISOString() }),
+    ];
+
+    const state = createDeploymentDetailState(projectDeployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+
+    // Shows both environments
+    expect(text).toContain("PRODUCTION");
+    expect(text).toContain("STAGING");
+    // Shows deploy history
+    expect(text).toContain("History (2)"); // 2 production deploys
+    expect(text).toContain("History (1)"); // 1 staging deploy
+    // Shows which commit is live
+    expect(text).toContain("Live commit:");
+    expect(text).toContain("abc123");
+    expect(text).toContain("stg789");
+    // Shows old deployment in history
+    expect(text).toContain("old456");
+  });
+
+  it("deployment detail shows all deploys across environments from a single project", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "prod1" }),
+      makeDeployment({ id: "d2", environment: "staging", status: "active", ref: "stg1" }),
+      makeDeployment({ id: "d3", environment: "preview", status: "active", ref: "prev1" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "testproj");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+
+    // All environments visible
+    expect(text).toContain("PRODUCTION");
+    expect(text).toContain("STAGING");
+    expect(text).toContain("PREVIEW");
+    // All commit SHAs visible
+    expect(text).toContain("prod1");
+    expect(text).toContain("stg1");
+    expect(text).toContain("prev1");
   });
 });
