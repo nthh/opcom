@@ -1712,6 +1712,29 @@ export class TuiApp {
         toggleTestOutput(state);
         return;
 
+      case "y":
+        // Confirm pending-confirmation step
+        if (state.step.status === "pending-confirmation" && state.plan) {
+          this.client.send({
+            type: "confirm_step",
+            planId: state.plan.id,
+            ticketId: state.step.ticketId,
+          } as import("@opcom/types").ClientCommand);
+        }
+        return;
+
+      case "n":
+        // Reject pending-confirmation step
+        if (state.step.status === "pending-confirmation" && state.plan) {
+          this.client.send({
+            type: "reject_step",
+            planId: state.plan.id,
+            ticketId: state.step.ticketId,
+            reason: "Rejected by user",
+          } as import("@opcom/types").ClientCommand);
+        }
+        return;
+
       case "t":
         // Jump to ticket focus
         if (state.ticket) {

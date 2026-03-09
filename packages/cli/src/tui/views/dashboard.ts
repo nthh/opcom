@@ -387,6 +387,7 @@ function planStepIcon(status: string): string {
     case "skipped": return "\u2298"; // ⊘
     case "needs-rebase": return "\u21c4"; // ⇄
     case "rebasing": return "\u27f3"; // ⟳
+    case "pending-confirmation": return "\u2709"; // ✉
     default: return "?";
   }
 }
@@ -400,6 +401,7 @@ function planStatusColor(status: string): string {
     case "failed": return ANSI.red;
     case "needs-rebase": return ANSI.red;
     case "rebasing": return ANSI.yellow;
+    case "pending-confirmation": return ANSI.magenta;
     case "skipped": return ANSI.dim;
     case "blocked": return ANSI.dim;
     default: return ANSI.white;

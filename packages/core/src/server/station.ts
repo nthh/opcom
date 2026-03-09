@@ -763,6 +763,26 @@ export class Station {
         break;
       }
 
+      case "confirm_step": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.confirmStep(command.ticketId);
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
+      case "reject_step": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.rejectStep(command.ticketId, command.reason);
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
       case "run_hygiene": {
         const ticketSets = await this.loadAllTickets();
         const report = checkHygiene(ticketSets, this.sessionManager.listSessions());

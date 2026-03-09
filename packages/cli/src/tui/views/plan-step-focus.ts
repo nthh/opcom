@@ -80,6 +80,7 @@ function stepStatusIcon(status: string): string {
     case "skipped": return "\u2298"; // ⊘
     case "needs-rebase": return "\u21c4"; // ⇄
     case "rebasing": return "\u27f3"; // ⟳
+    case "pending-confirmation": return "\u2709"; // ✉
     default: return "?";
   }
 }
@@ -93,6 +94,7 @@ function stepStatusColor(status: string): string {
     case "failed": return ANSI.red;
     case "needs-rebase": return ANSI.red;
     case "rebasing": return ANSI.yellow;
+    case "pending-confirmation": return ANSI.magenta;
     case "skipped": return ANSI.dim;
     case "blocked": return ANSI.dim;
     default: return ANSI.white;
@@ -303,6 +305,14 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
     lines.push("");
   }
 
+  // --- Pending Confirmation ---
+  if (step.status === "pending-confirmation") {
+    lines.push(bold(color(ANSI.magenta, "Awaiting Confirmation")));
+    lines.push(`  Agent completed. Confirm this task is done?`);
+    lines.push(`  Press ${bold("y")} to confirm or ${bold("n")} to reject.`);
+    lines.push("");
+  }
+
   // --- Track ---
   if (step.track) {
     lines.push(`${dim("Track:")} ${step.track}`);
@@ -367,7 +377,8 @@ export function renderPlanStepFocus(
   const agentKey = state.agent ? "a:agent  " : "";
   const startKey = state.step.status === "ready" ? "w:start agent  " : "";
   const outputKey = state.verification?.testGate?.output ? "o:output  " : "";
-  const keys = dim(`j/k:scroll  ${startKey}${agentKey}${outputKey}t:ticket  Esc:back`);
+  const confirmKeys = state.step.status === "pending-confirmation" ? "y:confirm  n:reject  " : "";
+  const keys = dim(`j/k:scroll  ${confirmKeys}${startKey}${agentKey}${outputKey}t:ticket  Esc:back`);
   buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
 }
 

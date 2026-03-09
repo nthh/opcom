@@ -74,7 +74,7 @@ export class TuiClient {
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
   private activeExecutorPlanId: string | null = null;
-  private activeExecutor: { pause(): void; resume(): void } | null = null;
+  private activeExecutor: { pause(): void; resume(): void; confirmStep?(ticketId: string): void; rejectStep?(ticketId: string, reason?: string): void } | null = null;
 
   // CI/CD poller for direct mode (real-time deployment tracking)
   private cicdPoller: CICDPoller | null = null;
@@ -619,6 +619,14 @@ export class TuiClient {
           // Re-create the executor to resume execution.
           await this.executePlan(this.activePlan.id);
         }
+        break;
+
+      case "confirm_step":
+        this.activeExecutor?.confirmStep?.(command.ticketId);
+        break;
+
+      case "reject_step":
+        this.activeExecutor?.rejectStep?.(command.ticketId, command.reason);
         break;
 
       case "refresh_status":
