@@ -1,7 +1,7 @@
 ---
 id: plan-lifecycle
 title: "Plan lifecycle: cancel, delete, and cleanup"
-status: open
+status: closed
 type: bug
 priority: 1
 deps: []
