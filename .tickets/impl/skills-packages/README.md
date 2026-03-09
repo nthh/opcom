@@ -6,6 +6,7 @@ type: feature
 priority: 3
 deps: []
 links:
+  - docs/spec/skills.md
   - docs/spec/roles.md
   - docs/spec/adapters.md
 services:

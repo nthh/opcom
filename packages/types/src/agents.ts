@@ -119,6 +119,7 @@ export interface ContextPacket {
     clean: boolean;
   };
   graph?: GraphContext;
+  skills?: import("./skills.js").SkillEntry[];
   agentConfig?: string;
   memory?: string;
   summary?: string;

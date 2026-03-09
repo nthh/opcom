@@ -1609,7 +1609,11 @@ export class Executor {
     const tickets = await scanTickets(project.path);
     const workItem = tickets.find((t) => t.id === step.ticketId);
 
-    const contextPacket = await buildContextPacket(project, workItem);
+    // Resolve role early so buildContextPacket can match skills
+    const roleId = step.role ?? workItem?.role ?? "engineer";
+    const roleDef = await loadRole(roleId);
+
+    const contextPacket = await buildContextPacket(project, workItem, roleDef);
 
     // Create worktree if enabled — agent runs in isolation
     // Skip creation if rebaseConflict is set (worktree already exists from the original step)
@@ -1634,8 +1638,6 @@ export class Executor {
     }
 
     // Resolve role config: role definition → stack tools → plan overrides
-    const roleId = step.role ?? workItem?.role ?? "engineer";
-    const roleDef = await loadRole(roleId);
     const stackBashPatterns = deriveAllowedBashTools(
       { stack: project.stack, testing: project.testing, linting: project.linting },
     ).map((t) => t.replace(/^Bash\(/, "").replace(/\)$/, ""));

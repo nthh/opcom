@@ -36,6 +36,7 @@ import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js
 import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
 import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
 import { runImportCalendar, runImportPaste } from "./commands/import.js";
+import { runSkillsList, runSkillsShow } from "./commands/skills.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -478,6 +479,27 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "skills":
+    case "skill": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+        case undefined:
+          return runSkillsList();
+        case "show":
+          if (!args[2]) {
+            console.error("  Usage: opcom skills show <skill-id>");
+            process.exit(1);
+          }
+          return runSkillsShow(args[2]);
+        default:
+          console.error("  Usage: opcom skills [list|show]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -552,6 +574,8 @@ function printHelp(): void {
     integrations [list]          Show available/active integration modules
     integrations enable <id>     Enable an integration module
     integrations disable <id>    Disable an integration module
+    skills [list]                List available capability skills
+    skills show <id>             Show skill details
     scaffold <spec-file>         Generate tickets from spec section anchors
     scaffold --all               Scaffold all specs
     audit [--verbose]            Traceability audit (spec coverage, broken links)
