@@ -156,6 +156,8 @@ import {
   scrollDown as podScrollDown,
   scrollToTop as podScrollToTop,
   scrollToBottom as podScrollToBottom,
+  toggleFollow as podToggleFollow,
+  switchContainer as podSwitchContainer,
   type PodDetailState,
 } from "./views/pod-detail.js";
 
@@ -2391,6 +2393,14 @@ export class TuiApp {
 
       case "g":
         podScrollToTop(state);
+        return;
+
+      case "f":
+        podToggleFollow(state);
+        return;
+
+      case "c":
+        podSwitchContainer(state);
         return;
     }
   }
