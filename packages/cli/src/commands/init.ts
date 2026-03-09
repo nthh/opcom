@@ -12,6 +12,8 @@ import {
   detectProject,
   defaultSettings,
   emptyStack,
+  writeProjectSummary,
+  createInitialSummaryFromDescription,
 } from "@opcom/core";
 import type { WorkspaceConfig, ProjectConfig } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
@@ -65,6 +67,10 @@ export async function runInit(): Promise<void> {
         if (confirm === "" || confirm === "y" || confirm === "yes") {
           const config = detectionToProjectConfig(result);
           await saveProject(config);
+          await writeProjectSummary(
+            config.id,
+            createInitialSummaryFromDescription(config.name),
+          );
           workspace.projectIds.push(config.id);
           console.log(`  Added ${config.name}\n`);
         } else {
@@ -153,6 +159,10 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       name,
     };
     await saveProject(config);
+    await writeProjectSummary(
+      config.id,
+      createInitialSummaryFromDescription(config.name, description || undefined),
+    );
 
     // 8. Add to workspace
     const global = await loadGlobalConfig();

@@ -42,8 +42,17 @@ export {
   projectPath,
   rolesDir,
   rolePath,
+  summariesDir,
+  summaryPath,
 } from "./config/paths.js";
 export { loadRole, resolveRoleConfig, writeBuiltinRoles, BUILTIN_ROLES, parseRoleYaml } from "./config/roles.js";
+export {
+  readProjectSummary,
+  writeProjectSummary,
+  updateProjectSummary,
+  createInitialSummaryFromDescription,
+} from "./config/summary.js";
+export type { SummaryUpdate } from "./config/summary.js";
 
 export { validateGlobalConfig, validateWorkspaceConfig, validateProjectConfig, emptyStack } from "./config/schema.js";
 export {

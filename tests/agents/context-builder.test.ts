@@ -160,6 +160,24 @@ describe("contextPacketToMarkdown", () => {
     expect(md).not.toContain("## Done Criteria");
   });
 
+  it("includes summary in markdown when present", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    packet.summary = "# MyApp Summary\n\n## Current State\n- Phase: Building\n";
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("## Project Summary");
+    expect(md).toContain("Phase: Building");
+  });
+
+  it("omits summary section when not present", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).not.toContain("## Project Summary");
+  });
+
   it("always includes git stash warning even with role instructions", async () => {
     const project = makeProject();
     const packet = await buildContextPacket(project);
