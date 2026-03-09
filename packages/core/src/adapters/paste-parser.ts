@@ -120,19 +120,16 @@ export function pasteEventToId(date: string | null, title: string): string {
  */
 export function parsePastedText(text: string): WorkItem[] {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  return lines.map((line) => {
+  const items: WorkItem[] = [];
+  for (const line of lines) {
     const { date, title } = parseLine(line);
-    if (!title) return null;
+    if (!title) continue;
 
     const id = pasteEventToId(date, title);
-    const tags: Record<string, string[]> = {
-      source: ["paste"],
-    };
-
-    return {
+    items.push({
       id,
       title,
-      status: "open" as const,
+      status: "open",
       priority: 2,
       type: "task",
       filePath: "",
@@ -140,7 +137,8 @@ export function parsePastedText(text: string): WorkItem[] {
       due: date ?? undefined,
       deps: [],
       links: [],
-      tags,
-    };
-  }).filter((item): item is WorkItem => item !== null);
+      tags: { source: ["paste"] },
+    });
+  }
+  return items;
 }
