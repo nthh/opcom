@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { parseFrontmatter, parseTicketFile, summarizeWorkItems, scanTickets } from "@opcom/core";
+import { parseFrontmatter, parseTicketFile, summarizeWorkItems, scanTickets, computePlan } from "@opcom/core";
 import type { WorkItem } from "@opcom/types";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -316,6 +316,158 @@ deps: []
     const child = items.find(i => i.id === "my-subtask");
     expect(child).toBeDefined();
     expect(child!.parent).toBe("epic");
+  });
+});
+
+describe("scanTickets → computePlan integration", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), "opcom-test-"));
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("parent ticket with children is excluded from plan steps", async () => {
+    const implDir = join(tmpDir, ".tickets", "impl", "pipeline-v2");
+    mkdirSync(implDir, { recursive: true });
+    writeFileSync(join(implDir, "README.md"), `---
+id: pipeline-v2
+title: "Pipeline V2"
+status: open
+type: feature
+priority: 1
+deps: []
+---
+
+# Pipeline V2
+`);
+    writeFileSync(join(implDir, "argo-executor.md"), `---
+id: argo-executor
+title: "Argo Executor"
+status: open
+type: feature
+priority: 1
+deps: []
+---
+
+# Argo Executor
+`);
+    writeFileSync(join(implDir, "cost-estimation.md"), `---
+id: cost-estimation
+title: "Cost Estimation"
+status: open
+type: feature
+priority: 2
+deps:
+  - argo-executor
+---
+
+# Cost Estimation
+`);
+
+    // Scan returns parent + children
+    const items = await scanTickets(tmpDir);
+    expect(items).toHaveLength(3);
+
+    // Feed into computePlan — parent should be excluded
+    const plan = computePlan(
+      [{ projectId: "folia", tickets: items }],
+      {},
+      "test-plan",
+    );
+
+    const stepIds = plan.steps.map((s) => s.ticketId);
+    expect(stepIds).not.toContain("pipeline-v2");
+    expect(stepIds).toContain("argo-executor");
+    expect(stepIds).toContain("cost-estimation");
+    expect(plan.steps).toHaveLength(2);
+  });
+
+  it("Folia plan for pipeline-v2 produces a multi-step track instead of a single step", async () => {
+    const implDir = join(tmpDir, ".tickets", "impl", "pipeline-v2");
+    mkdirSync(implDir, { recursive: true });
+    writeFileSync(join(implDir, "README.md"), `---
+id: pipeline-v2
+title: "Pipeline V2"
+status: open
+type: feature
+priority: 1
+deps: []
+---
+
+# Pipeline V2 — parent epic
+`);
+    writeFileSync(join(implDir, "pipeline-v2-types.md"), `---
+id: pipeline-v2-types
+title: "Pipeline V2 Types"
+status: open
+type: feature
+priority: 1
+deps: []
+---
+
+# Pipeline V2 Types
+`);
+    writeFileSync(join(implDir, "argo-executor.md"), `---
+id: argo-executor
+title: "Argo Executor"
+status: open
+type: feature
+priority: 1
+deps:
+  - pipeline-v2-types
+---
+
+# Argo Executor
+`);
+    writeFileSync(join(implDir, "cost-estimation.md"), `---
+id: cost-estimation
+title: "Cost Estimation"
+status: open
+type: feature
+priority: 2
+deps:
+  - pipeline-v2-types
+---
+
+# Cost Estimation
+`);
+
+    const items = await scanTickets(tmpDir);
+    expect(items).toHaveLength(4); // parent + 3 children
+
+    const plan = computePlan(
+      [{ projectId: "folia", tickets: items }],
+      {},
+      "pipeline-v2-plan",
+    );
+
+    // Parent excluded, 3 children become steps
+    const stepIds = plan.steps.map((s) => s.ticketId);
+    expect(stepIds).not.toContain("pipeline-v2");
+    expect(plan.steps).toHaveLength(3);
+    expect(stepIds).toContain("pipeline-v2-types");
+    expect(stepIds).toContain("argo-executor");
+    expect(stepIds).toContain("cost-estimation");
+
+    // Children form a multi-step track (connected via deps)
+    const typesStep = plan.steps.find((s) => s.ticketId === "pipeline-v2-types")!;
+    const argoStep = plan.steps.find((s) => s.ticketId === "argo-executor")!;
+    const costStep = plan.steps.find((s) => s.ticketId === "cost-estimation")!;
+
+    // types is ready (no deps), argo and cost are blocked on types
+    expect(typesStep.status).toBe("ready");
+    expect(argoStep.status).toBe("blocked");
+    expect(argoStep.blockedBy).toEqual(["pipeline-v2-types"]);
+    expect(costStep.status).toBe("blocked");
+    expect(costStep.blockedBy).toEqual(["pipeline-v2-types"]);
+
+    // All three should be in the same track (connected by deps)
+    expect(typesStep.track).toBe(argoStep.track);
+    expect(argoStep.track).toBe(costStep.track);
   });
 });
 
