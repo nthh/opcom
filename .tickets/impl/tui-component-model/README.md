@@ -1,7 +1,7 @@
 ---
 id: tui-component-model
 title: "TUI: Extract Reusable Component Model"
-status: open
+status: closed
 type: refactor
 priority: 1
 created: 2026-03-08
