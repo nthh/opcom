@@ -1,7 +1,7 @@
 ---
 id: verification-modes
 title: "Per-work-item verification modes"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
