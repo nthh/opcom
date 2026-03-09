@@ -148,7 +148,7 @@ describe("getInfraResourcesList", () => {
 });
 
 describe("getPanelItemCount for infra panel", () => {
-  it("returns infra resource count for panel 5", () => {
+  it("returns infra resource count for panel 6", () => {
     const state = createProjectDetailState(makeProject());
     state.infraResources = [
       makeResource({ name: "api" }),
@@ -156,12 +156,12 @@ describe("getPanelItemCount for infra panel", () => {
       makeResource({ name: "api-svc", kind: "service" }),
     ];
 
-    expect(getPanelItemCount(state, 5)).toBe(3);
+    expect(getPanelItemCount(state, 6)).toBe(3);
   });
 
   it("returns 0 for empty infra panel", () => {
     const state = createProjectDetailState(makeProject());
-    expect(getPanelItemCount(state, 5)).toBe(0);
+    expect(getPanelItemCount(state, 6)).toBe(0);
   });
 });
 
@@ -169,25 +169,25 @@ describe("clampSelection for infra panel", () => {
   it("clamps infra panel selection to valid range", () => {
     const state = createProjectDetailState(makeProject());
     state.infraResources = [makeResource({ name: "api" })];
-    state.selectedIndex[5] = 5; // Out of range
+    state.selectedIndex[6] = 5; // Out of range
 
     clampSelection(state);
-    expect(state.selectedIndex[5]).toBe(0);
+    expect(state.selectedIndex[6]).toBe(0);
   });
 
   it("resets to 0 when no infra resources", () => {
     const state = createProjectDetailState(makeProject());
-    state.selectedIndex[5] = 2;
+    state.selectedIndex[6] = 2;
 
     clampSelection(state);
-    expect(state.selectedIndex[5]).toBe(0);
-    expect(state.scrollOffset[5]).toBe(0);
+    expect(state.selectedIndex[6]).toBe(0);
+    expect(state.scrollOffset[6]).toBe(0);
   });
 });
 
 describe("PANEL_COUNT", () => {
-  it("is 6 (tickets, agents, specs, stack, cloud, infra)", () => {
-    expect(PANEL_COUNT).toBe(6);
+  it("is 7 (tickets, agents, specs, stack, cloud, cicd, infra)", () => {
+    expect(PANEL_COUNT).toBe(7);
   });
 });
 
@@ -198,9 +198,9 @@ describe("createProjectDetailState infra fields", () => {
     expect(state.infraCrashEvents).toEqual([]);
   });
 
-  it("has 6 panel slots in selectedIndex and scrollOffset", () => {
+  it("has 7 panel slots in selectedIndex and scrollOffset", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(6);
-    expect(state.scrollOffset).toHaveLength(6);
+    expect(state.selectedIndex).toHaveLength(7);
+    expect(state.scrollOffset).toHaveLength(7);
   });
 });

@@ -608,7 +608,7 @@ function printHelp(): void {
     ci <project> --watch         Watch pipeline status live
     infra [project]              Show infrastructure status (K8s)
     infra <project> pods         List pods
-    infra <project> logs <pod>   Tail pod logs (--follow for streaming)
+    infra <project> logs <pod>   Tail pod logs (--follow, --container/-c)
     infra <project> restart <dep> Rollout restart a deployment
     schedule list                List scheduled tasks
     schedule add <n> <c> <cmd>   Add a scheduled task (name, cron, command)
