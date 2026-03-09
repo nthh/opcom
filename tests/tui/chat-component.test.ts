@@ -462,9 +462,9 @@ describe("layout with chat panel", () => {
 
   it("project-detail layout positions chat at bottom of right column", () => {
     const layout = getLayout(2, 120, 40);
-    const cicdPanel = layout.panels.find((p) => p.id === "cicd")!;
+    const infraPanel = layout.panels.find((p) => p.id === "infra")!;
     const chatPanel = layout.panels.find((p) => p.id === "chat")!;
-    expect(chatPanel.y).toBe(cicdPanel.y + cicdPanel.height);
+    expect(chatPanel.y).toBe(infraPanel.y + infraPanel.height);
   });
 
   it("L3 layout has no chat panel", () => {

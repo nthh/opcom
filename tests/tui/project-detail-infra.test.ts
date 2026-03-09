@@ -186,8 +186,8 @@ describe("clampSelection for infra panel", () => {
 });
 
 describe("PANEL_COUNT", () => {
-  it("is 7 (tickets, agents, specs, stack, cloud, cicd, infra)", () => {
-    expect(PANEL_COUNT).toBe(7);
+  it("is 8 (tickets, agents, specs, stack, cloud, cicd, infra, chat)", () => {
+    expect(PANEL_COUNT).toBe(8);
   });
 });
 
@@ -198,9 +198,9 @@ describe("createProjectDetailState infra fields", () => {
     expect(state.infraCrashEvents).toEqual([]);
   });
 
-  it("has 7 panel slots in selectedIndex and scrollOffset", () => {
+  it("has 8 panel slots in selectedIndex and scrollOffset", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(7);
-    expect(state.scrollOffset).toHaveLength(7);
+    expect(state.selectedIndex).toHaveLength(8);
+    expect(state.scrollOffset).toHaveLength(8);
   });
 });
