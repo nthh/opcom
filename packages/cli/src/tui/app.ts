@@ -1886,6 +1886,38 @@ export class TuiApp {
     }
   }
 
+  private handlePipelineDetailInput(data: string): void {
+    if (!this.pipelineDetailState) return;
+    const state = this.pipelineDetailState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 4;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        pipelineScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        pipelineScrollUp(state, 1);
+        return;
+
+      case "G":
+        pipelineScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        pipelineScrollToTop(state);
+        return;
+    }
+  }
+
   private openSettingsView(): void {
     this.navStack.push({
       level: this.level,
