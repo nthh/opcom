@@ -20,13 +20,16 @@ import {
   bold,
   dim,
   color,
-  stateColor,
   truncate,
   padRight,
-  progressBar,
 } from "../renderer.js";
 import { healthDot } from "./cloud-service-detail.js";
 import { renderCICDPanel, getCICDItemCount } from "./cicd-pane.js";
+import {
+  AgentsListComponent,
+  getVisibleAgents,
+  type AgentsListState,
+} from "../components/agents-list.js";
 
 export interface ProjectDetailState {
   project: ProjectStatusSnapshot;
@@ -40,9 +43,13 @@ export interface ProjectDetailState {
   focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
+  agentsComponent: AgentsListState; // component state for agents panel
 }
 
 export function createProjectDetailState(project: ProjectStatusSnapshot): ProjectDetailState {
+  const agentsComponent = AgentsListComponent.init();
+  agentsComponent.mode = "project-detail";
+  agentsComponent.projectId = project.id;
   return {
     project,
     projectConfig: null,
@@ -55,6 +62,7 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     focusedPanel: 0,
     selectedIndex: [0, 0, 0, 0, 0, 0],
     scrollOffset: [0, 0, 0, 0, 0, 0],
+    agentsComponent,
   };
 }
 
@@ -71,7 +79,7 @@ export function renderProjectDetail(
   const cicdPanel = panels.find((p) => p.id === "cicd");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
-  if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 1);
+  if (agentsPanel) AgentsListComponent.render(buf, agentsPanel, state.agentsComponent, state.focusedPanel === 1);
   if (specsPanel) renderSpecsPanel(buf, specsPanel, state, state.focusedPanel === 2);
   if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 3);
   if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 4);
@@ -207,61 +215,6 @@ function formatTicketLine(
   const typeStr = ticket.type ? dim(` [${ticket.type}]`) : "";
 
   const line = `  ${priority} ${statusIcon} ${ticket.id}: ${ticket.title}${typeStr}${agentIcon}`;
-  return truncate(line, maxWidth);
-}
-
-// --- Agents Panel ---
-
-function renderAgentsPanel(
-  buf: ScreenBuffer,
-  panel: Panel,
-  state: ProjectDetailState,
-  focused: boolean,
-): void {
-  const projectAgents = state.agents.filter((a) => a.projectId === state.project.id);
-  const title = `Agents (${projectAgents.filter((a) => a.state !== "stopped").length})`;
-
-  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
-
-  const contentWidth = panel.width - 4;
-  const maxItems = panel.height - 2;
-  const selected = state.selectedIndex[1] ?? 0;
-  const scroll = state.scrollOffset[1] ?? 0;
-
-  if (projectAgents.length === 0) {
-    buf.writeLine(panel.y + 1, panel.x + 2, dim("No agents for this project"), contentWidth);
-    buf.writeLine(panel.y + 2, panel.x + 2, dim("Press 'w' on a ticket to start"), contentWidth);
-    return;
-  }
-
-  for (let i = 0; i < maxItems && i + scroll < projectAgents.length; i++) {
-    const idx = i + scroll;
-    const agent = projectAgents[idx];
-    const row = panel.y + 1 + i;
-    const isSelected = idx === selected && focused;
-
-    const line = formatAgentLine(agent, contentWidth);
-    if (isSelected) {
-      buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
-    } else {
-      buf.writeLine(row, panel.x + 2, line, contentWidth);
-    }
-  }
-}
-
-function formatAgentLine(agent: AgentSession, maxWidth: number): string {
-  const sColor = stateColor(agent.state);
-  const stateStr = color(sColor, agent.state);
-  const shortId = agent.id.slice(0, 8);
-  const ticket = agent.workItemId ? ` ${dim(agent.workItemId)}` : "";
-
-  let ctxStr = "";
-  if (agent.contextUsage) {
-    const pct = Math.round(agent.contextUsage.percentage);
-    ctxStr = ` ${progressBar(agent.contextUsage.tokensUsed, agent.contextUsage.maxTokens, 8)} ${pct}%`;
-  }
-
-  const line = `${dim(shortId)} ${stateStr}${ticket}${ctxStr}`;
   return truncate(line, maxWidth);
 }
 
@@ -632,7 +585,7 @@ export function getTicketsList(state: ProjectDetailState): WorkItem[] {
 export function getPanelItemCount(state: ProjectDetailState, panelIndex: number): number {
   switch (panelIndex) {
     case 0: return getTicketsList(state).length;
-    case 1: return state.agents.filter((a) => a.projectId === state.project.id).length;
+    case 1: return getVisibleAgents(state.agentsComponent).length;
     case 2: return getSpecsList(state).length;
     case 3: return 0; // stack is not navigable
     case 4: return getCloudServicesList(state).length;
