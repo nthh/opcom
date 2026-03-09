@@ -1,7 +1,7 @@
 ---
 id: skills-packages
 title: "Skills as reusable capability packages, separate from roles"
-status: open
+status: closed
 type: feature
 priority: 3
 deps: []
