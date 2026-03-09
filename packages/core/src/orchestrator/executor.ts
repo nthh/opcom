@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -118,7 +119,19 @@ export class Executor {
         if (!sessionAlive) {
           step.verifyingPhase = undefined;
           step.verifyingPhaseStartedAt = undefined;
-          if (this.plan.config.worktree && step.worktreePath) {
+          if (this.plan.config.worktree && step.worktreePath && existsSync(step.worktreePath)) {
+            // Restore worktree tracking (lost on executor restart) so that
+            // hasCommits() and merge() can find the worktree info.
+            const project = await loadProject(step.projectId);
+            if (project) {
+              this.worktreeManager.restore({
+                stepId: step.ticketId,
+                ticketId: step.ticketId,
+                projectPath: project.path,
+                worktreePath: step.worktreePath,
+                branch: step.worktreeBranch ?? `work/${step.ticketId}`,
+              });
+            }
             log.warn("re-running verification for stuck step", { ticketId: step.ticketId });
             // Re-enter the worktree completion flow which runs verification then merges.
             this.activeVerifications++;
@@ -750,7 +763,7 @@ export class Executor {
     }
 
     // Verification passed (or skipped) — merge into main tree
-    const mergeResult = await this.worktreeManager.merge(step.ticketId);
+    let mergeResult = await this.worktreeManager.merge(step.ticketId);
 
     if (mergeResult.conflict) {
       if (verification) step.verification = verification;
@@ -758,15 +771,18 @@ export class Executor {
       // Auto-rebase: attempt automatic conflict resolution.
       // Allow rebase even after a resolution agent — main may have moved again
       // while the agent was working. Limit total rebase attempts to prevent loops.
-      const rebaseAttempts = step.rebaseAttempts ?? 0;
+      // Loop because a concurrent merge can move main again during re-verification.
       const maxRebaseAttempts = 3;
-      if (this.plan.config.verification.autoRebase !== false && rebaseAttempts < maxRebaseAttempts) {
-        step.rebaseAttempts = rebaseAttempts + 1;
+      while (this.plan.config.verification.autoRebase !== false && (step.rebaseAttempts ?? 0) < maxRebaseAttempts) {
+        step.rebaseAttempts = (step.rebaseAttempts ?? 0) + 1;
         const resolved = await this.handleAutoRebase(step, event, roleVerify);
         if (resolved) return; // Step completed or re-queued for agent resolution
+        // handleAutoRebase returned false — post-rebase merge still conflicts.
+        // Refresh mergeResult for the needs-rebase error message, then retry.
+        mergeResult = { merged: false, conflict: true, error: mergeResult.error };
       }
 
-      // Auto-rebase disabled or failed — mark as needs-rebase
+      // Auto-rebase disabled or exhausted — mark as needs-rebase
       step.status = "needs-rebase";
       step.error = `Merge conflict: ${mergeResult.error}`;
       step.completedAt = new Date().toISOString();
