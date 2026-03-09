@@ -841,35 +841,26 @@ Stages break plan execution into sequential rounds with approval gates between t
 
 ### Stage Computation
 
-Stages are derived from the DAG — each "wave" of steps that can run in parallel at the same dependency depth forms a stage:
+Stages group **major feature areas** into reviewable batches, not dependency-depth waves. Each stage should be a coherent chunk of work the user can test before the next batch starts.
+
+Auto-computation groups steps by **track** (connected components in the dep graph). Tracks are ordered by priority and inter-track dependencies, then batched into stages:
 
 ```
-Stage 1: all steps with no deps (leaf nodes in the DAG)
-Stage 2: steps whose deps were all in stage 1
-Stage 3: steps whose deps were all in stage 1 or 2
-...
+Stage 1: "geo pipeline" — geospatial-libs, h3-validation, pipeline sub-tickets
+Stage 2: "serving layer" — edge-serving, tile-warming, publish-and-serve
+Stage 3: "UI + demos" — siting-demo, data-quality-demo, geo-workbench
 ```
 
 ```typescript
 function computeStages(steps: PlanStep[]): PlanStage[] {
-  const stages: PlanStage[] = [];
-  const completed = new Set<string>();
-
-  while (completed.size < steps.length) {
-    const wave = steps.filter(s =>
-      !completed.has(s.ticketId) &&
-      s.blockedBy.every(dep => completed.has(dep))
-    );
-    stages.push({
-      index: stages.length,
-      stepTicketIds: wave.map(s => s.ticketId),
-      status: "pending",
-    });
-    wave.forEach(s => completed.add(s.ticketId));
-  }
-  return stages;
+  // 1. Group steps by track
+  // 2. Order tracks by priority (highest first) and deps (if track B depends on track A, A first)
+  // 3. Batch tracks into stages based on maxStageSize config
+  // 4. Intra-stage dep ordering handled by executor via blockedBy
 }
 ```
+
+The previous approach (dep-depth waves) put all no-dep tickets into stage 0 regardless of feature area, producing stages that were too large to review and where a stuck step in one track blocked unrelated tracks in later stages.
 
 ### Explicit Stages
 
