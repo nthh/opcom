@@ -8,6 +8,8 @@ import type {
   ProjectConfig,
   CloudService,
   CloudServiceKind,
+  Pipeline,
+  DeploymentStatus,
 } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import type { SpecCoverageItem } from "../health-data.js";
@@ -24,6 +26,7 @@ import {
   progressBar,
 } from "../renderer.js";
 import { healthDot } from "./cloud-service-detail.js";
+import { renderCICDPanel, getCICDItemCount } from "./cicd-pane.js";
 
 export interface ProjectDetailState {
   project: ProjectStatusSnapshot;
@@ -32,7 +35,9 @@ export interface ProjectDetailState {
   agents: AgentSession[];
   cloudServices: CloudService[];
   projectSpecs: SpecCoverageItem[];
-  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud
+  pipelines: Pipeline[];
+  deployments: DeploymentStatus[];
+  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
 }
@@ -45,9 +50,11 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     agents: [],
     cloudServices: [],
     projectSpecs: [],
+    pipelines: [],
+    deployments: [],
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0, 0, 0],
-    scrollOffset: [0, 0, 0, 0, 0],
+    selectedIndex: [0, 0, 0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0, 0, 0],
   };
 }
 
@@ -61,12 +68,17 @@ export function renderProjectDetail(
   const specsPanel = panels.find((p) => p.id === "specs");
   const stackPanel = panels.find((p) => p.id === "stack");
   const cloudPanel = panels.find((p) => p.id === "cloud");
+  const cicdPanel = panels.find((p) => p.id === "cicd");
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
   if (agentsPanel) renderAgentsPanel(buf, agentsPanel, state, state.focusedPanel === 1);
   if (specsPanel) renderSpecsPanel(buf, specsPanel, state, state.focusedPanel === 2);
   if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 3);
   if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 4);
+  if (cicdPanel) renderCICDPanel(
+    buf, cicdPanel, state.pipelines, state.deployments,
+    state.selectedIndex[5] ?? 0, state.scrollOffset[5] ?? 0, state.focusedPanel === 5,
+  );
 }
 
 // --- Tickets Panel ---
@@ -624,14 +636,19 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
     case 2: return getSpecsList(state).length;
     case 3: return 0; // stack is not navigable
     case 4: return getCloudServicesList(state).length;
+    case 5: return getCICDItemCount(state.pipelines, state.deployments);
     default: return 0;
   }
 }
 
 /** Total number of panels for Tab cycling. */
-export const PANEL_COUNT = 5;
+export const PANEL_COUNT = 6;
 
 export function clampSelection(state: ProjectDetailState): void {
+  // Ensure arrays are large enough for all panels
+  while (state.selectedIndex.length < PANEL_COUNT) state.selectedIndex.push(0);
+  while (state.scrollOffset.length < PANEL_COUNT) state.scrollOffset.push(0);
+
   for (let p = 0; p < PANEL_COUNT; p++) {
     const count = getPanelItemCount(state, p);
     if (count === 0) {

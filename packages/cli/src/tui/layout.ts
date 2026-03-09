@@ -87,10 +87,11 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
-  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
-  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.25));
-  const rightH4 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3);
+  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
+  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
+  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
+  const rightH4 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.20));
+  const rightH5 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4);
 
   return {
     panels: [
@@ -133,6 +134,14 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         width: rightWidth,
         height: rightH4,
         title: "Cloud",
+      },
+      {
+        id: "cicd",
+        x: leftWidth,
+        y: rightH1 + rightH2 + rightH3 + rightH4,
+        width: rightWidth,
+        height: rightH5,
+        title: "CI/CD",
       },
     ],
     statusBarY,

@@ -97,8 +97,8 @@ describe("getCloudServicesList", () => {
 });
 
 describe("PANEL_COUNT", () => {
-  it("is 5 (tickets, agents, specs, stack, cloud)", () => {
-    expect(PANEL_COUNT).toBe(5);
+  it("is 6 (tickets, agents, specs, stack, cloud, cicd)", () => {
+    expect(PANEL_COUNT).toBe(6);
   });
 });
 
@@ -148,9 +148,9 @@ describe("createProjectDetailState", () => {
     expect(state.cloudServices).toEqual([]);
   });
 
-  it("has 5 panel slots in selectedIndex", () => {
+  it("has 6 panel slots in selectedIndex", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(5);
-    expect(state.scrollOffset).toHaveLength(5);
+    expect(state.selectedIndex).toHaveLength(6);
+    expect(state.scrollOffset).toHaveLength(6);
   });
 });

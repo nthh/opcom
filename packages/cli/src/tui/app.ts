@@ -2,7 +2,7 @@
 // Manages navigation, input, rendering, and data flow
 
 import { spawn } from "node:child_process";
-import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService } from "@opcom/types";
+import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService, Pipeline } from "@opcom/types";
 import { ScreenBuffer, ANSI, bold, dim, color, padRight } from "./renderer.js";
 import { getLayout, TerminalSize, type NavigationLevel } from "./layout.js";
 import { TuiClient } from "./client.js";
@@ -111,6 +111,18 @@ import {
   type SettingsViewState,
 } from "./views/settings-view.js";
 import { loadGlobalConfig, saveGlobalConfig, defaultSettings } from "@opcom/core";
+import {
+  getPipelineAtIndex,
+} from "./views/cicd-pane.js";
+import {
+  renderPipelineDetail,
+  createPipelineDetailState,
+  scrollUp as pipelineScrollUp,
+  scrollDown as pipelineScrollDown,
+  scrollToTop as pipelineScrollToTop,
+  scrollToBottom as pipelineScrollToBottom,
+  type PipelineDetailState,
+} from "./views/pipeline-detail.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -130,6 +142,7 @@ export class TuiApp {
   private planOverviewState: PlanOverviewState | null = null;
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
   private settingsViewState: SettingsViewState | null = null;
+  private pipelineDetailState: PipelineDetailState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -284,7 +297,21 @@ export class TuiApp {
         }
         const cloudServices = this.client.projectCloudServices.get(this.focusedProjectId) ?? [];
         this.projectDetailState.cloudServices = cloudServices;
+        const pipelines = this.client.projectPipelines.get(this.focusedProjectId) ?? [];
+        this.projectDetailState.pipelines = pipelines;
+        const deployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
+        this.projectDetailState.deployments = deployments;
         clampProjectDetail(this.projectDetailState);
+      }
+    }
+
+    // Update pipeline detail if active
+    if (this.pipelineDetailState) {
+      const projectId = this.pipelineDetailState.pipeline.projectId;
+      const pipelines = this.client.projectPipelines.get(projectId) ?? [];
+      const updated = pipelines.find((p) => p.id === this.pipelineDetailState!.pipeline.id);
+      if (updated) {
+        this.pipelineDetailState.pipeline = updated;
       }
     }
 
@@ -400,6 +427,8 @@ export class TuiApp {
             renderCloudServiceDetail(this.buf, layout.panels[0], this.cloudServiceDetailState);
           } else if (this.settingsViewState) {
             renderSettingsView(this.buf, layout.panels[0], this.settingsViewState);
+          } else if (this.pipelineDetailState) {
+            renderPipelineDetail(this.buf, layout.panels[0], this.pipelineDetailState);
           }
           break;
       }
@@ -560,6 +589,8 @@ export class TuiApp {
           this.handleCloudServiceDetailInput(data);
         } else if (this.settingsViewState) {
           this.handleSettingsViewInput(data);
+        } else if (this.pipelineDetailState) {
+          this.handlePipelineDetailInput(data);
         }
         break;
     }
@@ -934,6 +965,12 @@ export class TuiApp {
       const service = services[selected];
       if (service) {
         this.navigateToCloudService(service);
+      }
+    } else if (panel === 5) {
+      // Drill into pipeline
+      const pipeline = getPipelineAtIndex(state.pipelines, state.deployments, selected);
+      if (pipeline) {
+        this.navigateToPipeline(pipeline);
       }
     }
   }
@@ -1572,6 +1609,12 @@ export class TuiApp {
         this.scheduleRender();
       }
     }).catch(() => {});
+
+    // Load CI/CD data (pipelines + deployments from cache)
+    const pipelines = this.client.projectPipelines.get(project.id) ?? [];
+    const deployments = this.client.projectDeployments.get(project.id) ?? [];
+    this.projectDetailState.pipelines = pipelines;
+    this.projectDetailState.deployments = deployments;
   }
 
   private navigateToAgent(agent: AgentSession): void {
@@ -1598,6 +1641,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.pipelineDetailState = null;
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {
@@ -1628,6 +1672,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.pipelineDetailState = null;
 
     // Load ticket content async — guard against stale state if user navigated away
     const stateRef = this.ticketFocusState;
@@ -1658,6 +1703,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.pipelineDetailState = null;
   }
 
   private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
@@ -1693,6 +1739,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.pipelineDetailState = null;
   }
 
   // --- L3: Cloud Service Detail Input ---
@@ -1854,6 +1901,24 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.planOverviewState = null;
+    this.settingsViewState = null;
+    this.pipelineDetailState = null;
+  }
+
+  private navigateToPipeline(pipeline: Pipeline): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+    const projectName = this.client.projects.find((p) => p.id === this.focusedProjectId)?.name ?? "";
+    this.pipelineDetailState = createPipelineDetailState(pipeline, projectName);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
     this.settingsViewState = null;
   }
 
@@ -2034,6 +2099,7 @@ export class TuiApp {
         this.planOverviewState = null;
         this.cloudServiceDetailState = null;
         this.settingsViewState = null;
+        this.pipelineDetailState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -2049,6 +2115,7 @@ export class TuiApp {
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
       this.settingsViewState = null;
+      this.pipelineDetailState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;
@@ -2116,7 +2183,7 @@ export function buildHelpLines(): string[] {
     bold("Level 2: Project Detail"),
     "  j/k        Navigate up/down",
     "  Tab        Switch panel focus",
-    "  Enter      Drill down to ticket/agent/spec/cloud",
+    "  Enter      Drill down to ticket/agent/spec/cloud/cicd",
     "  w          Start agent on ticket",
     "  v          Focus cloud services panel",
     "  M          Run pending migrations",

@@ -15,6 +15,8 @@ import type {
   CloudServiceConfig,
   CloudServiceHealth,
   CloudHealthSummary,
+  Pipeline,
+  DeploymentStatus,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -61,6 +63,10 @@ export class TuiClient {
 
   // Cloud service status cache per project
   projectCloudServices = new Map<string, CloudService[]>();
+
+  // CI/CD status cache per project
+  projectPipelines = new Map<string, Pipeline[]>();
+  projectDeployments = new Map<string, DeploymentStatus[]>();
 
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
@@ -354,6 +360,32 @@ export class TuiClient {
         this.projects = this.projects.map((p) =>
           p.id === event.projectId ? { ...p, cloudHealthSummary: summary } : p,
         );
+        break;
+      }
+
+      case "pipeline_updated": {
+        const pipelines = this.projectPipelines.get(event.projectId) ?? [];
+        const pIdx = pipelines.findIndex((p) => p.id === event.pipeline.id);
+        if (pIdx >= 0) {
+          pipelines[pIdx] = event.pipeline;
+        } else {
+          pipelines.unshift(event.pipeline);
+          // Keep last 20 pipelines per project
+          if (pipelines.length > 20) pipelines.pop();
+        }
+        this.projectPipelines.set(event.projectId, pipelines);
+        break;
+      }
+
+      case "deployment_updated": {
+        const deployments = this.projectDeployments.get(event.projectId) ?? [];
+        const dIdx = deployments.findIndex((d) => d.id === event.deployment.id);
+        if (dIdx >= 0) {
+          deployments[dIdx] = event.deployment;
+        } else {
+          deployments.unshift(event.deployment);
+        }
+        this.projectDeployments.set(event.projectId, deployments);
         break;
       }
     }
