@@ -39,6 +39,7 @@ import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
 import { runImportCalendar, runImportPaste } from "./commands/import.js";
 import { runSkillsList, runSkillsShow, runSkillsCreate } from "./commands/skills.js";
 import { runState } from "./commands/state.js";
+import { runTeamList, runTeamShow } from "./commands/team.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -541,6 +542,27 @@ async function main(): Promise<void> {
       return runState(sub, stateOpts);
     }
 
+    case "teams":
+    case "team": {
+      const subcommand = args[1];
+      switch (subcommand) {
+        case "list":
+        case "ls":
+        case undefined:
+          return runTeamList();
+        case "show":
+          if (!args[2]) {
+            console.error("  Usage: opcom teams show <team-id>");
+            process.exit(1);
+          }
+          return runTeamShow(args[2]);
+        default:
+          console.error("  Usage: opcom teams [list|show <id>]");
+          process.exit(1);
+      }
+      break;
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -625,6 +647,8 @@ function printHelp(): void {
     skills [list]                List available capability skills
     skills show <id>             Show skill details
     skills create <id>           Create a new custom skill
+    teams [list]                 List available team formations
+    teams show <id>              Show team details
     scaffold <spec-file>         Generate tickets from spec section anchors
     scaffold --all               Scaffold all specs
     audit [--verbose]            Traceability audit (spec coverage, broken links)
