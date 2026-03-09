@@ -456,10 +456,33 @@ export class Station {
       return { status: 200, data: { skipped: true } };
     }
 
+    // POST /plans/:id/cancel
+    const planCancelMatch = path.match(/^\/plans\/([^/]+)\/cancel$/);
+    if (method === "POST" && planCancelMatch) {
+      const plan = await loadPlan(planCancelMatch[1]);
+      if (!plan) return { status: 404, data: { error: "Plan not found" } };
+      const executor = this.executors.get(plan.id);
+      if (executor) {
+        executor.stop();
+        this.executors.delete(plan.id);
+      }
+      plan.status = "cancelled";
+      plan.updatedAt = new Date().toISOString();
+      await savePlan(plan);
+      this.broadcast({ type: "plan_cancelled", planId: plan.id });
+      return { status: 200, data: { cancelled: true } };
+    }
+
     // DELETE /plans/:id
     const planDeleteMatch = path.match(/^\/plans\/([^/]+)$/);
     if (method === "DELETE" && planDeleteMatch) {
+      const executor = this.executors.get(planDeleteMatch[1]);
+      if (executor) {
+        executor.stop();
+        this.executors.delete(planDeleteMatch[1]);
+      }
       await deletePlan(planDeleteMatch[1]);
+      this.broadcast({ type: "plan_deleted", planId: planDeleteMatch[1] });
       return { status: 200, data: { deleted: true } };
     }
 
@@ -880,6 +903,37 @@ export class Station {
         } else {
           this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
         }
+        break;
+      }
+
+      case "cancel_plan": {
+        const plan = await loadPlan(command.planId);
+        if (!plan) {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Plan not found" });
+          return;
+        }
+        // Stop the executor if running
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.stop();
+          this.executors.delete(command.planId);
+        }
+        plan.status = "cancelled";
+        plan.updatedAt = new Date().toISOString();
+        await savePlan(plan);
+        this.broadcast({ type: "plan_cancelled", planId: plan.id });
+        break;
+      }
+
+      case "delete_plan": {
+        // Stop the executor if running
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.stop();
+          this.executors.delete(command.planId);
+        }
+        await deletePlan(command.planId);
+        this.broadcast({ type: "plan_deleted", planId: command.planId });
         break;
       }
 

@@ -1,6 +1,6 @@
 // Orchestrator plan types
 
-export type PlanStatus = "planning" | "executing" | "paused" | "done" | "failed";
+export type PlanStatus = "planning" | "executing" | "paused" | "done" | "failed" | "cancelled";
 export type StepStatus = "blocked" | "ready" | "in-progress" | "verifying" | "done" | "failed" | "skipped" | "needs-rebase" | "pending-confirmation";
 export type VerificationMode = "test-gate" | "oracle" | "confirmation" | "output-exists" | "none";
 

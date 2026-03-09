@@ -28,6 +28,8 @@ export type ClientCommand =
   | { type: "inject_context"; planId: string; text: string }
   | { type: "confirm_step"; planId: string; ticketId: string }
   | { type: "reject_step"; planId: string; ticketId: string; reason?: string }
+  | { type: "cancel_plan"; planId: string }
+  | { type: "delete_plan"; planId: string }
   | { type: "run_hygiene" }
   // Changeset queries
   | { type: "get_changesets"; ticketId?: string; sessionId?: string; projectId?: string };
@@ -65,6 +67,8 @@ export type ServerEvent =
   | { type: "step_failed"; step: import("./plan.js").PlanStep; error: string }
   | { type: "plan_completed"; plan: import("./plan.js").Plan }
   | { type: "plan_paused"; plan: import("./plan.js").Plan }
+  | { type: "plan_cancelled"; planId: string }
+  | { type: "plan_deleted"; planId: string }
   | { type: "hygiene_report"; report: import("./plan.js").HygieneReport }
 
   // CI/CD events
