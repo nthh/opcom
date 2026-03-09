@@ -1,7 +1,7 @@
 ---
 id: k8s-monitoring
 title: "Kubernetes Infrastructure Monitoring"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
