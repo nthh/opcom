@@ -94,6 +94,38 @@ deps: []
     const item = parseTicketFile(content, "/path/no-role/README.md", "no-role");
     expect(item!.role).toBeUndefined();
   });
+
+  it("parses team from frontmatter", () => {
+    const content = `---
+id: auth-feature
+title: Auth Feature
+status: open
+type: feature
+priority: 2
+team: feature-dev
+deps: []
+---
+
+# Auth Feature
+`;
+    const item = parseTicketFile(content, "/path/auth-feature/README.md", "auth-feature");
+    expect(item).not.toBeNull();
+    expect(item!.team).toBe("feature-dev");
+  });
+
+  it("team is undefined when not specified", () => {
+    const content = `---
+id: no-team
+title: No Team
+status: open
+deps: []
+---
+
+# No Team
+`;
+    const item = parseTicketFile(content, "/path/no-team/README.md", "no-team");
+    expect(item!.team).toBeUndefined();
+  });
 });
 
 describe("summarizeWorkItems", () => {
