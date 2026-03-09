@@ -1,7 +1,7 @@
 ---
 id: init-folder
 title: "opcom init <folder>: Project creation with optional codebase detection"
-status: open
+status: closed
 type: feature
 priority: 1
 deps: []
