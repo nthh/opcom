@@ -37,6 +37,7 @@ import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUc
 import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
 import { runImportCalendar, runImportPaste } from "./commands/import.js";
 import { runSkillsList, runSkillsShow, runSkillsCreate } from "./commands/skills.js";
+import { runState } from "./commands/state.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -512,6 +513,23 @@ async function main(): Promise<void> {
       break;
     }
 
+    case "state": {
+      const sub = args[1];
+      if (!sub) {
+        console.error("  Usage: opcom state <decisions|metrics|artifacts>");
+        console.error("  Options: --plan <id>  --step <id>  --metric <name>  --type <type>");
+        process.exit(1);
+      }
+      const stateOpts: { planId?: string; stepId?: string; metric?: string; type?: string } = {};
+      for (let i = 2; i < args.length; i++) {
+        if (args[i] === "--plan" && args[i + 1]) { stateOpts.planId = args[++i]; }
+        else if (args[i] === "--step" && args[i + 1]) { stateOpts.stepId = args[++i]; }
+        else if (args[i] === "--metric" && args[i + 1]) { stateOpts.metric = args[++i]; }
+        else if (args[i] === "--type" && args[i + 1]) { stateOpts.type = args[++i]; }
+      }
+      return runState(sub, stateOpts);
+    }
+
     case "help":
     case "--help":
     case "-h":
@@ -569,6 +587,9 @@ function printHelp(): void {
     plan context <text> [id]     Add context to plan
     plan skip <ticket> [id]      Skip a step
     plan hygiene                 Run ticket health checks
+    state decisions              Show strategic decisions with rationale
+    state metrics                Show operational metrics per step/plan
+    state artifacts              Show produced outputs (commits, merges)
     graph build [project]        Build context graph (all projects if none specified)
     graph stats [project]        Show graph node/edge statistics
     graph drift [project]        Show drift signals (uncovered specs, untested files, etc.)

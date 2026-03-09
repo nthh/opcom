@@ -156,7 +156,7 @@ export {
   findNextAvailablePort,
   isPortInReservedRange,
 } from "./config/port-registry.js";
-export { portsPath } from "./config/paths.js";
+export { portsPath, stateDir, stateFilePath } from "./config/paths.js";
 
 // Phase 7: Scheduling
 export { Scheduler, parseCron, parseCronField, getNextRunTime } from "./scheduling/scheduler.js";
@@ -312,6 +312,10 @@ export {
   defaultConfig as defaultOrchestratorConfig,
 } from "./orchestrator/persistence.js";
 export { plansDir, planPath, planContextPath } from "./config/paths.js";
+
+// State Store
+export { StateStore } from "./state/state-store.js";
+export type { StateWriter, StateReader } from "./state/state-store.js";
 
 // Templates
 export { BUILTIN_TEMPLATES } from "./templates/builtins.js";
