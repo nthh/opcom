@@ -14,6 +14,7 @@ import {
   getPanelItemCount as getDashboardItemCount,
   getPlanStepsInDisplayOrder,
   DASHBOARD_PANEL_COUNT,
+  aggregateDeployStatus,
   type DashboardState,
   type DashboardWorkItem,
 } from "./views/dashboard.js";
@@ -290,6 +291,17 @@ export class TuiApp {
       }
     }
     this.dashboardState.workItems = allWorkItems;
+
+    // Aggregate deploy status per project
+    const deployStatuses = new Map<string, import("./views/dashboard.js").DashboardDeployStatus>();
+    for (const project of this.client.projects) {
+      const deployments = this.client.projectDeployments.get(project.id) ?? [];
+      const status = aggregateDeployStatus(deployments, project.id);
+      if (status) {
+        deployStatuses.set(project.id, status);
+      }
+    }
+    this.dashboardState.deployStatuses = deployStatuses;
 
     // Sync plan state
     if (this.client.activePlan) {

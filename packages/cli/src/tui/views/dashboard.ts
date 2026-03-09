@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal, DeploymentStatus } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -39,6 +39,118 @@ export interface DashboardWorkItem {
   projectName: string;
 }
 
+export interface DashboardDeployStatus {
+  projectId: string;
+  environment: string;
+  state: "healthy" | "failing" | "deploying" | "unknown";
+  relativeTime: string;
+  commitSha?: string;
+}
+
+/** Environment priority for selecting "most important" deployment. */
+const ENV_PRIORITY: Record<string, number> = {
+  production: 0,
+  prod: 0,
+  staging: 1,
+  stage: 1,
+  preview: 2,
+  dev: 3,
+  development: 3,
+};
+
+function envPriority(env: string): number {
+  return ENV_PRIORITY[env.toLowerCase()] ?? 10;
+}
+
+/**
+ * Pick the single most important deployment status for a project.
+ * Priority: failing > in-progress > most recent active in highest environment.
+ */
+export function aggregateDeployStatus(
+  deployments: DeploymentStatus[],
+  projectId: string,
+): DashboardDeployStatus | null {
+  if (deployments.length === 0) return null;
+
+  // 1. Any failing?
+  const failing = deployments.filter((d) => d.status === "failed" || d.status === "error");
+  if (failing.length > 0) {
+    const pick = failing.sort((a, b) => envPriority(a.environment) - envPriority(b.environment))[0];
+    return {
+      projectId,
+      environment: shortEnv(pick.environment),
+      state: "failing",
+      relativeTime: formatDeployTimeAgo(pick.updatedAt),
+      commitSha: pick.ref,
+    };
+  }
+
+  // 2. Any in-progress / pending?
+  const deploying = deployments.filter((d) => d.status === "in_progress" || d.status === "pending");
+  if (deploying.length > 0) {
+    const pick = deploying.sort((a, b) => envPriority(a.environment) - envPriority(b.environment))[0];
+    return {
+      projectId,
+      environment: shortEnv(pick.environment),
+      state: "deploying",
+      relativeTime: formatDeployTimeAgo(pick.updatedAt),
+      commitSha: pick.ref,
+    };
+  }
+
+  // 3. Most recent active in highest environment
+  const active = deployments.filter((d) => d.status === "active");
+  if (active.length > 0) {
+    const pick = active.sort((a, b) => {
+      const envDiff = envPriority(a.environment) - envPriority(b.environment);
+      if (envDiff !== 0) return envDiff;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    })[0];
+    return {
+      projectId,
+      environment: shortEnv(pick.environment),
+      state: "healthy",
+      relativeTime: formatDeployTimeAgo(pick.updatedAt),
+      commitSha: pick.ref,
+    };
+  }
+
+  // 4. Inactive/unknown — show most recent
+  const sorted = [...deployments].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+  );
+  return {
+    projectId,
+    environment: shortEnv(sorted[0].environment),
+    state: "unknown",
+    relativeTime: formatDeployTimeAgo(sorted[0].updatedAt),
+    commitSha: sorted[0].ref,
+  };
+}
+
+function shortEnv(env: string): string {
+  const map: Record<string, string> = {
+    production: "prod",
+    staging: "staging",
+    preview: "preview",
+    development: "dev",
+  };
+  return map[env.toLowerCase()] ?? env;
+}
+
+function formatDeployTimeAgo(iso: string): string {
+  try {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (isNaN(diff)) return iso;
+    if (diff < 60_000) return "just now";
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
+    return `${Math.floor(diff / 86400_000)}d ago`;
+  } catch {
+    return iso;
+  }
+}
+
 export interface DashboardState {
   projects: ProjectStatusSnapshot[];
   agents: AgentSession[];
@@ -49,6 +161,7 @@ export interface DashboardState {
   priorityFilter: number | null; // null = all, 0-4 = filter
   projectFilter: string | null; // null = all, string = projectId
   searchQuery: string;
+  deployStatuses: Map<string, DashboardDeployStatus>; // projectId → deploy status
   planPanel: PlanPanelState | null; // non-null when plan is active
   agentsComponent: AgentsListState; // component state for agents panel
   chatComponent: ChatState; // component state for chat panel
@@ -62,6 +175,7 @@ export function createDashboardState(): DashboardState {
     projects: [],
     agents: [],
     workItems: [],
+    deployStatuses: new Map(),
     focusedPanel: 0,
     selectedIndex: [0, 0, 0, 0],
     scrollOffset: [0, 0, 0, 0],
@@ -124,7 +238,8 @@ function renderProjectsPanel(
     const row = panel.y + 1 + i;
     const isSelected = idx === selected && focused;
 
-    const line = formatProjectLine(project, contentWidth);
+    const deployStatus = state.deployStatuses.get(project.id) ?? null;
+    const line = formatProjectLine(project, deployStatus, contentWidth);
     if (isSelected) {
       buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
     } else {
@@ -133,7 +248,11 @@ function renderProjectsPanel(
   }
 }
 
-function formatProjectLine(project: ProjectStatusSnapshot, maxWidth: number): string {
+export function formatProjectLine(
+  project: ProjectStatusSnapshot,
+  deployStatus: DashboardDeployStatus | null,
+  maxWidth: number,
+): string {
   const name = bold(project.name);
   const git = project.git;
 
@@ -144,6 +263,11 @@ function formatProjectLine(project: ProjectStatusSnapshot, maxWidth: number): st
       ? color(ANSI.green, "clean")
       : color(ANSI.yellow, `${git.uncommittedCount ?? 0} dirty`);
     gitStr = ` ${branchStr} ${cleanStr}`;
+  }
+
+  let deployStr = "";
+  if (deployStatus) {
+    deployStr = ` ${formatDeployIndicator(deployStatus)}`;
   }
 
   let ticketStr = "";
@@ -157,8 +281,21 @@ function formatProjectLine(project: ProjectStatusSnapshot, maxWidth: number): st
     cloudStr = ` ${formatCloudDots(project.cloudHealthSummary)}`;
   }
 
-  const line = `${name}${gitStr}${ticketStr}${cloudStr}`;
+  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}`;
   return truncate(line, maxWidth);
+}
+
+export function formatDeployIndicator(status: DashboardDeployStatus): string {
+  switch (status.state) {
+    case "healthy":
+      return color(ANSI.green, "\u2713") + ` ${dim(status.environment)} ${dim(status.relativeTime)}`;
+    case "failing":
+      return color(ANSI.red, "\u2717") + ` ${color(ANSI.red, status.environment)} ${dim(status.relativeTime)}`;
+    case "deploying":
+      return color(ANSI.yellow, "\u25cf") + ` ${dim(status.environment)} ${dim("deploying...")}`;
+    case "unknown":
+      return dim("\u25cb") + ` ${dim(status.environment)} ${dim(status.relativeTime)}`;
+  }
 }
 
 function formatCloudDots(summary: import("@opcom/types").CloudHealthSummary): string {
