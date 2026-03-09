@@ -453,6 +453,47 @@ describe("deployment detail scrolling", () => {
 
 // --- Real-time deploy status updates ---
 
+/**
+ * Simulate the deployment_updated event handler from client.ts.
+ * This mirrors TuiClient.handleServerEvent for deployment_updated events.
+ * In production, the CICDPoller polls GitHub Actions for deployment changes and
+ * emits deployment_updated events, which are forwarded through handleServerEvent.
+ */
+function handleDeploymentUpdatedEvent(
+  cache: Map<string, DeploymentStatus[]>,
+  projectId: string,
+  deployment: DeploymentStatus,
+): void {
+  const deployments = cache.get(projectId) ?? [];
+  const dIdx = deployments.findIndex((d) => d.id === deployment.id);
+  if (dIdx >= 0) {
+    deployments[dIdx] = deployment;
+  } else {
+    deployments.unshift(deployment);
+  }
+  cache.set(projectId, deployments);
+}
+
+/**
+ * Simulate the syncData deploy aggregation from app.ts.
+ * In production, this runs on every ServerEvent (including deployment_updated)
+ * via client.onEvent(() => { syncData(); scheduleRender(); }).
+ */
+function syncDeployStatuses(
+  state: DashboardState,
+  projectDeployments: Map<string, DeploymentStatus[]>,
+): void {
+  const deployStatuses = new Map<string, DashboardDeployStatus>();
+  for (const project of state.projects) {
+    const deployments = projectDeployments.get(project.id) ?? [];
+    const status = aggregateDeployStatus(deployments, project.id);
+    if (status) {
+      deployStatuses.set(project.id, status);
+    }
+  }
+  state.deployStatuses = deployStatuses;
+}
+
 describe("real-time deploy status updates", () => {
   it("re-aggregates deploy status when deployments change", () => {
     // Simulate: deployment starts as in_progress, then transitions to active
@@ -488,15 +529,7 @@ describe("real-time deploy status updates", () => {
     ]);
 
     // Re-aggregate (mirrors what syncData does on every event)
-    const deployStatuses = new Map<string, DashboardDeployStatus>();
-    for (const project of state.projects) {
-      const deployments = projectDeployments.get(project.id) ?? [];
-      const status = aggregateDeployStatus(deployments, project.id);
-      if (status) {
-        deployStatuses.set(project.id, status);
-      }
-    }
-    state.deployStatuses = deployStatuses;
+    syncDeployStatuses(state, projectDeployments);
 
     expect(state.deployStatuses.size).toBe(2);
     expect(state.deployStatuses.get("proj-1")!.state).toBe("healthy");
@@ -530,6 +563,99 @@ describe("real-time deploy status updates", () => {
       makeDeployment({ id: "d2", status: "error", ref: "commit2" }),
     ];
     expect(aggregateDeployStatus(withError, "proj-1")!.state).toBe("failing");
+  });
+
+  it("deployment_updated event updates cache and dashboard state in real time", () => {
+    // Full event-driven flow: event arrives → cache updates → syncData → dashboard updates
+    const projectDeployments = new Map<string, DeploymentStatus[]>();
+    const state: DashboardState = createDashboardState();
+    state.projects = [makeProject({ id: "proj-1", name: "folia" })];
+
+    // Step 1: Initial deployment event arrives (pending)
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-1",
+      makeDeployment({ id: "d1", projectId: "proj-1", status: "pending", ref: "abc123" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("deploying");
+
+    // Step 2: Deployment progresses (in_progress event)
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-1",
+      makeDeployment({ id: "d1", projectId: "proj-1", status: "in_progress", ref: "abc123" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("deploying");
+
+    // Step 3: Deployment succeeds (active event)
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-1",
+      makeDeployment({ id: "d1", projectId: "proj-1", status: "active", ref: "abc123" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("healthy");
+    expect(state.deployStatuses.get("proj-1")!.commitSha).toBe("abc123");
+  });
+
+  it("multiple deployment events update dashboard state correctly", () => {
+    // Simulate multiple projects receiving deployment events concurrently
+    const projectDeployments = new Map<string, DeploymentStatus[]>();
+    const state: DashboardState = createDashboardState();
+    state.projects = [
+      makeProject({ id: "proj-1", name: "folia" }),
+      makeProject({ id: "proj-2", name: "mtnmap" }),
+    ];
+
+    // proj-1: deploy starts
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-1",
+      makeDeployment({ id: "d1", projectId: "proj-1", status: "in_progress", ref: "abc123" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("deploying");
+    expect(state.deployStatuses.has("proj-2")).toBe(false);
+
+    // proj-2: deploy fails
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-2",
+      makeDeployment({ id: "d2", projectId: "proj-2", status: "failed", ref: "def456" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("deploying");
+    expect(state.deployStatuses.get("proj-2")!.state).toBe("failing");
+
+    // proj-1: deploy succeeds
+    handleDeploymentUpdatedEvent(projectDeployments, "proj-1",
+      makeDeployment({ id: "d1", projectId: "proj-1", status: "active", ref: "abc123" }));
+    syncDeployStatuses(state, projectDeployments);
+    expect(state.deployStatuses.get("proj-1")!.state).toBe("healthy");
+    expect(state.deployStatuses.get("proj-2")!.state).toBe("failing");
+  });
+
+  it("deployment detail view updates in real time when deployments change", () => {
+    // Simulates syncData updating the deployment detail view on deployment_updated events.
+    // In app.ts, syncData checks if deploymentDetailState is active and rebuilds display lines
+    // when deployment status changes.
+
+    // Create initial detail state with in_progress deployment
+    const initialDeployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "in_progress", ref: "abc123" }),
+    ];
+    const detailState = createDeploymentDetailState(initialDeployments, "folia");
+    const text1 = detailState.displayLines.map(stripAnsi).join("\n");
+    expect(text1).not.toContain("LIVE");
+    expect(text1).not.toContain("Live commit:");
+
+    // deployment_updated event arrives: status changes to active.
+    // In production, CICDPoller emits this event, handleServerEvent updates the cache,
+    // and syncData detects the change and rebuilds display lines.
+    const updatedDeployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123" }),
+    ];
+
+    // Simulate syncData's real-time update path:
+    // it detects status differs and rebuilds the display lines
+    const statusChanged = updatedDeployments.length !== detailState.deployments.length ||
+      updatedDeployments.some((d, i) => d.status !== detailState.deployments[i]?.status);
+    expect(statusChanged).toBe(true);
+
+    detailState.deployments = updatedDeployments;
+    rebuildDisplayLines(detailState, 80);
+
+    const text2 = detailState.displayLines.map(stripAnsi).join("\n");
+    expect(text2).toContain("LIVE");
+    expect(text2).toContain("Live commit:");
+    expect(text2).toContain("abc123");
   });
 });
 
