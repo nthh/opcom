@@ -1,4 +1,24 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// Mock child_process to prevent real kubectl calls in tests.
+// vi.hoisted ensures the mock fn is available when vi.mock factory runs.
+const { mockExecFileAsync } = vi.hoisted(() => ({
+  mockExecFileAsync: vi.fn(),
+}));
+
+vi.mock("node:child_process", () => {
+  const mockExecFile: any = vi.fn();
+  mockExecFile[Symbol.for("nodejs.util.promisify.custom")] = mockExecFileAsync;
+  return {
+    execFile: mockExecFile,
+    spawn: vi.fn(() => ({
+      stdout: { on: vi.fn() },
+      stderr: { on: vi.fn() },
+      on: vi.fn(),
+      kill: vi.fn(),
+    })),
+  };
+});
 
 import {
   mapDeploymentStatus,
@@ -23,6 +43,12 @@ import {
 } from "@opcom/core";
 
 import type { ProjectConfig, StackInfo, InfraResource } from "@opcom/types";
+
+// Default: kubectl calls reject immediately (no real cluster in tests)
+beforeEach(() => {
+  mockExecFileAsync.mockReset();
+  mockExecFileAsync.mockRejectedValue(new Error("kubectl not available in test"));
+});
 
 // =============================================================================
 // Helpers
