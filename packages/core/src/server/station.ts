@@ -29,6 +29,9 @@ import { GitHubActionsAdapter } from "../integrations/github-actions.js";
 import { CICDPoller } from "../integrations/cicd-poller.js";
 import type { ProjectCICDState } from "../integrations/cicd-poller.js";
 import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
+import { KubernetesAdapter, computeInfraHealthSummary } from "../infra/kubernetes.js";
+import { detectInfrastructure } from "../infra/detect.js";
+import type { Disposable, InfraEvent } from "@opcom/types";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -60,10 +63,11 @@ export class Station {
   private projectStatuses = new Map<string, ProjectStatus>();
   private executors = new Map<string, Executor>(); // planId → running Executor
   private cicdPoller: CICDPoller | null = null;
+  private infraWatchers = new Map<string, Disposable>(); // projectId → watcher disposable
   private port: number;
-  private options?: { skipCICD?: boolean; skipReconcile?: boolean };
+  private options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean };
 
-  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean }) {
+  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean }) {
     this.port = port;
     this.options = options;
   }
@@ -92,6 +96,11 @@ export class Station {
     // Initialize CI/CD polling for GitHub Actions projects (skip in test)
     if (!this.options?.skipCICD) {
       await this.initCICDPoller();
+    }
+
+    // Initialize infrastructure watchers for K8s projects (skip in test)
+    if (!this.options?.skipInfra) {
+      await this.initInfraWatchers();
     }
 
     // Wire up session events to broadcast
@@ -154,6 +163,12 @@ export class Station {
       this.cicdPoller.dispose();
       this.cicdPoller = null;
     }
+
+    // Stop infrastructure watchers
+    for (const watcher of this.infraWatchers.values()) {
+      try { watcher.dispose(); } catch {}
+    }
+    this.infraWatchers.clear();
 
     // Stop all running executors
     for (const executor of this.executors.values()) {
@@ -551,6 +566,91 @@ export class Station {
       return { status: 200, data: signals };
     }
 
+    // --- Infrastructure endpoints ---
+
+    // GET /projects/:id/infrastructure
+    const infraListMatch = path.match(/^\/projects\/([^/]+)\/infrastructure$/);
+    if (method === "GET" && infraListMatch) {
+      const project = await loadProject(infraListMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 200, data: [] };
+        }
+        const resources = await adapters[0].listResources(project);
+        return { status: 200, data: resources };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to list infrastructure";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // GET /projects/:id/infrastructure/:resourceId
+    const infraGetMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)$/);
+    if (method === "GET" && infraGetMatch && !infraGetMatch[2].includes("/logs")) {
+      const project = await loadProject(infraGetMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 404, data: { error: "No infrastructure adapter" } };
+        }
+        const resource = await adapters[0].getResource(project, decodeURIComponent(infraGetMatch[2]));
+        return { status: 200, data: resource };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Resource not found";
+        return { status: 404, data: { error: msg } };
+      }
+    }
+
+    // GET /projects/:id/infrastructure/:resourceId/logs?tail=100&since=5m
+    const infraLogsMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)\/logs$/);
+    if (method === "GET" && infraLogsMatch) {
+      const project = await loadProject(infraLogsMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) {
+          return { status: 404, data: { error: "No infrastructure adapter" } };
+        }
+        const tail = searchParams?.get("tail");
+        const since = searchParams?.get("since");
+        const container = searchParams?.get("container");
+        const logLines: import("@opcom/types").InfraLogLine[] = [];
+        for await (const line of adapters[0].streamLogs(
+          project,
+          decodeURIComponent(infraLogsMatch[2]),
+          {
+            tailLines: tail ? parseInt(tail, 10) : 100,
+            since: since ?? undefined,
+            container: container ?? undefined,
+          },
+        )) {
+          logLines.push(line);
+        }
+        return { status: 200, data: logLines };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to fetch logs";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
+    // POST /projects/:id/infrastructure/:resourceId/restart
+    const infraRestartMatch = path.match(/^\/projects\/([^/]+)\/infrastructure\/([^/]+(?:\/[^/]+)?)\/restart$/);
+    if (method === "POST" && infraRestartMatch) {
+      const project = await loadProject(infraRestartMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      try {
+        const adapter = new KubernetesAdapter();
+        await adapter.rolloutRestart(project, decodeURIComponent(infraRestartMatch[2]));
+        return { status: 200, data: { restarted: true } };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Failed to restart";
+        return { status: 502, data: { error: msg } };
+      }
+    }
+
     // GET /changesets?ticketId=X&sessionId=Y&projectId=Z
     if (method === "GET" && path === "/changesets") {
       if (!this.eventStore) {
@@ -856,6 +956,49 @@ export class Station {
         }
       } catch {
         // Skip projects where detection fails (no git remote, etc.)
+      }
+    }
+  }
+
+  private async initInfraWatchers(): Promise<void> {
+    const projects = await listProjects();
+    for (const project of projects) {
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) continue;
+
+        const adapter = adapters[0];
+        const watcher = adapter.watch(project, (event: InfraEvent) => {
+          switch (event.type) {
+            case "resource_updated":
+              this.broadcast({
+                type: "infra_resource_updated",
+                projectId: project.id,
+                resource: event.resource,
+              });
+              break;
+            case "resource_deleted":
+              this.broadcast({
+                type: "infra_resource_deleted",
+                projectId: project.id,
+                resourceId: event.resourceId,
+              });
+              break;
+            case "pod_crash":
+              this.broadcast({
+                type: "pod_crash",
+                projectId: project.id,
+                pod: event.pod,
+                container: event.container,
+                reason: event.reason,
+              });
+              break;
+          }
+        });
+
+        this.infraWatchers.set(project.id, watcher);
+      } catch {
+        // Skip projects where infra detection/watch fails
       }
     }
   }

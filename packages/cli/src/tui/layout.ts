@@ -99,13 +99,16 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  // 6 right-column panels: agents, specs, stack, cloud, cicd, chat
-  const rightH1 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
-  const rightH2 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
-  const rightH3 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
-  const rightH4 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
-  const rightH5 = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows * 0.16));
-  const rightH6 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4 - rightH5);
+  // 7 right-column panels: agents, specs, stack, cloud, cicd, infra, chat
+  const sectionCount = 7;
+  const sectionH = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows / sectionCount));
+  const rightH1 = sectionH;
+  const rightH2 = sectionH;
+  const rightH3 = sectionH;
+  const rightH4 = sectionH;
+  const rightH5 = sectionH;
+  const rightH6 = sectionH;
+  const rightH7 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4 - rightH5 - rightH6);
 
   return {
     panels: [
@@ -158,11 +161,19 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         title: "CI/CD",
       },
       {
-        id: "chat",
+        id: "infra",
         x: leftWidth,
         y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5,
         width: rightWidth,
         height: rightH6,
+        title: "Infrastructure",
+      },
+      {
+        id: "chat",
+        x: leftWidth,
+        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5 + rightH6,
+        width: rightWidth,
+        height: rightH7,
         title: "Chat",
       },
     ],

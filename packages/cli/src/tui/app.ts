@@ -2,7 +2,7 @@
 // Manages navigation, input, rendering, and data flow
 
 import { spawn } from "node:child_process";
-import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService, Pipeline } from "@opcom/types";
+import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService, Pipeline, PodDetail } from "@opcom/types";
 import { ScreenBuffer, ANSI, bold, dim, color, padRight } from "./renderer.js";
 import { getLayout, TerminalSize, type NavigationLevel } from "./layout.js";
 import { TuiClient } from "./client.js";
@@ -37,6 +37,7 @@ import {
   getTicketsList,
   getSpecsList,
   getCloudServicesList,
+  getInfraResourcesList,
   getPanelItemCount as getProjectItemCount,
   PANEL_COUNT as PROJECT_PANEL_COUNT,
   type ProjectDetailState,
@@ -148,6 +149,17 @@ import {
   scrollToBottom as deploymentScrollToBottom,
   type DeploymentDetailState,
 } from "./views/deployment-detail.js";
+import {
+  renderPodDetail,
+  createPodDetailState,
+  scrollUp as podScrollUp,
+  scrollDown as podScrollDown,
+  scrollToTop as podScrollToTop,
+  scrollToBottom as podScrollToBottom,
+  toggleFollow as podToggleFollow,
+  switchContainer as podSwitchContainer,
+  type PodDetailState,
+} from "./views/pod-detail.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -169,6 +181,7 @@ export class TuiApp {
   private settingsViewState: SettingsViewState | null = null;
   private pipelineDetailState: PipelineDetailState | null = null;
   private deploymentDetailState: DeploymentDetailState | null = null;
+  private podDetailState: PodDetailState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -495,6 +508,8 @@ export class TuiApp {
             renderPipelineDetail(this.buf, layout.panels[0], this.pipelineDetailState);
           } else if (this.deploymentDetailState) {
             renderDeploymentDetail(this.buf, layout.panels[0], this.deploymentDetailState);
+          } else if (this.podDetailState) {
+            renderPodDetail(this.buf, layout.panels[0], this.podDetailState);
           }
           break;
       }
@@ -672,6 +687,8 @@ export class TuiApp {
           this.handlePipelineDetailInput(data);
         } else if (this.deploymentDetailState) {
           this.handleDeploymentDetailInput(data);
+        } else if (this.podDetailState) {
+          this.handlePodDetailInput(data);
         }
         break;
     }
@@ -1116,6 +1133,13 @@ export class TuiApp {
         if (deployment) {
           this.navigateToDeploymentDetail(deployment.environment);
         }
+      }
+    } else if (panel === 6) {
+      // Drill into infrastructure resource (pods only)
+      const resources = getInfraResourcesList(state);
+      const resource = resources[selected];
+      if (resource && resource.kind === "pod") {
+        this.navigateToPod(resource as PodDetail);
       }
     }
   }
@@ -1950,6 +1974,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {
@@ -1982,6 +2007,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
 
     // Load ticket content async — guard against stale state if user navigated away
     const stateRef = this.ticketFocusState;
@@ -2014,6 +2040,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
   }
 
   private navigateToPlanStep(step: import("@opcom/types").PlanStep, plan: import("@opcom/types").Plan): void {
@@ -2051,6 +2078,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
   }
 
   // --- L3: Cloud Service Detail Input ---
@@ -2211,6 +2239,7 @@ export class TuiApp {
       this.cloudServiceDetailState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
+      this.podDetailState = null;
       this.scheduleRender();
     }).catch(() => {
       // Fallback: use defaults
@@ -2222,6 +2251,7 @@ export class TuiApp {
       this.cloudServiceDetailState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
+      this.podDetailState = null;
       this.scheduleRender();
     });
   }
@@ -2251,6 +2281,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
   }
 
   private navigateToPipeline(pipeline: Pipeline): void {
@@ -2269,6 +2300,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.deploymentDetailState = null;
+    this.podDetailState = null;
   }
 
   private drillDownToDeployments(): void {
@@ -2302,6 +2334,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
+    this.podDetailState = null;
   }
 
   private handleDeploymentDetailInput(data: string): void {
@@ -2332,6 +2365,65 @@ export class TuiApp {
 
       case "g":
         deploymentScrollToTop(state);
+        return;
+    }
+  }
+
+  private navigateToPod(pod: PodDetail): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+    const projectName = this.client.projects.find((p) => p.id === this.focusedProjectId)?.name ?? "";
+    this.podDetailState = createPodDetailState(pod, projectName);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
+    this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
+  }
+
+  private handlePodDetailInput(data: string): void {
+    if (!this.podDetailState) return;
+    const state = this.podDetailState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 2;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        podScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        podScrollUp(state, 1);
+        return;
+
+      case "G":
+        podScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        podScrollToTop(state);
+        return;
+
+      case "f":
+        podToggleFollow(state);
+        return;
+
+      case "c":
+        podSwitchContainer(state);
         return;
     }
   }
@@ -2515,6 +2607,7 @@ export class TuiApp {
         this.settingsViewState = null;
         this.pipelineDetailState = null;
         this.deploymentDetailState = null;
+        this.podDetailState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -2532,6 +2625,7 @@ export class TuiApp {
       this.settingsViewState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
+      this.podDetailState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;

@@ -21,27 +21,27 @@ Monitor live Kubernetes cluster state for projects with K8s infrastructure — d
 
 ## Tasks
 
-- [ ] Define `InfraAdapter` interface: `detect`, `listResources`, `getResource`, `streamLogs`, `watch`
-- [ ] Define normalized types: `InfraResource`, `PodDetail`, `ContainerStatus`, `ResourceStatus`, `ReplicaStatus`
-- [ ] Implement `KubernetesAdapter`:
-  - [ ] Detection: check `StackInfo.infrastructure` for kubernetes, or kubeconfig context matching project name
-  - [ ] Project-to-resource mapping: label matching (`app=<project>`), namespace matching, or explicit user config
-  - [ ] `kubectl get` JSON output parsing for deployments, pods, services, ingresses
-  - [ ] Status mapping: K8s conditions → `ResourceStatus` (healthy/degraded/unhealthy/progressing/suspended)
-  - [ ] Pod detail: container status, restart counts, crash reasons (CrashLoopBackOff, OOMKilled)
-- [ ] Log streaming: `kubectl logs --follow` as `AsyncIterable<LogLine>`
-- [ ] Watch mode: `kubectl get --watch -o json` for real-time resource updates
-- [ ] Polling fallback: 30s interval if watch stream drops
-- [ ] REST endpoints: `/projects/:id/infrastructure`, `/:resourceId`, `/:resourceId/logs`, `/:resourceId/restart`
-- [ ] WebSocket events: `infra_resource_updated`, `infra_resource_deleted`, `pod_crash`
-- [ ] CLI: `opcom infra [project]` for infrastructure overview
-- [ ] CLI: `opcom infra <project> logs <pod> [--follow]` for log tailing
-- [ ] CLI: `opcom infra <project> restart <deployment>` for rollout restart
-- [ ] User config: kubeconfig context, namespace, label selector overrides per project
-- [ ] TUI L1: infrastructure health indicator per project (●●○ K8s)
-- [ ] TUI L2: INFRASTRUCTURE section with deployments, services, pods and live status
-- [ ] TUI L3: Pod detail view with container status and log streaming
-- [ ] Crash alerts: surface `pod_crash` events as TUI notifications
+- [x] Define `InfraAdapter` interface: `detect`, `listResources`, `getResource`, `streamLogs`, `watch`
+- [x] Define normalized types: `InfraResource`, `PodDetail`, `ContainerStatus`, `ResourceStatus`, `ReplicaStatus`
+- [x] Implement `KubernetesAdapter`:
+  - [x] Detection: check `StackInfo.infrastructure` for kubernetes, or kubeconfig context matching project name
+  - [x] Project-to-resource mapping: label matching (`app=<project>`), namespace matching, or explicit user config
+  - [x] `kubectl get` JSON output parsing for deployments, pods, services, ingresses
+  - [x] Status mapping: K8s conditions → `ResourceStatus` (healthy/degraded/unhealthy/progressing/suspended)
+  - [x] Pod detail: container status, restart counts, crash reasons (CrashLoopBackOff, OOMKilled)
+- [x] Log streaming: `kubectl logs --follow` as `AsyncIterable<LogLine>`
+- [x] Watch mode: `kubectl get --watch -o json` for real-time resource updates
+- [x] Polling fallback: 30s interval if watch stream drops
+- [x] REST endpoints: `/projects/:id/infrastructure`, `/:resourceId`, `/:resourceId/logs`, `/:resourceId/restart`
+- [x] WebSocket events: `infra_resource_updated`, `infra_resource_deleted`, `pod_crash`
+- [x] CLI: `opcom infra [project]` for infrastructure overview
+- [x] CLI: `opcom infra <project> logs <pod> [--follow]` for log tailing
+- [x] CLI: `opcom infra <project> restart <deployment>` for rollout restart
+- [x] User config: kubeconfig context, namespace, label selector overrides per project
+- [x] TUI L1: infrastructure health indicator per project (●●○ K8s)
+- [x] TUI L2: INFRASTRUCTURE section with deployments, services, pods and live status
+- [x] TUI L3: Pod detail view with container status and log streaming
+- [x] Crash alerts: surface `pod_crash` events as TUI notifications
 
 ## Acceptance Criteria
 

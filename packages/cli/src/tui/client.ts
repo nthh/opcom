@@ -17,6 +17,9 @@ import type {
   CloudHealthSummary,
   Pipeline,
   DeploymentStatus,
+  InfraResource,
+  PodDetail,
+  InfraHealthSummary,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -69,6 +72,12 @@ export class TuiClient {
   // CI/CD status cache per project
   projectPipelines = new Map<string, Pipeline[]>();
   projectDeployments = new Map<string, DeploymentStatus[]>();
+
+  // Infrastructure resource cache per project
+  projectInfraResources = new Map<string, InfraResource[]>();
+
+  // Pod crash events per project (most recent)
+  projectInfraCrashes = new Map<string, Array<{ pod: PodDetail; container: string; reason: string; timestamp: string }>>();
 
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
@@ -429,6 +438,48 @@ export class TuiClient {
           deployments.unshift(event.deployment);
         }
         this.projectDeployments.set(event.projectId, deployments);
+        break;
+      }
+
+      case "infra_resource_updated": {
+        const resources = this.projectInfraResources.get(event.projectId) ?? [];
+        const rIdx = resources.findIndex((r) => r.id === event.resource.id);
+        if (rIdx >= 0) {
+          resources[rIdx] = event.resource;
+        } else {
+          resources.push(event.resource);
+        }
+        this.projectInfraResources.set(event.projectId, resources);
+        // Update infra health summary
+        const infraSummary = this.buildInfraHealthSummary(resources);
+        this.projects = this.projects.map((p) =>
+          p.id === event.projectId ? { ...p, infraHealthSummary: infraSummary } : p,
+        );
+        break;
+      }
+
+      case "infra_resource_deleted": {
+        const resources = this.projectInfraResources.get(event.projectId) ?? [];
+        const filtered = resources.filter((r) => r.id !== event.resourceId);
+        this.projectInfraResources.set(event.projectId, filtered);
+        const infraSummary = this.buildInfraHealthSummary(filtered);
+        this.projects = this.projects.map((p) =>
+          p.id === event.projectId ? { ...p, infraHealthSummary: infraSummary } : p,
+        );
+        break;
+      }
+
+      case "pod_crash": {
+        const crashes = this.projectInfraCrashes.get(event.projectId) ?? [];
+        crashes.push({
+          pod: event.pod,
+          container: event.container,
+          reason: event.reason,
+          timestamp: new Date().toISOString(),
+        });
+        // Keep last 20 crash events per project
+        if (crashes.length > 20) crashes.splice(0, crashes.length - 20);
+        this.projectInfraCrashes.set(event.projectId, crashes);
         break;
       }
     }
@@ -920,6 +971,14 @@ export class TuiClient {
     const summary: CloudHealthSummary = { total: services.length, healthy: 0, degraded: 0, unreachable: 0, unknown: 0 };
     for (const svc of services) {
       summary[svc.status]++;
+    }
+    return summary;
+  }
+
+  private buildInfraHealthSummary(resources: InfraResource[]): InfraHealthSummary {
+    const summary: InfraHealthSummary = { total: resources.length, healthy: 0, degraded: 0, unhealthy: 0, progressing: 0, suspended: 0, unknown: 0 };
+    for (const r of resources) {
+      summary[r.status]++;
     }
     return summary;
   }
