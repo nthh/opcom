@@ -35,7 +35,7 @@ import {
 import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js";
 import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
 import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
-import { runImportCalendar } from "./commands/import.js";
+import { runImportCalendar, runImportPaste } from "./commands/import.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -461,10 +461,18 @@ async function main(): Promise<void> {
           }
           return runImportCalendar(args[2], importProject);
         }
+        case "paste": {
+          let pasteProject: string | undefined;
+          for (let i = 2; i < args.length; i++) {
+            if (args[i] === "--project" && args[i + 1]) { pasteProject = args[++i]; }
+          }
+          return runImportPaste(pasteProject);
+        }
         default:
-          console.error("  Usage: opcom import <calendar> <file>");
+          console.error("  Usage: opcom import <subcommand>");
           console.error("  Subcommands:");
           console.error("    calendar <file.ics>   Import events from an iCal file");
+          console.error("    paste                 Import events from pasted text");
           process.exit(1);
       }
       break;
@@ -555,6 +563,7 @@ function printHelp(): void {
     templates [list]             Show available project templates
     templates show <id>          Show template details
     import calendar <file.ics>   Import events from an iCal file
+    import paste                 Import events from pasted text
     dev <project> [service]      Start dev services for a project
     dev stop <project>           Stop all services for a project
     help                         Show this help

@@ -91,6 +91,8 @@ export { parseICalEvents, parseICalToWorkItems, parseICalDate, icalEventToWorkIt
 export type { ICalEvent } from "./adapters/calendar-parser.js";
 export { workItemToMarkdown, writeWorkItemsToTickets } from "./adapters/ticket-writer.js";
 export type { WriteResult } from "./adapters/ticket-writer.js";
+export { parsePastedText, parseLine, pasteEventToId } from "./adapters/paste-parser.js";
+export type { ParsedLine } from "./adapters/paste-parser.js";
 
 // Phase 6: LLM Skills
 export {
