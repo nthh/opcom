@@ -831,66 +831,147 @@ export class KubernetesAdapter implements InfraAdapter {
     project: ProjectConfig,
     callback: (event: InfraEvent) => void,
   ): Disposable {
-    const config = resolveK8sConfig(project);
-    const ns = resolveNamespace(project);
-    const args = ["get", "pods", "-n", ns, "--watch", "-o", "json"];
-
-    if (config.context) {
-      args.unshift("--context", config.context);
-    }
-
-    const labelSelector = resolveLabelSelector(project);
-    if (labelSelector) {
-      args.push("-l", labelSelector);
-    }
-
-    const child = spawn("kubectl", args);
-    let buffer = "";
     let disposed = false;
+    let watchChild: ChildProcess | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    const lastResourceState = new Map<string, string>(); // id → JSON snapshot
 
-    child.stdout?.on("data", (chunk: Buffer) => {
+    // --- Primary: kubectl --watch ---
+    const startWatch = (): void => {
       if (disposed) return;
-      buffer += chunk.toString();
+      const config = resolveK8sConfig(project);
+      const ns = resolveNamespace(project);
+      const args = ["get", "pods", "-n", ns, "--watch", "-o", "json"];
 
-      // kubectl --watch -o json outputs one JSON object per line
-      const parts = buffer.split("\n");
-      buffer = parts.pop() ?? "";
+      if (config.context) {
+        args.unshift("--context", config.context);
+      }
 
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        try {
-          const obj = JSON.parse(part) as K8sPod;
-          const pod = mapPod(obj, project.id);
-          callback({ type: "resource_updated", resource: pod });
+      const labelSelector = resolveLabelSelector(project);
+      if (labelSelector) {
+        args.push("-l", labelSelector);
+      }
 
-          // Detect crashes
-          for (const container of pod.containers) {
-            if (
-              container.reason === "CrashLoopBackOff" ||
-              container.reason === "OOMKilled"
-            ) {
-              callback({
-                type: "pod_crash",
-                pod,
-                container: container.name,
-                reason: container.reason,
-              });
+      const child = spawn("kubectl", args);
+      watchChild = child;
+      let buffer = "";
+
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (disposed) return;
+        buffer += chunk.toString();
+
+        const parts = buffer.split("\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          try {
+            const obj = JSON.parse(part) as K8sPod;
+            const pod = mapPod(obj, project.id);
+            lastResourceState.set(pod.id, JSON.stringify(pod));
+            callback({ type: "resource_updated", resource: pod });
+
+            // Detect crashes
+            for (const container of pod.containers) {
+              if (
+                container.reason === "CrashLoopBackOff" ||
+                container.reason === "OOMKilled"
+              ) {
+                callback({
+                  type: "pod_crash",
+                  pod,
+                  container: container.name,
+                  reason: container.reason,
+                });
+              }
+            }
+          } catch {
+            // Incomplete JSON or parse error — skip
+          }
+        }
+      });
+
+      child.on("error", () => {
+        // Watch failed — polling fallback will continue
+        watchChild = null;
+      });
+
+      child.on("close", () => {
+        // Watch stream ended — polling fallback handles updates
+        watchChild = null;
+      });
+    };
+
+    // --- Fallback: 30-second polling ---
+    const poll = async (): Promise<void> => {
+      if (disposed) return;
+      try {
+        const resources = await this.listResources(project);
+        const currentIds = new Set<string>();
+
+        for (const resource of resources) {
+          currentIds.add(resource.id);
+          const snapshot = JSON.stringify(resource);
+          const prev = lastResourceState.get(resource.id);
+          if (prev !== snapshot) {
+            lastResourceState.set(resource.id, snapshot);
+            callback({ type: "resource_updated", resource });
+
+            // Detect crashes on pods
+            if (resource.kind === "pod") {
+              const pod = resource as PodDetail;
+              for (const container of pod.containers) {
+                if (
+                  container.reason === "CrashLoopBackOff" ||
+                  container.reason === "OOMKilled"
+                ) {
+                  callback({
+                    type: "pod_crash",
+                    pod,
+                    container: container.name,
+                    reason: container.reason,
+                  });
+                }
+              }
             }
           }
-        } catch {
-          // Incomplete JSON or parse error — skip
         }
-      }
-    });
 
-    child.on("error", () => {
-      // Watch process failed — caller can restart via polling
-    });
+        // Detect deletions
+        for (const id of lastResourceState.keys()) {
+          if (!currentIds.has(id)) {
+            lastResourceState.delete(id);
+            callback({ type: "resource_deleted", resourceId: id });
+          }
+        }
+      } catch {
+        // Poll failed — will retry next interval
+      }
+      if (!disposed) {
+        pollTimer = setTimeout(poll, 30_000);
+      }
+    };
+
+    // Seed last-known state before starting polling
+    this.listResources(project)
+      .then((resources) => {
+        for (const r of resources) {
+          lastResourceState.set(r.id, JSON.stringify(r));
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!disposed) {
+          startWatch();
+          pollTimer = setTimeout(poll, 30_000);
+        }
+      });
 
     return {
       dispose() {
         disposed = true;
-        child.kill();
+        watchChild?.kill();
+        if (pollTimer) clearTimeout(pollTimer);
       },
     };
   }
