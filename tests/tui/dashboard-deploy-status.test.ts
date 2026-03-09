@@ -7,6 +7,17 @@ import {
   createDashboardState,
   type DashboardDeployStatus,
 } from "../../packages/cli/src/tui/views/dashboard.js";
+import {
+  formatDeploymentLine,
+} from "../../packages/cli/src/tui/views/cicd-pane.js";
+import {
+  createDeploymentDetailState,
+  rebuildDisplayLines,
+  scrollDown,
+  scrollUp,
+  scrollToTop,
+  scrollToBottom,
+} from "../../packages/cli/src/tui/views/deployment-detail.js";
 import type { DeploymentStatus, ProjectStatusSnapshot } from "@opcom/types";
 
 // --- Factories ---
@@ -277,5 +288,164 @@ describe("DashboardState deployStatuses", () => {
     const state = createDashboardState();
     expect(state.deployStatuses).toBeInstanceOf(Map);
     expect(state.deployStatuses.size).toBe(0);
+  });
+});
+
+// --- formatDeploymentLine (L2 CI/CD pane) ---
+
+describe("formatDeploymentLine", () => {
+  it("shows commit ref for deployment", () => {
+    const deployment = makeDeployment({ ref: "abc1234567890" });
+    const text = stripAnsi(formatDeploymentLine(deployment, 120));
+    expect(text).toContain("abc1234");
+    expect(text).toContain("production");
+  });
+
+  it("shows LIVE label for active deployment", () => {
+    const deployment = makeDeployment({ status: "active", ref: "abc1234" });
+    const text = stripAnsi(formatDeploymentLine(deployment, 120));
+    expect(text).toContain("LIVE");
+    expect(text).toContain("active");
+  });
+
+  it("does not show LIVE for non-active deployment", () => {
+    const deployment = makeDeployment({ status: "failed", ref: "abc1234" });
+    const text = stripAnsi(formatDeploymentLine(deployment, 120));
+    expect(text).not.toContain("LIVE");
+    expect(text).toContain("failed");
+  });
+
+  it("shows short ref (first 7 chars)", () => {
+    const deployment = makeDeployment({ ref: "abcdef1234567890" });
+    const text = stripAnsi(formatDeploymentLine(deployment, 120));
+    expect(text).toContain("abcdef1");
+    expect(text).not.toContain("abcdef1234567890");
+  });
+});
+
+// --- Deployment Detail View (L3) ---
+
+describe("createDeploymentDetailState", () => {
+  it("creates state with display lines for deployments", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123" }),
+      makeDeployment({ id: "d2", environment: "staging", status: "in_progress", ref: "def456" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    expect(state.projectName).toBe("folia");
+    expect(state.deployments).toHaveLength(2);
+    expect(state.displayLines.length).toBeGreaterThan(0);
+    expect(state.scrollOffset).toBe(0);
+  });
+
+  it("shows empty state for no deployments", () => {
+    const state = createDeploymentDetailState([], "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("No deployments found");
+  });
+});
+
+describe("deployment detail display content", () => {
+  it("groups deployments by environment", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123" }),
+      makeDeployment({ id: "d2", environment: "staging", status: "active", ref: "def456" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("PRODUCTION");
+    expect(text).toContain("STAGING");
+  });
+
+  it("shows LIVE label for active environment", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("LIVE");
+    expect(text).toContain("Live commit:");
+    expect(text).toContain("abc123");
+  });
+
+  it("shows deploy history per environment", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "abc123",
+        updatedAt: new Date(Date.now() - 60_000).toISOString() }),
+      makeDeployment({ id: "d2", environment: "production", status: "inactive", ref: "old456",
+        updatedAt: new Date(Date.now() - 3600_000).toISOString() }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("History (2)");
+    expect(text).toContain("abc123");
+    expect(text).toContain("old456");
+  });
+
+  it("orders environments by priority (production first)", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "staging", status: "active" }),
+      makeDeployment({ id: "d2", environment: "production", status: "active" }),
+      makeDeployment({ id: "d3", environment: "preview", status: "active" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    const prodIdx = text.indexOf("PRODUCTION");
+    const stagingIdx = text.indexOf("STAGING");
+    const previewIdx = text.indexOf("PREVIEW");
+    expect(prodIdx).toBeLessThan(stagingIdx);
+    expect(stagingIdx).toBeLessThan(previewIdx);
+  });
+
+  it("shows commit sha for each deployment in history", () => {
+    const deployments = [
+      makeDeployment({ id: "d1", environment: "production", status: "active", ref: "commit1abc" }),
+      makeDeployment({ id: "d2", environment: "production", status: "inactive", ref: "commit2def" }),
+    ];
+    const state = createDeploymentDetailState(deployments, "folia");
+    const text = state.displayLines.map(stripAnsi).join("\n");
+    expect(text).toContain("commit1");
+    expect(text).toContain("commit2");
+  });
+});
+
+describe("deployment detail scrolling", () => {
+  it("scrolls down", () => {
+    const deployments = Array.from({ length: 20 }, (_, i) =>
+      makeDeployment({ id: `d${i}`, environment: "production", status: "active", ref: `ref${i}` }),
+    );
+    const state = createDeploymentDetailState(deployments, "folia");
+    expect(state.scrollOffset).toBe(0);
+    scrollDown(state, 5, 10);
+    expect(state.scrollOffset).toBe(5);
+  });
+
+  it("scrolls up", () => {
+    const deployments = Array.from({ length: 20 }, (_, i) =>
+      makeDeployment({ id: `d${i}`, environment: "production", status: "active", ref: `ref${i}` }),
+    );
+    const state = createDeploymentDetailState(deployments, "folia");
+    scrollDown(state, 10, 10);
+    scrollUp(state, 3);
+    expect(state.scrollOffset).toBe(7);
+  });
+
+  it("scrollToTop resets offset", () => {
+    const deployments = Array.from({ length: 20 }, (_, i) =>
+      makeDeployment({ id: `d${i}`, environment: "production", status: "active", ref: `ref${i}` }),
+    );
+    const state = createDeploymentDetailState(deployments, "folia");
+    scrollDown(state, 10, 10);
+    scrollToTop(state);
+    expect(state.scrollOffset).toBe(0);
+  });
+
+  it("scrollToBottom goes to max offset", () => {
+    const deployments = Array.from({ length: 20 }, (_, i) =>
+      makeDeployment({ id: `d${i}`, environment: "production", status: "active", ref: `ref${i}` }),
+    );
+    const state = createDeploymentDetailState(deployments, "folia");
+    scrollToBottom(state, 5);
+    expect(state.scrollOffset).toBe(state.displayLines.length - 5);
   });
 });
