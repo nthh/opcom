@@ -1,9 +1,10 @@
-import { listSkills, loadSkill } from "@opcom/core";
+import { listSkills, loadSkill, createSkill } from "@opcom/core";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 const CYAN = "\x1b[36m";
+const GREEN = "\x1b[32m";
 
 export async function runSkillsList(): Promise<void> {
   const skills = await listSkills();
@@ -44,4 +45,17 @@ export async function runSkillsShow(skillId: string): Promise<void> {
   console.log("");
   console.log(skill.content);
   console.log("");
+}
+
+export async function runSkillsCreate(skillId: string, opts?: { name?: string; description?: string }): Promise<void> {
+  try {
+    const mdPath = await createSkill(skillId, opts);
+    console.log(`\n  ${GREEN}Created${RESET} skill ${CYAN}${skillId}${RESET}`);
+    console.log(`  ${DIM}${mdPath}${RESET}`);
+    console.log(`\n  Edit the SKILL.md to define triggers, compatible roles, and content.\n`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`  ${msg}`);
+    process.exit(1);
+  }
 }

@@ -36,7 +36,7 @@ import { runGraphBuild, runGraphStats, runGraphDrift } from "./commands/graph.js
 import { runScaffold, runAudit, runTrace, runCoverage, runUcLs, runUcShow, runUcGaps } from "./commands/traceability.js";
 import { runTemplatesList, runTemplatesShow } from "./commands/templates.js";
 import { runImportCalendar, runImportPaste } from "./commands/import.js";
-import { runSkillsList, runSkillsShow } from "./commands/skills.js";
+import { runSkillsList, runSkillsShow, runSkillsCreate } from "./commands/skills.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -493,8 +493,20 @@ async function main(): Promise<void> {
             process.exit(1);
           }
           return runSkillsShow(args[2]);
+        case "create": {
+          if (!args[2]) {
+            console.error("  Usage: opcom skills create <skill-id> [--name <name>] [--description <desc>]");
+            process.exit(1);
+          }
+          const createOpts: { name?: string; description?: string } = {};
+          for (let i = 3; i < args.length; i++) {
+            if (args[i] === "--name" && args[i + 1]) { createOpts.name = args[++i]; }
+            else if (args[i] === "--description" && args[i + 1]) { createOpts.description = args[++i]; }
+          }
+          return runSkillsCreate(args[2], createOpts);
+        }
         default:
-          console.error("  Usage: opcom skills [list|show]");
+          console.error("  Usage: opcom skills [list|show|create]");
           process.exit(1);
       }
       break;
@@ -576,6 +588,7 @@ function printHelp(): void {
     integrations disable <id>    Disable an integration module
     skills [list]                List available capability skills
     skills show <id>             Show skill details
+    skills create <id>           Create a new custom skill
     scaffold <spec-file>         Generate tickets from spec section anchors
     scaffold --all               Scaffold all specs
     audit [--verbose]            Traceability audit (spec coverage, broken links)

@@ -8,6 +8,7 @@ import {
   listSkills,
   matchSkills,
   writeBuiltinSkills,
+  createSkill,
   parseSkillMd,
 } from "@opcom/core";
 import type { WorkItem, RoleDefinition } from "@opcom/types";
@@ -425,5 +426,58 @@ describe("writeBuiltinSkills", () => {
     expect(skill).not.toBeNull();
     expect(skill!.triggers).toContain("deploy");
     expect(skill!.triggers).toContain("deployment");
+  });
+});
+
+describe("createSkill", () => {
+  let tmpDir: string;
+  let originalHome: string;
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "opcom-skills-create-"));
+    originalHome = process.env.HOME!;
+    process.env.HOME = tmpDir;
+  });
+
+  afterEach(async () => {
+    process.env.HOME = originalHome;
+    await rm(tmpDir, { recursive: true });
+  });
+
+  it("creates a new skill directory with SKILL.md", async () => {
+    const mdPath = await createSkill("my-new-skill");
+    expect(mdPath).toContain("my-new-skill");
+    expect(mdPath).toContain("SKILL.md");
+
+    const { existsSync } = await import("node:fs");
+    expect(existsSync(mdPath)).toBe(true);
+  });
+
+  it("created skill is loadable", async () => {
+    await createSkill("loadable-skill", { name: "Loadable Skill", description: "A loadable skill" });
+    const skill = await loadSkill("loadable-skill");
+    expect(skill).not.toBeNull();
+    expect(skill!.id).toBe("loadable-skill");
+    expect(skill!.name).toBe("Loadable Skill");
+    expect(skill!.description).toBe("A loadable skill");
+    expect(skill!.version).toBe("1.0.0");
+  });
+
+  it("uses capitalized id as default name", async () => {
+    await createSkill("deep-research");
+    const skill = await loadSkill("deep-research");
+    expect(skill).not.toBeNull();
+    expect(skill!.name).toBe("Deep research");
+  });
+
+  it("throws if skill already exists", async () => {
+    await createSkill("duplicate-skill");
+    await expect(createSkill("duplicate-skill")).rejects.toThrow("already exists");
+  });
+
+  it("created skill appears in listSkills", async () => {
+    await createSkill("listed-skill");
+    const skills = await listSkills();
+    expect(skills.find(s => s.id === "listed-skill")).toBeDefined();
   });
 });
