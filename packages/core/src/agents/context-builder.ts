@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition } from "@opcom/types";
+import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition, VerificationMode } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
 import { readProjectSummary } from "../config/summary.js";
@@ -140,6 +140,7 @@ export function contextPacketToMarkdown(
   previousVerification?: VerificationResult,
   rebaseConflict?: RebaseConflict,
   stallWarning?: string,
+  verificationMode?: VerificationMode,
 ): string {
   const lines: string[] = [];
 
@@ -268,16 +269,19 @@ export function contextPacketToMarkdown(
 
   // Requirements (role instructions replace hardcoded defaults)
   lines.push(`## Requirements`);
+  const needsTests = !verificationMode || verificationMode === "test-gate";
   if (roleConfig?.instructions) {
     lines.push(roleConfig.instructions);
-  } else {
+  } else if (needsTests) {
     lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
     lines.push(`- Run tests relevant to your changes during development (specific test files, not the full suite).`);
     lines.push(`- The full test suite will be run by the verification pipeline after you finish. Do not run it yourself.`);
   }
   lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);
   lines.push(`- When committing, use a simple single-line commit message: \`git commit -m 'short description'\`. Do NOT use multi-line messages, heredocs, or \`$()\` substitution — they will be blocked by the permission system.`);
-  lines.push(`- Do not mark work as complete if tests are failing.`);
+  if (needsTests) {
+    lines.push(`- Do not mark work as complete if tests are failing.`);
+  }
   if (roleConfig?.doneCriteria) {
     lines.push("");
     lines.push(`## Done Criteria`);

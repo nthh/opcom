@@ -1,7 +1,8 @@
 // Orchestrator plan types
 
 export type PlanStatus = "planning" | "executing" | "paused" | "done" | "failed";
-export type StepStatus = "blocked" | "ready" | "in-progress" | "verifying" | "done" | "failed" | "skipped" | "needs-rebase";
+export type StepStatus = "blocked" | "ready" | "in-progress" | "verifying" | "done" | "failed" | "skipped" | "needs-rebase" | "pending-confirmation";
+export type VerificationMode = "test-gate" | "oracle" | "confirmation" | "output-exists" | "none";
 
 export interface Plan {
   id: string;
@@ -46,6 +47,7 @@ export interface PlanStep {
   verifyingPhase?: "testing" | "oracle"; // which verification sub-phase is active
   verifyingPhaseStartedAt?: string;      // ISO timestamp when current sub-phase started
   stallSignal?: StallSignal;             // active stall warning (cleared when step progresses)
+  verificationMode?: VerificationMode;   // per-step override from work item frontmatter
 }
 
 export interface RebaseConflict {
