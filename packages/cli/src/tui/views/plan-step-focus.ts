@@ -238,6 +238,18 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
     lines.push("");
   }
 
+  // --- Stall Warning ---
+  if (step.stallSignal) {
+    const sig = step.stallSignal;
+    lines.push(bold(color(ANSI.orange, "Stall Warning")));
+    lines.push(`  ${dim("Type:")}    ${sig.type}`);
+    lines.push(`  ${dim("Signal:")}  ${color(ANSI.orange, sig.message)}`);
+    for (const sl of wrapText(`  ${dim("Action:")}  ${sig.suggestion}`, width)) {
+      lines.push(sl);
+    }
+    lines.push("");
+  }
+
   // --- Verification ---
   if (verification) {
     lines.push(bold("Verification"));

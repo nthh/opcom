@@ -1,7 +1,7 @@
 // AgentsListComponent — Reusable agents panel for dashboard and project-detail views
 // Extracted from inline renderAgentsPanel() in both views.
 
-import type { AgentSession, ProjectStatusSnapshot, Plan, PlanStep } from "@opcom/types";
+import type { AgentSession, ProjectStatusSnapshot, Plan, PlanStep, StallSignal } from "@opcom/types";
 import type { TuiComponent } from "./types.js";
 import type { Panel } from "../layout.js";
 import {
@@ -245,6 +245,23 @@ function renderProjectAgentsPanel(
 
 // --- Formatting (moved from views/dashboard.ts and views/project-detail.ts) ---
 
+/** Format a compact stall badge for display in dashboard step/agent rows */
+export function formatStallBadge(signal: StallSignal): string {
+  const minutes = Math.round(signal.durationMs / 60_000);
+  switch (signal.type) {
+    case "long-running":
+      return `${minutes}m no commits`;
+    case "repeated-failure":
+      return "repeated failure";
+    case "plan-stall":
+      return `no progress ${minutes}m`;
+    case "repeated-action":
+      return "same error repeating";
+    default:
+      return "stalled";
+  }
+}
+
 /** Dashboard-mode agent formatting: project name + state + plan label + duration */
 export function formatAgentLines(
   agent: AgentSession,
@@ -263,7 +280,10 @@ export function formatAgentLines(
   const planStep = getPlanStepForAgent(agent, plan);
   const planLabel = planStep ? color(ANSI.yellow, ` [step:${planStep.ticketId}]`) : "";
 
-  const line1 = `${bold(projectName)} ${stateStr}${planLabel} ${dim(duration)}`;
+  const stallStr = planStep?.stallSignal
+    ? color(ANSI.orange, ` \u26a0 ${formatStallBadge(planStep.stallSignal)}`)
+    : "";
+  const line1 = `${bold(projectName)} ${stateStr}${planLabel}${stallStr} ${dim(duration)}`;
 
   // Detail line: context usage + last activity
   const parts: string[] = [];
