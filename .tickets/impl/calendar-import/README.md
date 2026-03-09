@@ -1,7 +1,7 @@
 ---
 id: calendar-import
 title: "Calendar/external source import as work item adapter"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
