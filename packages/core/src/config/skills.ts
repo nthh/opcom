@@ -422,6 +422,50 @@ export async function writeBuiltinSkills(): Promise<void> {
   }
 }
 
+/**
+ * Create a new skill directory with a template SKILL.md.
+ * Returns the path to the created SKILL.md file.
+ * Throws if a skill with that ID already exists.
+ */
+export async function createSkill(
+  skillId: string,
+  opts?: { name?: string; description?: string },
+): Promise<string> {
+  const skillDir = join(skillsDir(), skillId);
+  const mdPath = join(skillDir, "SKILL.md");
+
+  if (existsSync(mdPath)) {
+    throw new Error(`Skill '${skillId}' already exists at ${mdPath}`);
+  }
+
+  await mkdir(skillDir, { recursive: true });
+
+  const name = opts?.name ?? capitalize(skillId.replace(/-/g, " "));
+  const description = opts?.description ?? "";
+  const template = [
+    "---",
+    `name: ${name}`,
+    `description: ${JSON.stringify(description)}`,
+    "version: 1.0.0",
+    "triggers: []",
+    "compatible-roles: []",
+    "projects: []",
+    "---",
+    "",
+    `# ${name}`,
+    "",
+    "## When to Use",
+    "",
+    "## Process",
+    "",
+    "## Anti-Patterns",
+    "",
+  ].join("\n");
+
+  await writeFile(mdPath, template, "utf-8");
+  return mdPath;
+}
+
 // --- Helpers ---
 
 function skillToMd(skill: SkillDefinition): string {
