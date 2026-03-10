@@ -141,6 +141,7 @@ import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_
 import {
   renderSkillsBrowser,
   createSkillsBrowserState,
+  matchSkillsForContext,
   moveUp as skillsMoveUp,
   moveDown as skillsMoveDown,
   drillDown as skillsDrillDown,
@@ -2519,10 +2520,18 @@ export class TuiApp {
     }
 
     listSkills().then((skills) => {
-      // Map active skill names to IDs
+      // Map active skill names to IDs (from running agents)
       const activeIds = skills
         .filter(s => activeSkillIds.some(name => name === s.name || name === s.id))
         .map(s => s.id);
+
+      // Also match skills against the focused project and its tickets
+      const projectId = this.focusedProjectId;
+      const tickets = projectId ? (this.client.projectTickets.get(projectId) ?? []) : [];
+      const contextMatches = matchSkillsForContext(skills, projectId, tickets);
+      for (const id of contextMatches) {
+        if (!activeIds.includes(id)) activeIds.push(id);
+      }
 
       this.skillsBrowserState = createSkillsBrowserState(skills, activeIds);
       this.agentFocusState = null;
@@ -2532,7 +2541,6 @@ export class TuiApp {
       this.cloudServiceDetailState = null;
       this.stackDetailState = null;
       this.settingsViewState = null;
-      this.skillsBrowserState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;

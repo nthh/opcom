@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import type { SkillDefinition } from "@opcom/types";
+import type { SkillDefinition, WorkItem } from "@opcom/types";
 import {
   createSkillsBrowserState,
+  matchSkillsForContext,
   buildSkillListLines,
   buildSkillDetailLines,
   moveUp,
@@ -347,6 +348,90 @@ describe("renderSkillsBrowser", () => {
     const panel = { x: 0, y: 0, width: 80, height: 24 };
 
     expect(() => renderSkillsBrowser(buf, panel, state)).not.toThrow();
+  });
+});
+
+// --- matchSkillsForContext ---
+
+function makeTicket(overrides: Partial<WorkItem> = {}): WorkItem {
+  return {
+    id: "ticket-1",
+    title: "Default ticket",
+    status: "open",
+    priority: 1,
+    type: "feature",
+    filePath: "/tmp/ticket.md",
+    deps: [],
+    links: [],
+    tags: {},
+    ...overrides,
+  };
+}
+
+describe("matchSkillsForContext", () => {
+  it("returns empty when no projectId", () => {
+    const skills = makeBuiltinSkills();
+    const result = matchSkillsForContext(skills, null, []);
+    expect(result).toEqual([]);
+  });
+
+  it("matches skills with empty projects array (applies to all projects)", () => {
+    const skills = [makeSkill("universal", { projects: [] })];
+    const result = matchSkillsForContext(skills, "my-project", []);
+    expect(result).toContain("universal");
+  });
+
+  it("matches skills scoped to the focused project", () => {
+    const skills = [makeSkill("proj-specific", { projects: ["folia", "mtnmap"] })];
+    const result = matchSkillsForContext(skills, "folia", []);
+    expect(result).toContain("proj-specific");
+  });
+
+  it("does not match skills scoped to other projects", () => {
+    const skills = [makeSkill("other-proj", { projects: ["conversi"] })];
+    const result = matchSkillsForContext(skills, "folia", []);
+    expect(result).not.toContain("other-proj");
+  });
+
+  it("matches skills via trigger keywords in ticket titles", () => {
+    const skills = [makeSkill("reviewer", { projects: ["other"], triggers: ["review", "PR"] })];
+    const tickets = [makeTicket({ title: "Code review for auth module" })];
+    const result = matchSkillsForContext(skills, "folia", tickets);
+    expect(result).toContain("reviewer");
+  });
+
+  it("matches skills via trigger keywords in ticket type", () => {
+    const skills = [makeSkill("deployer", { projects: ["other"], triggers: ["deployment"] })];
+    const tickets = [makeTicket({ type: "deployment" })];
+    const result = matchSkillsForContext(skills, "folia", tickets);
+    expect(result).toContain("deployer");
+  });
+
+  it("trigger matching is case-insensitive", () => {
+    const skills = [makeSkill("tester", { projects: ["other"], triggers: ["Testing"] })];
+    const tickets = [makeTicket({ title: "Add testing framework" })];
+    const result = matchSkillsForContext(skills, "folia", tickets);
+    expect(result).toContain("tester");
+  });
+
+  it("does not match when triggers do not match any ticket", () => {
+    const skills = [makeSkill("unrelated", { projects: ["other"], triggers: ["kubernetes"] })];
+    const tickets = [makeTicket({ title: "Fix auth bug", type: "bugfix" })];
+    const result = matchSkillsForContext(skills, "folia", tickets);
+    expect(result).not.toContain("unrelated");
+  });
+
+  it("combines project and trigger matching", () => {
+    const skills = [
+      makeSkill("proj-match", { projects: ["folia"] }),
+      makeSkill("trigger-match", { projects: ["other"], triggers: ["review"] }),
+      makeSkill("no-match", { projects: ["other"], triggers: ["kubernetes"] }),
+    ];
+    const tickets = [makeTicket({ title: "Code review" })];
+    const result = matchSkillsForContext(skills, "folia", tickets);
+    expect(result).toContain("proj-match");
+    expect(result).toContain("trigger-match");
+    expect(result).not.toContain("no-match");
   });
 });
 

@@ -1,7 +1,7 @@
 // TUI Skills Browser View (Level 3)
 // Browse available skills with built-in/custom and active/available indicators.
 
-import type { SkillDefinition } from "@opcom/types";
+import type { SkillDefinition, WorkItem } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -40,6 +40,38 @@ export function createSkillsBrowserState(
     detailScrollOffset: 0,
     detailLines: [],
   };
+}
+
+/**
+ * Return skill IDs that match the given project/ticket context.
+ * A skill matches if:
+ *  - its `projects` array is empty (applies to all projects) or includes the projectId
+ *  - OR any of its `triggers` appear in a ticket's title or type
+ */
+export function matchSkillsForContext(
+  skills: SkillDefinition[],
+  projectId: string | null,
+  tickets: WorkItem[],
+): string[] {
+  if (!projectId) return [];
+  const matched: string[] = [];
+  for (const skill of skills) {
+    const projectMatch = skill.projects.length === 0 || skill.projects.includes(projectId);
+    let triggerMatch = false;
+    if (skill.triggers.length > 0) {
+      for (const ticket of tickets) {
+        const haystack = `${ticket.title} ${ticket.type}`.toLowerCase();
+        if (skill.triggers.some(t => haystack.includes(t.toLowerCase()))) {
+          triggerMatch = true;
+          break;
+        }
+      }
+    }
+    if (projectMatch || triggerMatch) {
+      matched.push(skill.id);
+    }
+  }
+  return matched;
 }
 
 // --- Helpers ---
