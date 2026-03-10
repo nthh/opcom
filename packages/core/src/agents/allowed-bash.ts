@@ -4,7 +4,7 @@
  * Returns strings in "Bash(pattern)" format suitable for --allowedTools.
  */
 
-import type { StackInfo, TestingConfig, LintConfig } from "@opcom/types";
+import type { StackInfo, TestingConfig, LintConfig, AgentConstraint } from "@opcom/types";
 
 export interface AllowedBashInput {
   stack: StackInfo;
@@ -117,4 +117,33 @@ export function deriveAllowedBashTools(
 
   // Wrap in Bash() format
   return Array.from(patterns).map((p) => `Bash(${p})`);
+}
+
+/**
+ * Check a command against agent constraints for forbidden command warnings.
+ *
+ * Constraints whose name starts with "no-" or "forbidden-" are treated as
+ * forbidden command rules. The constraint's `rule` field is matched as a
+ * substring against the command. This is a soft check — produces warnings,
+ * not hard blocks.
+ *
+ * @returns `{ forbidden: false }` if allowed, or `{ forbidden: true, constraint }` with the matching constraint.
+ */
+export function checkForbiddenCommand(
+  command: string,
+  constraints: AgentConstraint[] | undefined,
+): { forbidden: boolean; constraint?: AgentConstraint } {
+  if (!constraints || constraints.length === 0) return { forbidden: false };
+
+  for (const constraint of constraints) {
+    const lowerName = constraint.name.toLowerCase();
+    if (!lowerName.startsWith("no-") && !lowerName.startsWith("forbidden-")) continue;
+
+    // Match the rule text as a substring of the command
+    if (command.includes(constraint.rule)) {
+      return { forbidden: true, constraint };
+    }
+  }
+
+  return { forbidden: false };
 }

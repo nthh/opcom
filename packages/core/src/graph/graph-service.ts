@@ -276,6 +276,57 @@ export function ingestTestResults(
 }
 
 /**
+ * Ingest use-case field mapping edges into the context graph.
+ * For each work item with use-case field mappings, creates:
+ * - A use_case node for each use-case ID
+ * - An "implements" edge from ticket → use_case
+ */
+export function ingestFieldMappingEdges(
+  projectName: string,
+  ticketId: string,
+  useCaseIds: string[],
+): void {
+  const db = openGraphDb(projectName);
+  if (!db) return;
+
+  try {
+    const now = new Date().toISOString();
+    const ticketNodeId = `ticket:${ticketId}`;
+
+    // Ensure ticket node exists
+    db.upsertNode({
+      id: ticketNodeId,
+      type: "ticket",
+      title: ticketId,
+      lastSeen: now,
+    });
+
+    for (const ucId of useCaseIds) {
+      const ucNodeId = `use_case:${ucId}`;
+
+      // Create/update use_case node
+      db.upsertNode({
+        id: ucNodeId,
+        type: "use_case",
+        title: ucId,
+        lastSeen: now,
+      });
+
+      // Create implements edge: ticket → use_case
+      db.upsertEdge({
+        source: ticketNodeId,
+        target: ucNodeId,
+        relation: "implements",
+      });
+    }
+
+    log.info("ingested field mapping edges", { projectName, ticketId, useCaseCount: useCaseIds.length });
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Get graph stats for a project.
  */
 export function getGraphStats(projectName: string): {

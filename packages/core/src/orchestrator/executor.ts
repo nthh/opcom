@@ -26,7 +26,7 @@ import type { TicketSet } from "./planner.js";
 import { recomputePlan, computeStages, computeDepthStages, buildExplicitStages, computeStageSummary, baseTicketId, applyStrategy } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
-import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
+import { deriveAllowedBashTools, checkForbiddenCommand } from "../agents/allowed-bash.js";
 import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges, captureChangeset } from "./git-ops.js";
@@ -54,6 +54,7 @@ export interface ExecutorEvents {
   plan_paused: { plan: Plan };
   plan_updated: { plan: Plan };
   stall_detected: { signal: StallSignal };
+  forbidden_command_warning: { stepTicketId: string; command: string; constraintName: string; rule: string };
 }
 
 type EventHandler<T> = (data: T) => void;
@@ -83,6 +84,7 @@ export class Executor {
   private stepVerification = new Map<string, { runTests: boolean; runOracle: boolean }>(); // ticketId → role verification
   private stepFiles = new Map<string, string[]>(); // ticketId → related file paths (cached from graph)
   private ticketCache = new Map<string, import("@opcom/types").WorkItem[]>(); // projectId → tickets
+  private stepConstraints = new Map<string, import("@opcom/types").AgentConstraint[]>(); // ticketId → constraints
   private worktreeManager = new WorktreeManager();
   private stallDetector: StallDetector;
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -244,6 +246,35 @@ export class Executor {
     const onAgentEvent = ({ sessionId, event: ev }: { sessionId: string; event: NormalizedEvent }) => {
       if (ev.type === "tool_end" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolSuccess !== false) {
         this.sessionWrites.set(sessionId, (this.sessionWrites.get(sessionId) ?? 0) + 1);
+      }
+      // Forbidden command check — soft warn on matching agent constraints
+      if (ev.type === "tool_start" && ev.data?.toolName === "Bash" && ev.data.toolInput) {
+        const ticketId = this.sessionToStep.get(sessionId);
+        if (ticketId) {
+          const constraints = this.stepConstraints.get(ticketId);
+          const result = checkForbiddenCommand(ev.data.toolInput, constraints);
+          if (result.forbidden && result.constraint) {
+            log.warn("forbidden command detected", {
+              ticketId,
+              command: ev.data.toolInput,
+              constraint: result.constraint.name,
+            });
+            this.emit("forbidden_command_warning", {
+              stepTicketId: ticketId,
+              command: ev.data.toolInput,
+              constraintName: result.constraint.name,
+              rule: result.constraint.rule,
+            });
+            this.logPlanEvent("forbidden_command_warning", {
+              stepTicketId: ticketId,
+              detail: {
+                command: ev.data.toolInput,
+                constraintName: result.constraint.name,
+                rule: result.constraint.rule,
+              },
+            });
+          }
+        }
       }
     };
 
@@ -1386,7 +1417,8 @@ export class Executor {
     // --- Test gate ---
     // Run tests in the worktree if available (verification runs before merge)
     const testPath = step.worktreePath ?? project.path;
-    if (verification.runTests && project.testing?.command) {
+    const resolvedTestCmd = this.resolveTestCommandFromProject(project);
+    if (verification.runTests && resolvedTestCmd) {
       step.verifyingPhase = "testing";
       step.verifyingPhaseStartedAt = new Date().toISOString();
       await savePlan(this.plan);
@@ -1395,7 +1427,7 @@ export class Executor {
         stepTicketId: step.ticketId,
         detail: { phase: "testing", startedAt: step.verifyingPhaseStartedAt },
       });
-      const testResult = await this.runTestGate(testPath, project.testing.command);
+      const testResult = await this.runTestGate(testPath, resolvedTestCmd);
       result.testGate = testResult;
       if (!testResult.passed) {
         result.passed = false;
@@ -2114,6 +2146,11 @@ export class Executor {
     this.stallDetector.recordStepTransition();
     this.stepVerification.set(step.ticketId, { runTests: resolved.runTests, runOracle: resolved.runOracle });
 
+    // Cache agent constraints for forbidden command checking during execution
+    if (project.profile?.agentConstraints?.length) {
+      this.stepConstraints.set(step.ticketId, project.profile.agentConstraints);
+    }
+
     // Write lock file so cleanupOrphaned() won't remove this worktree
     if (this.plan.config.worktree && session.pid) {
       await this.worktreeManager.writeLock(step.ticketId, session.pid).catch((err) => {
@@ -2320,7 +2357,7 @@ export class Executor {
     const projectPath = await this.resolveProjectPath();
     if (!projectPath) return null;
 
-    const testCommand = await this.resolveTestCommand();
+    const testCommand = await this.resolveSmokeTestCommand();
     log.info("running smoke test after stage", { stageIndex });
 
     const result = await runSmoke(projectPath, testCommand);
@@ -2339,7 +2376,7 @@ export class Executor {
     const projectPath = await this.resolveProjectPath();
     if (!projectPath) return null;
 
-    const testCommand = await this.resolveTestCommand();
+    const testCommand = await this.resolveSmokeTestCommand();
     log.info("running final smoke test on plan completion");
 
     const result = await runSmoke(projectPath, testCommand);
@@ -2358,12 +2395,45 @@ export class Executor {
     return project?.path ?? null;
   }
 
-  /** Resolve the test command from the primary project. */
+  /**
+   * Resolve the test command for a project.
+   * Precedence: plan-level override > profile "test" command > detected testing > fallback.
+   */
+  resolveTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: { command?: string } | null }): string {
+    if (this.plan.config.testCommand) return this.plan.config.testCommand;
+    const profileTest = project.profile?.commands?.find((c) => c.name === "test");
+    if (profileTest) return profileTest.command;
+    if (project.testing?.command) return project.testing.command;
+    return "npm test";
+  }
+
+  /**
+   * Resolve the smoke/full test command for stage and plan-completion tests.
+   * Precedence: plan-level override > profile "testFull" > profile "test" > detected > fallback.
+   */
+  resolveSmokeTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: { command?: string } | null }): string {
+    if (this.plan.config.testCommand) return this.plan.config.testCommand;
+    const profileTestFull = project.profile?.commands?.find((c) => c.name === "testFull");
+    if (profileTestFull) return profileTestFull.command;
+    return this.resolveTestCommandFromProject(project);
+  }
+
+  /** Resolve the test command from the primary project (for step verification). */
   private async resolveTestCommand(): Promise<string> {
     const projectId = this.plan.steps[0]?.projectId;
     if (!projectId) return "npm test";
     const project = await loadProject(projectId);
-    return project?.testing?.command ?? "npm test";
+    if (!project) return "npm test";
+    return this.resolveTestCommandFromProject(project);
+  }
+
+  /** Resolve the smoke test command from the primary project (for stage/plan completion). */
+  private async resolveSmokeTestCommand(): Promise<string> {
+    const projectId = this.plan.steps[0]?.projectId;
+    if (!projectId) return "npm test";
+    const project = await loadProject(projectId);
+    if (!project) return "npm test";
+    return this.resolveSmokeTestCommandFromProject(project);
   }
 
   /** Don't exit the event loop while paused — resume needs a live loop. */

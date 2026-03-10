@@ -11,6 +11,7 @@ import {
   queryGraphContext,
   queryProjectDrift,
   ingestTestResults,
+  ingestFieldMappingEdges,
   getGraphStats,
 } from "@opcom/core";
 
@@ -192,6 +193,56 @@ describe("ingestTestResults", () => {
     expect(trend[0].passed).toBe(7);
     expect(trend[0].failed).toBe(3);
     expect(trend[0].total).toBe(10);
+    db!.close();
+  });
+});
+
+describe("ingestFieldMappingEdges", () => {
+  it("skips silently when no graph exists", () => {
+    // Should not throw
+    ingestFieldMappingEdges("nonexistent-project-xyz", "ticket-1", ["UC-001"]);
+  });
+
+  it("creates use_case nodes and implements edges", async () => {
+    await buildGraph(projectName, projectDir);
+
+    ingestFieldMappingEdges(projectName, "fix-auth", ["UC-001", "UC-002"]);
+
+    const db = openGraphDb(projectName);
+    expect(db).not.toBeNull();
+
+    // Check ticket node exists
+    const ticketNode = db!.getNode("ticket:fix-auth");
+    expect(ticketNode).not.toBeNull();
+    expect(ticketNode!.type).toBe("ticket");
+
+    // Check use_case nodes exist
+    const uc1 = db!.getNode("use_case:UC-001");
+    expect(uc1).not.toBeNull();
+    expect(uc1!.type).toBe("use_case");
+
+    const uc2 = db!.getNode("use_case:UC-002");
+    expect(uc2).not.toBeNull();
+
+    // Check implements edges from ticket to use_cases
+    const edges = db!.getEdgesFrom("ticket:fix-auth", "implements");
+    const useCaseTargets = edges.map((e) => e.target).sort();
+    expect(useCaseTargets).toContain("use_case:UC-001");
+    expect(useCaseTargets).toContain("use_case:UC-002");
+
+    db!.close();
+  });
+
+  it("is idempotent — re-ingesting does not duplicate", async () => {
+    await buildGraph(projectName, projectDir);
+
+    ingestFieldMappingEdges(projectName, "fix-auth", ["UC-001"]);
+    ingestFieldMappingEdges(projectName, "fix-auth", ["UC-001"]);
+
+    const db = openGraphDb(projectName);
+    const edges = db!.getEdgesFrom("ticket:fix-auth", "implements");
+    const ucEdges = edges.filter((e) => e.target === "use_case:UC-001");
+    expect(ucEdges).toHaveLength(1);
     db!.close();
   });
 });

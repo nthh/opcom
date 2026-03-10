@@ -76,7 +76,7 @@ export { refreshProjectStatus } from "./project/status.js";
 export type { ProjectStatus } from "./project/status.js";
 
 // Phase 2: Agents
-export { deriveAllowedBashTools } from "./agents/allowed-bash.js";
+export { deriveAllowedBashTools, checkForbiddenCommand } from "./agents/allowed-bash.js";
 export type { AllowedBashInput } from "./agents/allowed-bash.js";
 export { createAdapter, ClaudeCodeAdapter, OpenCodeAdapter } from "./agents/adapter.js";
 export { SessionManager } from "./agents/session-manager.js";
@@ -283,7 +283,7 @@ export {
 export type { ExpoEASConfig } from "./cloud/index.js";
 
 // Context Graph Integration
-export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
+export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, ingestFieldMappingEdges, getGraphStats } from "./graph/graph-service.js";
 
 // Orchestrator
 export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds, computeStages, computeDepthStages, buildExplicitStages, validateExplicitStages, computeStageSummary, expandTeamSteps, expandSubtaskSteps, extractSubtasks, baseTicketId, applyStrategy } from "./orchestrator/planner.js";

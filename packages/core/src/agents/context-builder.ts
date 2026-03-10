@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { ProjectConfig, ProjectProfile, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition, VerificationMode } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
-import { queryGraphContext } from "../graph/graph-service.js";
+import { queryGraphContext, ingestFieldMappingEdges } from "../graph/graph-service.js";
 import { readProjectSummary } from "../config/summary.js";
 import { matchSkills } from "../config/skills.js";
 
@@ -117,6 +117,21 @@ export async function buildContextPacket(
       }
     } catch {
       // Graph not available — continue without it
+    }
+
+    // Ingest use-case field mapping edges into context graph
+    if (project.profile?.fieldMappings?.length) {
+      try {
+        for (const mapping of project.profile.fieldMappings) {
+          if (mapping.type !== "use-case") continue;
+          const tagValues = workItem.tags?.[mapping.field];
+          if (tagValues && tagValues.length > 0) {
+            ingestFieldMappingEdges(project.name, workItem.id, tagValues);
+          }
+        }
+      } catch {
+        // Graph ingestion is non-fatal
+      }
     }
   }
 
