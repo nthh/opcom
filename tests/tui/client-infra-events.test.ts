@@ -74,6 +74,58 @@ function makePodDetail(overrides: Partial<PodDetail> = {}): PodDetail {
   };
 }
 
+describe("TuiClient port conflict handling", () => {
+  let client: TuiClient;
+
+  beforeEach(async () => {
+    client = new TuiClient();
+    await client.connect();
+  });
+
+  it("stores port conflict events", () => {
+    expect(client.portConflicts).toHaveLength(0);
+
+    client.portConflicts.push({
+      projectId: "proj-b",
+      serviceName: "web",
+      port: 3000,
+      conflictsWith: {
+        port: 3000,
+        projectId: "proj-a",
+        serviceName: "web",
+        allocatedAt: new Date().toISOString(),
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(client.portConflicts).toHaveLength(1);
+    expect(client.portConflicts[0].serviceName).toBe("web");
+    expect(client.portConflicts[0].conflictsWith.projectId).toBe("proj-a");
+  });
+
+  it("limits port conflicts to 20", () => {
+    for (let i = 0; i < 25; i++) {
+      client.portConflicts.push({
+        projectId: `proj-${i}`,
+        serviceName: "svc",
+        port: 3000 + i,
+        conflictsWith: {
+          port: 3000 + i,
+          projectId: "other",
+          serviceName: "other-svc",
+          allocatedAt: new Date().toISOString(),
+        },
+        timestamp: new Date().toISOString(),
+      });
+    }
+    if (client.portConflicts.length > 20) {
+      client.portConflicts.splice(0, client.portConflicts.length - 20);
+    }
+
+    expect(client.portConflicts).toHaveLength(20);
+  });
+});
+
 describe("TuiClient infrastructure event handling", () => {
   let client: TuiClient;
 

@@ -91,6 +91,9 @@ export class TuiClient {
   // Dev environment status per project
   projectEnvironmentStatus = new Map<string, EnvironmentStatus>();
 
+  // Port conflict notifications (most recent per project/service)
+  portConflicts: Array<{ projectId: string; serviceName: string; port: number; conflictsWith: import("@opcom/types").PortAllocation; timestamp: string }> = [];
+
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
@@ -596,9 +599,21 @@ export class TuiClient {
       }
 
       case "service_status":
-      case "port_conflict":
-        // These are informational — environment_status handles the aggregate
+        // Informational — environment_status handles the aggregate
         break;
+
+      case "port_conflict": {
+        this.portConflicts.push({
+          projectId: event.projectId,
+          serviceName: event.serviceName,
+          port: event.port,
+          conflictsWith: event.conflictsWith,
+          timestamp: new Date().toISOString(),
+        });
+        // Keep last 20 conflicts
+        if (this.portConflicts.length > 20) this.portConflicts.splice(0, this.portConflicts.length - 20);
+        break;
+      }
     }
 
     // Notify handlers

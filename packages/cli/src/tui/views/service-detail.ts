@@ -79,6 +79,16 @@ export function rebuildDisplayLines(state: ServiceDetailState, wrapWidth: number
   }
   lines.push("");
 
+  // Logs
+  if (instance.logs && instance.logs.length > 0) {
+    lines.push(bold("LOGS"));
+    lines.push(dim("\u2500".repeat(Math.min(60, wrapWidth - 4))));
+    for (const logLine of instance.logs) {
+      lines.push(`  ${logLine}`);
+    }
+    lines.push("");
+  }
+
   // Footer
   lines.push(dim("esc:back  r:restart  s:stop  ?:help"));
 

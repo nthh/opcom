@@ -242,6 +242,9 @@ export class TuiApp {
   // Chat input mode (chat panel focused and accepting text input)
   private chatInputMode = false;
 
+  // Flash notification (port conflicts, etc.)
+  private notificationMessage: string | null = null;
+  private notificationTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.client = new TuiClient();
@@ -273,8 +276,13 @@ export class TuiApp {
     this.refreshHealthData();
 
     // Listen for data changes
-    this.client.onEvent(() => {
+    this.client.onEvent((event) => {
       this.syncData();
+      if (event.type === "port_conflict") {
+        this.showNotification(
+          `Port conflict: ${event.serviceName} wants :${event.port} (used by ${event.conflictsWith.projectId}/${event.conflictsWith.serviceName})`,
+        );
+      }
       this.scheduleRender();
     });
 
@@ -306,9 +314,20 @@ export class TuiApp {
 
   private _resolveQuit: (() => void) | null = null;
 
+  private showNotification(message: string, durationMs = 8000): void {
+    this.notificationMessage = message;
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    this.notificationTimer = setTimeout(() => {
+      this.notificationMessage = null;
+      this.notificationTimer = null;
+      this.scheduleRender();
+    }, durationMs);
+  }
+
   private quit(): void {
     this.running = false;
     if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
 
     // Restore terminal
     if (process.stdin.isTTY) {
@@ -619,8 +638,15 @@ export class TuiApp {
         break;
     }
 
-    const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${keysStr}`;
-    this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    // Show notification if active (overrides keys display)
+    if (this.notificationMessage) {
+      const notifStr = color(ANSI.yellow, this.notificationMessage);
+      const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${notifStr}`;
+      this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    } else {
+      const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${keysStr}`;
+      this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    }
   }
 
   private renderHelp(): void {

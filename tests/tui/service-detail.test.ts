@@ -160,3 +160,57 @@ describe("rebuildDisplayLines", () => {
     expect(updatedContent).not.toContain("starting");
   });
 });
+
+describe("service detail logs", () => {
+  it("shows log lines when present", () => {
+    const instance = makeInstance({
+      logs: [
+        "Starting server on port 3000...",
+        "Connected to database",
+        "Ready to accept connections",
+      ],
+    });
+    const state = createServiceDetailState("folia", "api", instance);
+
+    const content = state.displayLines.map(stripAnsi).join("\n");
+    expect(content).toContain("LOGS");
+    expect(content).toContain("Starting server on port 3000...");
+    expect(content).toContain("Connected to database");
+    expect(content).toContain("Ready to accept connections");
+  });
+
+  it("does not show LOGS section when logs are empty", () => {
+    const instance = makeInstance({ logs: [] });
+    const state = createServiceDetailState("folia", "api", instance);
+
+    const content = state.displayLines.map(stripAnsi).join("\n");
+    expect(content).not.toContain("LOGS");
+  });
+
+  it("does not show LOGS section when logs are undefined", () => {
+    const instance = makeInstance();
+    const state = createServiceDetailState("folia", "api", instance);
+
+    const content = state.displayLines.map(stripAnsi).join("\n");
+    expect(content).not.toContain("LOGS");
+  });
+
+  it("renders log lines after health check section", () => {
+    const hc: HealthCheckResult = {
+      healthy: true,
+      checkedAt: new Date().toISOString(),
+      latencyMs: 5,
+    };
+    const instance = makeInstance({
+      lastHealthCheck: hc,
+      logs: ["Server started"],
+    });
+    const state = createServiceDetailState("folia", "api", instance);
+
+    const content = state.displayLines.map(stripAnsi).join("\n");
+    const healthIdx = content.indexOf("HEALTH CHECK");
+    const logsIdx = content.indexOf("LOGS");
+    expect(healthIdx).toBeGreaterThan(-1);
+    expect(logsIdx).toBeGreaterThan(healthIdx);
+  });
+});
