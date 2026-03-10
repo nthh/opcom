@@ -293,9 +293,11 @@ export function renderAgentFocus(
 ): void {
   const { agent, role } = state;
 
-  // Header: agent info (2-3 rows depending on role)
+  // Header: agent info (2-4 rows depending on role/skills)
   const roleDetailLines = (state.showRoleDetail && role) ? buildRoleDetailLines(role) : [];
-  const baseHeaderHeight = role ? 3 : 2;
+  const hasSkills = agent.skills && agent.skills.length > 0;
+  let baseHeaderHeight = role ? 3 : 2;
+  if (hasSkills) baseHeaderHeight++;
   const headerHeight = baseHeaderHeight + roleDetailLines.length;
   const footerHeight = state.promptMode ? 2 : 1;
   const contentHeight = panel.height - headerHeight - footerHeight;
@@ -323,15 +325,24 @@ export function renderAgentFocus(
   buf.writeLine(panel.y + 1, panel.x + 1, headerLine2Parts.join("  "), contentWidth);
 
   // Role summary line
+  let nextHeaderRow = 2;
   if (role) {
     const summary = buildRoleSummary(role);
     const toggleHint = state.showRoleDetail ? dim(" [R: collapse]") : dim(" [R: expand]");
-    buf.writeLine(panel.y + 2, panel.x + 1, dim("Role: ") + (role.name ?? role.id) + dim(" — " + summary) + toggleHint, contentWidth);
+    buf.writeLine(panel.y + nextHeaderRow, panel.x + 1, dim("Role: ") + (role.name ?? role.id) + dim(" — " + summary) + toggleHint, contentWidth);
+    nextHeaderRow++;
+  }
+
+  // Skills line
+  if (hasSkills) {
+    const skillNames = agent.skills!.map(s => s.name).join(", ");
+    buf.writeLine(panel.y + nextHeaderRow, panel.x + 1, dim(`Skills: ${skillNames}`), contentWidth);
+    nextHeaderRow++;
   }
 
   // Expanded role detail lines
   for (let i = 0; i < roleDetailLines.length; i++) {
-    buf.writeLine(panel.y + baseHeaderHeight + i, panel.x + 1, dim(roleDetailLines[i]), contentWidth);
+    buf.writeLine(panel.y + nextHeaderRow + i, panel.x + 1, dim(roleDetailLines[i]), contentWidth);
   }
 
   // --- Content (scrollable agent output) ---

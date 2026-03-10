@@ -137,7 +137,20 @@ import {
   toggleSetting as settingsToggle,
   type SettingsViewState,
 } from "./views/settings-view.js";
-import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES } from "@opcom/core";
+import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES, listSkills } from "@opcom/core";
+import {
+  renderSkillsBrowser,
+  createSkillsBrowserState,
+  moveUp as skillsMoveUp,
+  moveDown as skillsMoveDown,
+  drillDown as skillsDrillDown,
+  drillUp as skillsDrillUp,
+  scrollDetailUp as skillsScrollUp,
+  scrollDetailDown as skillsScrollDown,
+  scrollDetailToTop as skillsScrollToTop,
+  scrollDetailToBottom as skillsScrollToBottom,
+  type SkillsBrowserState,
+} from "./views/skills-browser.js";
 import {
   getPipelineAtIndex,
   getDeploymentAtIndex,
@@ -202,6 +215,7 @@ export class TuiApp {
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
   private stackDetailState: StackDetailState | null = null;
   private settingsViewState: SettingsViewState | null = null;
+  private skillsBrowserState: SkillsBrowserState | null = null;
   private pipelineDetailState: PipelineDetailState | null = null;
   private deploymentDetailState: DeploymentDetailState | null = null;
   private podDetailState: PodDetailState | null = null;
@@ -565,6 +579,8 @@ export class TuiApp {
             renderCloudServiceDetail(this.buf, layout.panels[0], this.cloudServiceDetailState);
           } else if (this.settingsViewState) {
             renderSettingsView(this.buf, layout.panels[0], this.settingsViewState);
+          } else if (this.skillsBrowserState) {
+            renderSkillsBrowser(this.buf, layout.panels[0], this.skillsBrowserState);
           } else if (this.pipelineDetailState) {
             renderPipelineDetail(this.buf, layout.panels[0], this.pipelineDetailState);
           } else if (this.deploymentDetailState) {
@@ -617,7 +633,7 @@ export class TuiApp {
           const switchHint = this.dashboardState.allPlans.length > 1 ? "  [/]:plans" : "";
           keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}${switchHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:deploys  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:deploys  c:chat  H:health  O:settings  K:skills  /:search  ?:help  q:quit");
         }
         break;
       case 2:
@@ -756,6 +772,8 @@ export class TuiApp {
           this.handleCloudServiceDetailInput(data);
         } else if (this.settingsViewState) {
           this.handleSettingsViewInput(data);
+        } else if (this.skillsBrowserState) {
+          this.handleSkillsBrowserInput(data);
         } else if (this.pipelineDetailState) {
           this.handlePipelineDetailInput(data);
         } else if (this.deploymentDetailState) {
@@ -986,6 +1004,10 @@ export class TuiApp {
 
       case "O":
         this.openSettingsView();
+        return;
+
+      case "K":
+        this.openSkillsBrowser();
         return;
     }
   }
@@ -2150,6 +2172,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2206,6 +2229,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2240,6 +2264,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2279,6 +2304,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2470,6 +2496,123 @@ export class TuiApp {
     }).catch(() => {});
   }
 
+  // --- Skills Browser ---
+
+  private openSkillsBrowser(): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+
+    // Collect active skill IDs from running agents
+    const activeSkillIds: string[] = [];
+    for (const agent of this.client.agents) {
+      if (agent.skills) {
+        for (const skill of agent.skills) {
+          if (!activeSkillIds.includes(skill.name)) {
+            activeSkillIds.push(skill.name);
+          }
+        }
+      }
+    }
+
+    listSkills().then((skills) => {
+      // Map active skill names to IDs
+      const activeIds = skills
+        .filter(s => activeSkillIds.some(name => name === s.name || name === s.id))
+        .map(s => s.id);
+
+      this.skillsBrowserState = createSkillsBrowserState(skills, activeIds);
+      this.agentFocusState = null;
+      this.ticketFocusState = null;
+      this.planStepFocusState = null;
+      this.planOverviewState = null;
+      this.cloudServiceDetailState = null;
+      this.stackDetailState = null;
+      this.settingsViewState = null;
+      this.skillsBrowserState = null;
+      this.pipelineDetailState = null;
+      this.deploymentDetailState = null;
+      this.podDetailState = null;
+      this.scheduleRender();
+    }).catch(() => {
+      this.skillsBrowserState = createSkillsBrowserState([], []);
+      this.agentFocusState = null;
+      this.ticketFocusState = null;
+      this.planStepFocusState = null;
+      this.planOverviewState = null;
+      this.cloudServiceDetailState = null;
+      this.stackDetailState = null;
+      this.settingsViewState = null;
+      this.pipelineDetailState = null;
+      this.deploymentDetailState = null;
+      this.podDetailState = null;
+      this.scheduleRender();
+    });
+  }
+
+  private handleSkillsBrowserInput(data: string): void {
+    if (!this.skillsBrowserState) return;
+    const state = this.skillsBrowserState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 2;
+
+    if (state.drilledSkillId) {
+      // Detail view
+      switch (data) {
+        case "q":
+        case "\x1b":
+          skillsDrillUp(state);
+          return;
+
+        case "j":
+        case "\x1b[B":
+          skillsScrollDown(state, 1, viewHeight);
+          return;
+
+        case "k":
+        case "\x1b[A":
+          skillsScrollUp(state, 1);
+          return;
+
+        case "G":
+          skillsScrollToBottom(state, viewHeight);
+          return;
+
+        case "g":
+          skillsScrollToTop(state);
+          return;
+      }
+    } else {
+      // List view
+      switch (data) {
+        case "q":
+        case "\x1b":
+          this.navigateBack();
+          return;
+
+        case "j":
+        case "\x1b[B":
+          skillsMoveDown(state);
+          return;
+
+        case "k":
+        case "\x1b[A":
+          skillsMoveUp(state);
+          return;
+
+        case "\r":
+        case "\n": {
+          const contentWidth = layout.panels[0].width - 2;
+          skillsDrillDown(state, contentWidth);
+          return;
+        }
+      }
+    }
+  }
+
   private navigateToStackItem(item: import("./views/stack-detail.js").StackItem, projectConfig: import("@opcom/types").ProjectConfig): void {
     this.navStack.push({
       level: this.level,
@@ -2486,6 +2629,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2540,6 +2684,7 @@ export class TuiApp {
     this.planOverviewState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2561,6 +2706,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
   }
@@ -2596,6 +2742,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.podDetailState = null;
   }
@@ -2717,6 +2864,7 @@ export class TuiApp {
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
+    this.skillsBrowserState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.serviceDetailState = null;
@@ -2940,6 +3088,7 @@ export class TuiApp {
         this.cloudServiceDetailState = null;
         this.stackDetailState = null;
         this.settingsViewState = null;
+        this.skillsBrowserState = null;
         this.pipelineDetailState = null;
         this.deploymentDetailState = null;
         this.podDetailState = null;
@@ -2960,6 +3109,7 @@ export class TuiApp {
       this.cloudServiceDetailState = null;
       this.stackDetailState = null;
       this.settingsViewState = null;
+      this.skillsBrowserState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
@@ -3031,6 +3181,7 @@ export function buildHelpLines(): string[] {
     "  [/]        Cycle through plans",
     "  O          Open settings",
     "  P          Create plan for project",
+    "  K          Browse skills",
     "",
     bold("Level 2: Project Detail"),
     "  j/k        Navigate up/down",

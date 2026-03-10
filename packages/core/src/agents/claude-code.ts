@@ -110,6 +110,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       startedAt: new Date().toISOString(),
       workItemId: config.workItemId,
       pid: proc.pid,
+      skills: config.contextPacket.skills,
     };
 
     const running: RunningProcess = {
