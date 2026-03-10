@@ -1,7 +1,7 @@
 // TUI Plan Step Focus View (Level 3)
 // Shows full detail for a single plan step: status, ticket, blockers, agent, timing, errors
 
-import type { PlanStep, Plan, WorkItem, AgentSession, VerificationResult } from "@opcom/types";
+import type { PlanStep, Plan, WorkItem, AgentSession, VerificationResult, TeamDefinition } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -101,6 +101,29 @@ function stepStatusColor(status: string): string {
   }
 }
 
+/**
+ * Format a team pipeline badge for a plan step.
+ * Returns e.g. "[feature-dev 2/3]" for a multi-step team, or "" for single-step/no team.
+ */
+export function formatTeamBadge(step: PlanStep, plan: Plan): string {
+  if (!step.teamId || !step.teamStepRole) return "";
+
+  // Count total team steps and find this step's position
+  const teamSteps = plan.steps.filter((s) => s.teamId === step.teamId && baseTicketIdFromStep(s) === baseTicketIdFromStep(step));
+  if (teamSteps.length <= 1) return "";
+
+  const position = teamSteps.findIndex((s) => s.ticketId === step.ticketId) + 1;
+  return `[${step.teamId} ${position}/${teamSteps.length}]`;
+}
+
+/**
+ * Extract base ticket ID from a step (handles "ticketId/role" format).
+ */
+function baseTicketIdFromStep(step: PlanStep): string {
+  const slashIdx = step.ticketId.lastIndexOf("/");
+  return slashIdx >= 0 ? step.ticketId.slice(0, slashIdx) : step.ticketId;
+}
+
 function formatTimestamp(iso: string | undefined): string {
   if (!iso) return dim("—");
   const d = new Date(iso);
@@ -182,6 +205,31 @@ export function rebuildDisplayLines(state: PlanStepFocusState, width = 80): void
     lines.push(`  ${dim("(ticket not found)")}`);
   }
   lines.push("");
+
+  // --- Team ---
+  if (step.teamId) {
+    const badge = formatTeamBadge(step, state.plan);
+    lines.push(bold("Team"));
+    lines.push(`  ${dim("Team:")}     ${step.teamId}`);
+    lines.push(`  ${dim("Role:")}     ${step.teamStepRole ?? dim("—")}`);
+    if (badge) {
+      lines.push(`  ${dim("Pipeline:")} ${badge}`);
+
+      // Show pipeline steps
+      const teamSteps = state.plan.steps.filter(
+        (s) => s.teamId === step.teamId && baseTicketIdFromStep(s) === baseTicketIdFromStep(step),
+      );
+      const pipelineStr = teamSteps
+        .map((s) => {
+          const role = s.teamStepRole ?? s.ticketId;
+          const isCurrent = s.ticketId === step.ticketId;
+          return isCurrent ? bold(role) : dim(role);
+        })
+        .join(dim(" \u2192 "));
+      lines.push(`  ${dim("Steps:")}    ${pipelineStr}`);
+    }
+    lines.push("");
+  }
 
   // --- Blockers ---
   if (step.blockedBy.length > 0) {

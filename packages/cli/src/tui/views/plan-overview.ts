@@ -3,6 +3,7 @@
 // blocked/ready breakdown, dependency structure, confirm/cancel prompt.
 
 import type { Plan, PlanStep, OrchestratorConfig, WorkItem } from "@opcom/types";
+import { formatTeamBadge } from "./plan-step-focus.js";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -305,7 +306,9 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
           const deps = step.blockedBy.length > 0
             ? dim(` \u2190 ${step.blockedBy.join(", ")}`)
             : "";
-          lines.push(`    ${color(sColor, icon)} ${ticketId}${color(sColor, phaseLabel)}${deps}`);
+          const teamBadge = formatTeamBadge(step, plan);
+          const teamStr = teamBadge ? dim(` ${teamBadge}`) : "";
+          lines.push(`    ${color(sColor, icon)} ${ticketId}${teamStr}${color(sColor, phaseLabel)}${deps}`);
         }
       }
     }
@@ -338,7 +341,9 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
           const deps = step.blockedBy.length > 0
             ? dim(` \u2190 ${step.blockedBy.join(", ")}`)
             : "";
-          lines.push(`    ${color(sColor, icon)} ${ticketId}${color(sColor, phaseLabel)}${deps}`);
+          const teamBadge = formatTeamBadge(step, plan);
+          const teamStr = teamBadge ? dim(` ${teamBadge}`) : "";
+          lines.push(`    ${color(sColor, icon)} ${ticketId}${teamStr}${color(sColor, phaseLabel)}${deps}`);
         }
       }
     }
