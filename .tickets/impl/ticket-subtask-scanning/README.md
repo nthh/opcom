@@ -1,7 +1,7 @@
 ---
 id: ticket-subtask-scanning
 title: "Scan sibling .md files as sub-tickets within ticket directories"
-status: open
+status: closed
 type: feature
 priority: 1
 deps: []
