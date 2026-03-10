@@ -1,11 +1,27 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import type { ProjectConfig, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition, VerificationMode } from "@opcom/types";
+import type { ProjectConfig, ProjectProfile, WorkItem, ContextPacket, ResolvedRoleConfig, VerificationResult, RebaseConflict, RoleDefinition, VerificationMode } from "@opcom/types";
 import { scanTickets } from "../detection/tickets.js";
 import { queryGraphContext } from "../graph/graph-service.js";
 import { readProjectSummary } from "../config/summary.js";
 import { matchSkills } from "../config/skills.js";
+
+export function buildProjectProfile(project: ProjectConfig): ProjectProfile {
+  return {
+    name: project.name,
+    path: project.path,
+    ...(project.description ? { description: project.description } : {}),
+    stack: project.stack,
+    testing: project.testing,
+    linting: project.linting,
+    services: project.services,
+    environments: project.environments,
+    ...(project.profile?.commands?.length ? { commands: project.profile.commands } : {}),
+    ...(project.profile?.fieldMappings?.length ? { fieldMappings: project.profile.fieldMappings } : {}),
+    ...(project.profile?.agentConstraints?.length ? { agentConstraints: project.profile.agentConstraints } : {}),
+  };
+}
 
 export async function buildContextPacket(
   project: ProjectConfig,
@@ -13,14 +29,7 @@ export async function buildContextPacket(
   role?: RoleDefinition,
 ): Promise<ContextPacket> {
   const packet: ContextPacket = {
-    project: {
-      name: project.name,
-      path: project.path,
-      stack: project.stack,
-      testing: project.testing,
-      linting: project.linting,
-      services: project.services,
-    },
+    project: buildProjectProfile(project),
     git: {
       branch: project.git?.branch ?? "main",
       remote: project.git?.remote ?? null,
@@ -146,6 +155,9 @@ export function contextPacketToMarkdown(
 
   lines.push(`# Project: ${packet.project.name}`);
   lines.push(`Path: ${packet.project.path}`);
+  if (packet.project.description) {
+    lines.push(`Description: ${packet.project.description}`);
+  }
   lines.push("");
 
   // Stack
@@ -188,6 +200,35 @@ export function contextPacketToMarkdown(
     for (const svc of packet.project.services) {
       const port = svc.port ? `:${svc.port}` : "";
       lines.push(`- ${svc.name}${port}${svc.command ? ` (${svc.command})` : ""}`);
+    }
+    lines.push("");
+  }
+
+  // Environments
+  if (packet.project.environments && packet.project.environments.length > 0) {
+    lines.push(`## Environments`);
+    for (const env of packet.project.environments) {
+      const url = env.url ? ` — ${env.url}` : "";
+      lines.push(`- ${env.name} (${env.type})${url}`);
+    }
+    lines.push("");
+  }
+
+  // Commands
+  if (packet.project.commands && packet.project.commands.length > 0) {
+    lines.push(`## Commands`);
+    for (const cmd of packet.project.commands) {
+      const desc = cmd.description ? ` — ${cmd.description}` : "";
+      lines.push(`- \`${cmd.name}\`: \`${cmd.command}\`${desc}`);
+    }
+    lines.push("");
+  }
+
+  // Agent Constraints
+  if (packet.project.agentConstraints && packet.project.agentConstraints.length > 0) {
+    lines.push(`## Agent Constraints`);
+    for (const constraint of packet.project.agentConstraints) {
+      lines.push(`- **${constraint.name}**: ${constraint.rule}`);
     }
     lines.push("");
   }

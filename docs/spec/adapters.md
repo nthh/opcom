@@ -23,32 +23,66 @@ interface AgentStartConfig {
 }
 ```
 
+### Project Profile
+
+A `ProjectProfile` is the operational view of a project — the subset of `ProjectConfig` that agents need to understand how the project works. It captures what the project is, how to build/test/run it, and where it deploys.
+
+```typescript
+interface ProjectProfile {
+  name: string
+  path: string
+  description?: string              // what the project is about
+  stack: StackInfo                  // languages, frameworks, infra
+  testing: TestingConfig | null     // how to run tests
+  linting: LintConfig[]             // how to lint
+  services: ServiceDefinition[]     // runnable services
+  environments?: EnvironmentConfig[] // dev, staging, prod
+  commands?: ProjectCommand[]       // named project commands (build, test, dev, etc.)
+  fieldMappings?: FieldMapping[]    // map ticket fields to WorkItem properties
+  agentConstraints?: AgentConstraint[] // rules governing agent behavior
+}
+
+interface ProjectCommand {
+  name: string       // e.g. "build", "test", "dev"
+  command: string    // e.g. "npm run build"
+  description?: string
+}
+
+interface FieldMapping {
+  field: string                 // ticket frontmatter field name
+  type: "use-case" | "tag"     // "use-case" creates links, "tag" stays as tags
+  targetPath?: string          // path prefix for use-case links (default: "docs/use-cases/")
+}
+
+interface AgentConstraint {
+  name: string   // constraint identifier
+  rule: string   // human-readable constraint description
+}
+```
+
+Built by `buildProjectProfile(config: ProjectConfig)` — a pure projection, no I/O. Used as the `project` field in `ContextPacket`.
+
+The `commands`, `fieldMappings`, and `agentConstraints` fields are persisted in the project YAML config under a `profile` section. Field mappings of type `use-case` cause ticket frontmatter values to become links on WorkItems (via `applyFieldMappings()`) rather than remaining as tags.
+
 ### Context Packets
 
 The Context Builder assembles everything an agent needs to start working, eliminating manual onboarding:
 
 ```typescript
 interface ContextPacket {
-  project: {
-    name: string
-    path: string
-    stack: StackInfo           // languages, frameworks, infra
-    testing: TestingConfig     // how to run tests
-    linting: LintConfig[]      // how to lint
-    services: ServiceDefinition[]
-  }
+  project: ProjectProfile        // operational view of the project
   workItem?: {
-    ticket: WorkItem           // the ticket to work on
-    spec?: string              // contents of linked spec file
-    relatedTickets?: WorkItem[] // deps, parent, siblings
+    ticket: WorkItem             // the ticket to work on
+    spec?: string                // contents of linked spec file
+    relatedTickets?: WorkItem[]  // deps, parent, siblings
   }
   git: {
     branch: string
     remote: string
     clean: boolean
   }
-  agentConfig?: string         // AGENTS.md, CLAUDE.md, .cursorrules, etc.
-  memory?: string              // persistent agent memory file contents
+  agentConfig?: string           // AGENTS.md, CLAUDE.md, .cursorrules, etc.
+  memory?: string                // persistent agent memory file contents
 }
 ```
 

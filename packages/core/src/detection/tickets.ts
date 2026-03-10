@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, extname } from "node:path";
-import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence, VerificationMode } from "@opcom/types";
+import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence, VerificationMode, FieldMapping } from "@opcom/types";
 
 export interface TicketDetectionResult {
   workSystem: WorkSystemInfo;
@@ -117,13 +117,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     scheduled: typeof frontmatter.scheduled === "string" ? frontmatter.scheduled : undefined,
     deps: Array.isArray(frontmatter.deps) ? frontmatter.deps.map(String) : [],
     links: Array.isArray(frontmatter.links) ? frontmatter.links.map(String) : [],
-    tags: {
-      ...(Array.isArray(frontmatter.services) ? { services: frontmatter.services.map(String) } : {}),
-      ...(Array.isArray(frontmatter.domains) ? { domains: frontmatter.domains.map(String) } : {}),
-      ...(Array.isArray(frontmatter.source) ? { source: frontmatter.source.map(String) } : {}),
-      ...(Array.isArray(frontmatter.location) ? { location: frontmatter.location.map(String) } : {}),
-      ...(Array.isArray(frontmatter.category) ? { category: frontmatter.category.map(String) } : {}),
-    },
+    tags: buildTags(frontmatter),
     role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
     team: typeof frontmatter.team === "string" ? frontmatter.team : undefined,
     verification: parseVerificationMode(frontmatter.verification),
@@ -192,6 +186,78 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
   }
 
   return result;
+}
+
+/** Known frontmatter keys that are not tags. */
+const KNOWN_KEYS = new Set([
+  "id", "title", "status", "type", "priority", "created", "due", "scheduled",
+  "milestone", "dir", "links", "deps", "assignee", "role", "team",
+  "verification", "outputs",
+]);
+
+function buildTags(frontmatter: Record<string, unknown>): Record<string, string[]> {
+  const tags: Record<string, string[]> = {};
+
+  // Well-known tag fields
+  for (const key of ["services", "domains", "source", "location", "category"]) {
+    if (Array.isArray(frontmatter[key])) {
+      tags[key] = (frontmatter[key] as unknown[]).map(String);
+    }
+  }
+
+  // Capture any additional unknown fields as extra tags
+  for (const [key, value] of Object.entries(frontmatter)) {
+    if (KNOWN_KEYS.has(key)) continue;
+    if (tags[key]) continue; // already handled above
+    if (typeof value === "string") {
+      tags[key] = [value];
+    } else if (Array.isArray(value)) {
+      tags[key] = value.map(String);
+    }
+  }
+
+  return tags;
+}
+
+/**
+ * Apply project field mappings to work items.
+ * For "use-case" mappings, tag values become links (e.g. docs/use-cases/<value>.md).
+ */
+export function applyFieldMappings(items: WorkItem[], mappings: FieldMapping[]): WorkItem[] {
+  if (!mappings || mappings.length === 0) return items;
+
+  return items.map((item) => {
+    let links = item.links;
+    let tags = item.tags;
+    let changed = false;
+
+    for (const mapping of mappings) {
+      if (mapping.type !== "use-case") continue;
+
+      const tagValues = item.tags[mapping.field];
+      if (!tagValues || tagValues.length === 0) continue;
+
+      // Convert tag values to links
+      const newLinks = [...links];
+      for (const value of tagValues) {
+        const prefix = mapping.targetPath ?? "docs/use-cases/";
+        const linkPath = `${prefix}${value}.md`;
+        if (!newLinks.includes(linkPath)) {
+          newLinks.push(linkPath);
+        }
+      }
+      links = newLinks;
+
+      // Remove from tags since they're now links
+      if (!changed) {
+        tags = { ...tags };
+        changed = true;
+      }
+      delete tags[mapping.field];
+    }
+
+    return changed ? { ...item, links, tags } : item;
+  });
 }
 
 export function summarizeWorkItems(items: WorkItem[]): WorkSummary {

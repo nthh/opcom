@@ -70,5 +70,41 @@ export function validateProjectConfig(data: unknown): ProjectConfig {
     cloudServices: Array.isArray(obj.cloudServices) ? obj.cloudServices : [],
     lastScannedAt: typeof obj.lastScannedAt === "string" ? obj.lastScannedAt : new Date().toISOString(),
     overrides: obj.overrides as ProjectConfig["overrides"],
+    profile: validateProfileConfig(obj.profile),
   };
+}
+
+function validateProfileConfig(data: unknown): ProjectConfig["profile"] {
+  if (!data || typeof data !== "object") return undefined;
+  const obj = data as Record<string, unknown>;
+  const result: NonNullable<ProjectConfig["profile"]> = {};
+
+  if (Array.isArray(obj.commands)) {
+    result.commands = obj.commands.filter(
+      (c): c is { name: string; command: string; description?: string } =>
+        typeof c === "object" && c !== null &&
+        typeof (c as Record<string, unknown>).name === "string" &&
+        typeof (c as Record<string, unknown>).command === "string",
+    );
+  }
+
+  if (Array.isArray(obj.fieldMappings)) {
+    result.fieldMappings = obj.fieldMappings.filter(
+      (m): m is { field: string; type: "use-case" | "tag"; targetPath?: string } =>
+        typeof m === "object" && m !== null &&
+        typeof (m as Record<string, unknown>).field === "string" &&
+        ((m as Record<string, unknown>).type === "use-case" || (m as Record<string, unknown>).type === "tag"),
+    );
+  }
+
+  if (Array.isArray(obj.agentConstraints)) {
+    result.agentConstraints = obj.agentConstraints.filter(
+      (c): c is { name: string; rule: string } =>
+        typeof c === "object" && c !== null &&
+        typeof (c as Record<string, unknown>).name === "string" &&
+        typeof (c as Record<string, unknown>).rule === "string",
+    );
+  }
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }

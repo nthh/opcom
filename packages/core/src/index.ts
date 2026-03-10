@@ -4,7 +4,7 @@ export type { LogLevel, Logger } from "./logger.js";
 
 export { detectProject } from "./detection/detect.js";
 export { detectGit } from "./detection/git.js";
-export { scanTickets, summarizeWorkItems, parseFrontmatter, parseTicketFile } from "./detection/tickets.js";
+export { scanTickets, summarizeWorkItems, parseFrontmatter, parseTicketFile, applyFieldMappings } from "./detection/tickets.js";
 export { detectSubProjects } from "./detection/services.js";
 export { mergeStacks } from "./detection/stack.js";
 export {
@@ -82,7 +82,7 @@ export { createAdapter, ClaudeCodeAdapter, OpenCodeAdapter } from "./agents/adap
 export { SessionManager } from "./agents/session-manager.js";
 export { EventStore } from "./agents/event-store.js";
 export type { ToolUsageStat, SessionStat, DailyActivity, PlanEventRecord } from "./agents/event-store.js";
-export { buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt } from "./agents/context-builder.js";
+export { buildProjectProfile, buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt } from "./agents/context-builder.js";
 export { MessageRouter } from "./agents/message-router.js";
 
 // Phase 2: Jira Adapter
