@@ -1,7 +1,7 @@
 ---
 id: tui-team-formation
 title: "TUI: Team formation display on plan steps and ticket views"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
