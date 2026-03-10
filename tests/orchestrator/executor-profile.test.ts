@@ -78,11 +78,26 @@ vi.mock("../../packages/core/src/detection/tickets.js", () => ({
 }));
 
 vi.mock("../../packages/core/src/agents/context-builder.js", () => ({
-  buildContextPacket: vi.fn(async () => ({
-    project: { name: "test", path: "/tmp", stack: {}, testing: null, linting: [], services: [] },
-    git: { branch: "main", remote: null, clean: true },
-  })),
-  contextPacketToMarkdown: vi.fn(() => "# Test context"),
+  buildContextPacket: vi.fn(async (project: Record<string, unknown>) => {
+    const profile = (project?.profile ?? {}) as { agentConstraints?: Array<{ name: string; rule: string }> };
+    return {
+      project: {
+        name: "test", path: "/tmp", stack: {}, testing: null, linting: [], services: [],
+        ...(profile.agentConstraints?.length ? { agentConstraints: profile.agentConstraints } : {}),
+      },
+      git: { branch: "main", remote: null, clean: true },
+    };
+  }),
+  contextPacketToMarkdown: vi.fn((packet: { project?: { agentConstraints?: Array<{ name: string; rule: string }> } }) => {
+    if (packet.project?.agentConstraints?.length) {
+      const lines = ["# Test context", "", "## Agent Constraints"];
+      for (const c of packet.project.agentConstraints) {
+        lines.push(`- **${c.name}**: ${c.rule}`);
+      }
+      return lines.join("\n");
+    }
+    return "# Test context";
+  }),
 }));
 
 vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
@@ -440,6 +455,83 @@ describe("forbidden_command_warning events", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(warnings).toHaveLength(0);
+
+    // Clean up
+    mockSM.simulateCompletion(step.agentSessionId!);
+    executor.stop();
+    await runPromise;
+  });
+});
+
+// --- Agent context includes profile constraints ---
+
+describe("agent context includes profile constraints", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSM = new MockSessionManager();
+    mockLoadProject.mockResolvedValue({
+      id: "test-project",
+      name: "test-project",
+      path: "/tmp/test-project",
+      stack: { languages: [], frameworks: [], packageManagers: [{ name: "npm", sourceFile: "package-lock.json" }], infrastructure: [], versionManagers: [] },
+      testing: { framework: "vitest", command: "npm test" },
+      linting: [],
+      docs: {},
+      profile: {
+        agentConstraints: [
+          { name: "no-force-push", rule: "Never force push to main" },
+          { name: "test-required", rule: "All changes must include tests" },
+        ],
+      },
+    });
+  });
+
+  it("system prompt includes structured constraints from project profile", async () => {
+    const step = makeStep({ status: "ready" });
+    const plan = makePlan([step]);
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await waitFor(() => step.status === "in-progress");
+
+    // Verify the session was started with a system prompt containing constraints
+    const startCall = mockSM.startCalls[0];
+    const config = startCall.config as { systemPrompt?: string };
+    expect(config.systemPrompt).toContain("## Agent Constraints");
+    expect(config.systemPrompt).toContain("**no-force-push**");
+    expect(config.systemPrompt).toContain("Never force push to main");
+    expect(config.systemPrompt).toContain("**test-required**");
+    expect(config.systemPrompt).toContain("All changes must include tests");
+
+    // Clean up
+    mockSM.simulateCompletion(step.agentSessionId!);
+    executor.stop();
+    await runPromise;
+  });
+
+  it("omits constraints section when project has no profile", async () => {
+    mockLoadProject.mockResolvedValue({
+      id: "test-project",
+      name: "test-project",
+      path: "/tmp/test-project",
+      stack: { languages: [], frameworks: [], packageManagers: [], infrastructure: [], versionManagers: [] },
+      testing: null,
+      linting: [],
+      docs: {},
+    });
+
+    const step = makeStep({ status: "ready" });
+    const plan = makePlan([step]);
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await waitFor(() => step.status === "in-progress");
+
+    const startCall = mockSM.startCalls[0];
+    const config = startCall.config as { systemPrompt?: string };
+    expect(config.systemPrompt).not.toContain("## Agent Constraints");
 
     // Clean up
     mockSM.simulateCompletion(step.agentSessionId!);
