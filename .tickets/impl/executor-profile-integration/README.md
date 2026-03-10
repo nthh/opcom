@@ -1,7 +1,7 @@
 ---
 id: executor-profile-integration
 title: "Wire executor and verification pipeline to use project profile"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-10
