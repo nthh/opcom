@@ -160,28 +160,41 @@ describe("extractSubtasks", () => {
     expect(subtasks[1].parallel).toBe(false);
   });
 
-  it("applies sequential default — each depends on previous", () => {
+  it("defaults to parallel — no marker means no deps", () => {
     const body = `- [ ] Step one\n- [ ] Step two\n- [ ] Step three`;
+    const subtasks = extractSubtasks(body);
+    expect(subtasks).toHaveLength(3);
+    expect(subtasks[0].deps).toEqual([]);
+    expect(subtasks[1].deps).toEqual([]);
+    expect(subtasks[2].deps).toEqual([]);
+    expect(subtasks[0].parallel).toBe(true);
+    expect(subtasks[1].parallel).toBe(true);
+    expect(subtasks[2].parallel).toBe(true);
+  });
+
+  it("applies sequential marker — depends on previous", () => {
+    const body = `- [ ] Step one\n- [ ] Step two (sequential)\n- [ ] Step three (sequential)`;
     const subtasks = extractSubtasks(body);
     expect(subtasks).toHaveLength(3);
     expect(subtasks[0].deps).toEqual([]); // first has no deps
     expect(subtasks[1].deps).toEqual(["step-one"]); // depends on previous
     expect(subtasks[2].deps).toEqual(["step-two"]); // depends on previous
+    expect(subtasks[1].parallel).toBe(false);
   });
 
   it("handles mixed parallel and sequential tasks", () => {
     const body = [
-      "- [ ] Setup infra (parallel)",
-      "- [ ] Setup database (parallel)",
+      "- [ ] Setup infra",
+      "- [ ] Setup database",
       "- [ ] Build API (deps: setup-infra, setup-database)",
-      "- [ ] Write tests",
+      "- [ ] Write tests (deps: build-api)",
     ].join("\n");
     const subtasks = extractSubtasks(body);
     expect(subtasks).toHaveLength(4);
     expect(subtasks[0]).toMatchObject({ id: "setup-infra", parallel: true, deps: [] });
     expect(subtasks[1]).toMatchObject({ id: "setup-database", parallel: true, deps: [] });
     expect(subtasks[2]).toMatchObject({ id: "build-api", parallel: false, deps: ["setup-infra", "setup-database"] });
-    expect(subtasks[3]).toMatchObject({ id: "write-tests", parallel: false, deps: ["build-api"] }); // sequential default
+    expect(subtasks[3]).toMatchObject({ id: "write-tests", parallel: false, deps: ["build-api"] });
   });
 
   it("returns empty array for body with no task lines", () => {

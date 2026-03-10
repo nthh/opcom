@@ -266,6 +266,17 @@ export function formatDecompositionPrompt(
   sections.push("- Each sub-ticket should be completable by a single agent session");
   sections.push("");
 
+  sections.push("# Parallelism");
+  sections.push("Sub-tickets default to parallel (no deps). Only add deps when ordering genuinely matters.");
+  sections.push("Think about which sub-tickets touch independent files/subsystems — those can run concurrently.");
+  sections.push("Common patterns:");
+  sections.push("- Types/interfaces first → implementation depends on types");
+  sections.push("- Multiple providers are parallel with each other (both depend on types)");
+  sections.push("- Tests depend on the code they test");
+  sections.push("- TUI and backend are parallel if they don't share types");
+  sections.push("Maximize parallelism — only add deps for genuine data/API dependencies.");
+  sections.push("");
+
   sections.push("# Instructions");
   sections.push("");
   sections.push("Respond with sub-tickets using this format for each:");
@@ -280,6 +291,7 @@ export function formatDecompositionPrompt(
   sections.push(`All sub-tickets should have parent: ${ticket.id}`);
   sections.push("Ensure sub-ticket deps form a valid DAG (no cycles).");
   sections.push("Use the parent ticket's deps as starting deps for the first sub-ticket(s).");
+  sections.push("Only add deps between sub-tickets when one genuinely needs the other's output.");
 
   return sections.join("\n");
 }

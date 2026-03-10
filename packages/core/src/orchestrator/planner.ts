@@ -309,9 +309,13 @@ export function expandTeamSteps(
  * Parse markdown task-list lines into structured subtasks.
  *
  * Supported markers on each `- [ ] Title` line:
- * - `(parallel)` — subtask can run concurrently, no automatic deps
+ * - `(sequential)` — depends on the previous subtask in the list
  * - `(deps: id-a, id-b)` — explicit dependencies on other subtask IDs
- * - No marker — sequential default: depends on the previous subtask in the list
+ * - No marker — parallel by default: no automatic deps, can run concurrently
+ *
+ * Parallel is the default because agents with file-overlap scheduling and
+ * shared worktrees handle concurrency safely. Explicit deps should be stated
+ * when ordering actually matters, not assumed from list position.
  *
  * IDs are slugified from titles.
  */
@@ -326,26 +330,32 @@ export function extractSubtasks(body: string): Subtask[] {
     if (!match) continue;
 
     let title = match[1].trim();
-    let parallel = false;
+    let parallel = true;
     let deps: string[] = [];
 
-    // Check for (parallel) marker
+    // Check for (parallel) marker — explicit, same as default but documents intent
     const parallelMatch = title.match(/\s*\(parallel\)\s*$/);
     if (parallelMatch) {
       parallel = true;
       title = title.slice(0, parallelMatch.index).trim();
     }
 
-    // Check for (deps: a, b) marker
-    const depsMatch = title.match(/\s*\(deps:\s*(.+?)\)\s*$/);
-    if (depsMatch) {
-      deps = depsMatch[1].split(",").map((d) => d.trim());
-      title = title.slice(0, depsMatch.index).trim();
+    // Check for (sequential) marker — depends on previous task
+    const seqMatch = title.match(/\s*\(sequential\)\s*$/);
+    if (seqMatch) {
+      parallel = false;
+      if (subtasks.length > 0) {
+        deps = [subtasks[subtasks.length - 1].id];
+      }
+      title = title.slice(0, seqMatch.index).trim();
     }
 
-    // Sequential default: if no parallel and no explicit deps, depend on previous
-    if (!parallel && deps.length === 0 && subtasks.length > 0) {
-      deps = [subtasks[subtasks.length - 1].id];
+    // Check for (deps: a, b) marker — explicit dependencies
+    const depsMatch = title.match(/\s*\(deps:\s*(.+?)\)\s*$/);
+    if (depsMatch) {
+      parallel = false;
+      deps = depsMatch[1].split(",").map((d) => d.trim());
+      title = title.slice(0, depsMatch.index).trim();
     }
 
     const id = slugify(title);

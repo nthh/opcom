@@ -71,12 +71,13 @@ Parses the `## Tasks` section of a ticket body for structured task lines:
 ```
 
 Parsing rules:
-1. Match lines: `- [ ] <id> <description> (<modifiers>)`
-2. Task ID: first word after checkbox (alphanumeric, e.g., `T001`)
+1. Match lines: `- [ ] <description> (<modifiers>)`
+2. Task ID: slugified from description
 3. Modifiers in parentheses:
-   - `parallel` or `[P]` → no deps, can run immediately
-   - `deps: T001, T002` → blocked by listed IDs
-   - No modifier → depends on previous task (sequential default)
+   - `(deps: id-a, id-b)` → blocked by listed IDs
+   - `(sequential)` → depends on previous task
+   - `(parallel)` → explicit parallel (same as default, documents intent)
+   - No modifier → **parallel by default**, no automatic deps
 4. Already-checked tasks (`- [x]`) → status `done`, skip
 
 Returns `ExtractedSubtask[]`:

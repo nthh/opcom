@@ -1090,13 +1090,14 @@ When a ticket is a swarm target, the planner extracts subtasks from the ticket b
 
 **Parsing rules:**
 
-1. Task lines match: `- [ ] <id> <description> (<modifiers>)`
-2. Task ID: first word after checkbox (e.g., `T001`)
-3. Modifiers (parenthesized, comma-separated):
-   - `parallel` or `[P]` — no dependencies on other subtasks (can run immediately)
-   - `deps: T001, T002` — blocked by listed subtask IDs
-   - No modifier — sequential, depends on the previous task
-4. Tasks without any modifier are assumed **sequential** (each depends on the one above it)
+1. Task lines match: `- [ ] <description> (<modifiers>)`
+2. Task ID: slugified from description
+3. Modifiers (parenthesized):
+   - `(deps: id-a, id-b)` — blocked by listed subtask IDs
+   - `(sequential)` — depends on the previous task in the list
+   - `(parallel)` — explicit parallel marker (same as default, documents intent)
+   - No modifier — **parallel by default**, no automatic deps
+4. Tasks without any modifier can run concurrently. Only add deps when ordering genuinely matters. File-overlap scheduling and shared worktrees handle concurrency safely at runtime.
 
 **Extracted subtask type:**
 
