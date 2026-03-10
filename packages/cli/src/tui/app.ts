@@ -2544,6 +2544,7 @@ export class TuiApp {
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
+      this.serviceDetailState = null;
       this.scheduleRender();
     }).catch(() => {
       this.skillsBrowserState = createSkillsBrowserState([], []);
@@ -2557,6 +2558,7 @@ export class TuiApp {
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
+      this.serviceDetailState = null;
       this.scheduleRender();
     });
   }
