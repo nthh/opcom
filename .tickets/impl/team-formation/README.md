@@ -1,7 +1,7 @@
 ---
 id: team-formation
 title: "Codified team formation for multi-agent task coordination"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
