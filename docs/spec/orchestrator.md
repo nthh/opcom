@@ -826,6 +826,103 @@ This enables:
 - Historical track record for estimating future plans
 - Debugging failed plans ("step 4 failed after 12m, here's what the agent did")
 
+## File-Ticket Traceability {#file-ticket-traceability}
+
+Hybrid approach: SQLite is the live source of truth, ticket frontmatter gets a permanent snapshot on close.
+
+### Live Layer (SQLite)
+
+The `changesets` table already stores per-ticket file changes (from `captureChangeset()`):
+
+```sql
+SELECT ticket_id, files_json, total_insertions, total_deletions
+FROM changesets
+WHERE ticket_id = ?;
+```
+
+Extend with a reverse index — file path → tickets that changed it:
+
+```sql
+CREATE TABLE file_ticket_map (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_path TEXT NOT NULL,
+  ticket_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  change_status TEXT NOT NULL,      -- added, modified, deleted, renamed
+  timestamp TEXT NOT NULL
+);
+CREATE INDEX idx_file_ticket_path ON file_ticket_map(file_path);
+CREATE INDEX idx_file_ticket_ticket ON file_ticket_map(ticket_id);
+```
+
+Populated automatically when a changeset is inserted. Enables:
+- `opcom trace <file>` → includes "changed by tickets: X, Y, Z" alongside spec/test coverage
+- File-overlap scheduling uses this to predict conflicts
+- Context graph ingestion creates `changed_by` edges
+
+### Durable Layer (Ticket Frontmatter)
+
+When a ticket is closed (status → `closed`), stamp file changes into frontmatter:
+
+```yaml
+---
+id: auth-setup
+status: closed
+files:
+  - path: packages/core/src/auth/session.ts
+    status: added
+  - path: packages/core/src/auth/middleware.ts
+    status: modified
+  - path: tests/auth/session.test.ts
+    status: added
+commits:
+  - abc1234
+  - def5678
+---
+```
+
+Rules:
+- Only written on close, not during in-progress work
+- Aggregated across all sessions/retries for this ticket (union of all changesets)
+- Paths are relative to project root
+- Commits are the merge commits on main, not worktree branch commits
+- If ticket is reopened and re-closed, files are re-computed from fresh changesets
+
+### `opcom trace` Enhancement
+
+Current `opcom trace <file>` shows specs and tickets that *link* to a file. Enhance to also show tickets that *changed* the file:
+
+```
+$ opcom trace packages/core/src/auth/session.ts
+
+Specs:
+  docs/spec/auth.md#session-management
+
+Tickets (linked):
+  auth-setup (closed) — links to docs/spec/auth.md
+
+Tickets (changed this file):
+  auth-setup — added (2026-03-08)
+  auth-bugfix — modified (2026-03-10)
+
+Tests:
+  tests/auth/session.test.ts
+```
+
+The "linked" section comes from ticket `links:` fields (existing). The "changed" section comes from `file_ticket_map` (new).
+
+### Executor Hook
+
+In `updateTicketStatusSafe()`, when `newStatus === "closed"`:
+
+1. Query `eventStore.loadChangesets({ ticketId })` for all changesets
+2. Aggregate file changes (union of paths, latest status wins)
+3. Collect merge commit SHAs
+4. Write `files:` and `commits:` into ticket frontmatter
+5. Stage and commit the updated ticket file
+
+This runs in the executor process (not agent-initiated), so `protect-ticket-files` deny rules don't apply.
+
 ## Integration with Briefing + Triage Skills
 
 ### Briefing
