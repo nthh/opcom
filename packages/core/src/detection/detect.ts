@@ -22,6 +22,7 @@ import { detectTicketSystem } from "./tickets.js";
 import { detectSubProjects } from "./services.js";
 import { detectGit } from "./git.js";
 import { detectCloudServices } from "../cloud/detect.js";
+import { detectProfile } from "./profile.js";
 
 export async function detectProject(projectPath: string): Promise<DetectionResult> {
   const name = basename(projectPath);
@@ -427,6 +428,17 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
   const cloudResult = await detectCloudServices(projectPath, stack);
   evidence.push(...cloudResult.evidence);
 
+  // ===================================================================
+  // TIER 5: Profile detection (commands, constraints, field mappings)
+  // ===================================================================
+
+  const profileResult = await detectProfile(
+    projectPath,
+    docs.agentConfig,
+    ticketResult?.workSystem.ticketDir,
+  );
+  evidence.push(...profileResult.evidence);
+
   // --- Determine confidence ---
   let confidence: DetectionResult["confidence"] = "low";
   if (stack.languages.length > 0 && (stack.frameworks.length > 0 || stack.infrastructure.length > 0)) {
@@ -448,6 +460,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     linting,
     subProjects: subProjectResult.subProjects,
     cloudServices: cloudResult.configs,
+    profile: Object.keys(profileResult.profile).length > 0 ? profileResult.profile : undefined,
     evidence,
   };
 }

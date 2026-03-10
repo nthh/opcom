@@ -3,11 +3,18 @@ import {
   loadProject,
   saveProject,
   listProjects,
+  mergeProfiles,
 } from "@opcom/core";
 import { formatDetectionResult } from "../ui/format.js";
 import { detectionToProjectConfig } from "./add.js";
 
-export async function runScan(projectId?: string): Promise<void> {
+export interface ScanOptions {
+  resetProfile?: boolean;
+}
+
+export async function runScan(projectId?: string, opts?: ScanOptions): Promise<void> {
+  const resetProfile = opts?.resetProfile ?? false;
+
   if (projectId) {
     const existing = await loadProject(projectId);
     if (!existing) {
@@ -22,6 +29,13 @@ export async function runScan(projectId?: string): Promise<void> {
 
     const updated = detectionToProjectConfig(result);
     updated.overrides = existing.overrides;
+
+    // Merge profile: fill absent fields, preserve user edits
+    if (!resetProfile) {
+      const merged = mergeProfiles(existing.profile, result.profile ?? {});
+      updated.profile = merged;
+    }
+
     await saveProject(updated);
     console.log(`\n  Updated.\n`);
   } else {
@@ -37,6 +51,13 @@ export async function runScan(projectId?: string): Promise<void> {
       const result = await detectProject(project.path);
       const updated = detectionToProjectConfig(result);
       updated.overrides = project.overrides;
+
+      // Merge profile: fill absent fields, preserve user edits
+      if (!resetProfile) {
+        const merged = mergeProfiles(project.profile, result.profile ?? {});
+        updated.profile = merged;
+      }
+
       await saveProject(updated);
     }
     console.log(`\n  All projects re-scanned.\n`);
