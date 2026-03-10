@@ -948,6 +948,23 @@ export class Station {
         break;
       }
 
+      case "list_plans": {
+        const allPlans = await listPlans();
+        const filtered = command.statusFilter
+          ? allPlans.filter((p) => p.status === command.statusFilter)
+          : allPlans;
+        const summaries = filtered.map((p) => ({
+          id: p.id,
+          name: p.name,
+          status: p.status,
+          stepsDone: p.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
+          stepsTotal: p.steps.length,
+          updatedAt: p.updatedAt,
+        }));
+        this.sendToClient(ws, { type: "plans_list", plans: summaries });
+        break;
+      }
+
       case "run_hygiene": {
         const ticketSets = await this.loadAllTickets();
         const report = checkHygiene(ticketSets, this.sessionManager.listSessions());

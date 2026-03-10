@@ -13,6 +13,7 @@ import {
   getFilteredWorkItems,
   getPanelItemCount as getDashboardItemCount,
   getPlanStepsInDisplayOrder,
+  getNextPlanId,
   DASHBOARD_PANEL_COUNT,
   aggregateDeployStatus,
   type DashboardState,
@@ -345,6 +346,7 @@ export class TuiApp {
     } else {
       this.dashboardState.planPanel = null;
     }
+    this.dashboardState.allPlans = this.client.allPlans;
 
     clampDashboard(this.dashboardState);
 
@@ -564,7 +566,8 @@ export class TuiApp {
         } else if (this.dashboardState.planPanel) {
           const ps = this.dashboardState.planPanel.plan.status;
           const spaceHint = ps === "planning" ? "Space:go" : ps === "executing" ? "Space:pause" : ps === "paused" ? "Space:resume" : "";
-          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
+          const switchHint = this.dashboardState.allPlans.length > 1 ? "  [/]:plans" : "";
+          keysStr = dim(`j/k:nav  Tab:panel  ${spaceHint}${switchHint}  P:new plan  Enter:drill  c:chat  H:health  ?:help  q:quit`);
         } else {
           keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:deploys  c:chat  H:health  O:settings  /:search  ?:help  q:quit");
         }
@@ -840,6 +843,28 @@ export class TuiApp {
         }
         return;
 
+      case "]": { // Next plan
+        const nextId = getNextPlanId(state, 1);
+        if (nextId) {
+          this.client.switchToPlan(nextId).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      case "[": { // Previous plan
+        const prevId = getNextPlanId(state, -1);
+        if (prevId) {
+          this.client.switchToPlan(prevId).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+      }
+
       case "/":
         this.searchMode = true;
         this.searchQuery = "";
@@ -1105,6 +1130,28 @@ export class TuiApp {
           }
         }
         return;
+
+      case "]": { // Next plan
+        const nextId = getNextPlanId(this.dashboardState, 1);
+        if (nextId) {
+          this.client.switchToPlan(nextId).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      case "[": { // Previous plan
+        const prevId = getNextPlanId(this.dashboardState, -1);
+        if (prevId) {
+          this.client.switchToPlan(prevId).then(() => {
+            this.syncData();
+            this.scheduleRender();
+          }).catch(() => {});
+        }
+        return;
+      }
 
       case "d":
         // Reserved for dev services (not yet implemented)
@@ -2790,6 +2837,7 @@ export function buildHelpLines(): string[] {
     "  1-4        Filter by priority (0 to clear)",
     "  d          Drill into deploy history",
     "  H          Open health view",
+    "  [/]        Cycle through plans",
     "  O          Open settings",
     "  P          Create plan for project",
     "",

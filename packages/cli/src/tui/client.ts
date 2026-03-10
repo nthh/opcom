@@ -11,6 +11,7 @@ import type {
   WorkItem,
   ProjectConfig,
   Plan,
+  PlanSummary,
   CloudService,
   CloudServiceConfig,
   CloudServiceHealth,
@@ -62,6 +63,7 @@ export class TuiClient {
   agents: AgentSession[] = [];
   agentEvents = new Map<string, NormalizedEvent[]>();
   activePlan: Plan | null = null;
+  allPlans: PlanSummary[] = [];
 
   // Direct-loaded data (fallback mode)
   projectConfigs = new Map<string, ProjectConfig>();
@@ -326,6 +328,15 @@ export class TuiClient {
   private async loadActivePlan(): Promise<void> {
     try {
       const plans = await listPlans();
+      // Build plan summaries for the switcher
+      this.allPlans = plans.map((p) => ({
+        id: p.id,
+        name: p.name,
+        status: p.status,
+        stepsDone: p.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
+        stepsTotal: p.steps.length,
+        updatedAt: p.updatedAt,
+      }));
       // Find the most recent active plan (executing/paused/planning)
       const active = plans.find((p) =>
         p.status === "executing" || p.status === "paused" || p.status === "planning",
@@ -415,6 +426,10 @@ export class TuiClient {
           this.activePlan = null;
           this.loadActivePlan().catch(() => {});
         }
+        break;
+
+      case "plans_list":
+        this.allPlans = event.plans;
         break;
 
       case "cloud_service_updated": {
@@ -740,6 +755,12 @@ export class TuiClient {
         break;
       }
 
+      case "list_plans": {
+        await this.loadActivePlan();
+        this.handleServerEvent({ type: "plans_list", plans: this.allPlans } as ServerEvent);
+        break;
+      }
+
       case "refresh_status":
         await this.reloadProjectData();
         break;
@@ -747,6 +768,19 @@ export class TuiClient {
       default:
         // subscribe, ping — no-ops in offline mode
         break;
+    }
+  }
+
+  async switchToPlan(planId: string): Promise<void> {
+    const { loadPlan } = await import("@opcom/core");
+    const plan = await loadPlan(planId);
+    if (plan) {
+      this.activePlan = plan;
+      for (const handler of this.handlers) {
+        try {
+          handler({ type: "plan_updated", plan } as ServerEvent);
+        } catch { /* ignore */ }
+      }
     }
   }
 
