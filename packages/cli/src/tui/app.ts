@@ -2696,7 +2696,6 @@ export function buildHelpLines(): string[] {
     "  v          Focus cloud services panel",
     "  M          Run pending migrations",
     "  P          Create plan for project",
-    "  d          Start dev services",
     "",
     bold("Level 3: Agent Focus"),
     "  j/k        Scroll up/down",

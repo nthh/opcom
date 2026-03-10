@@ -94,18 +94,18 @@ describe("buildHelpLines", () => {
   it("Level 2 keys match project detail handler", () => {
     const keys = extractKeys("Level 2: Project Detail");
     expect(keys).toEqual([
-      "j/k", "Tab", "Enter", "w", "c", "C", "v", "M", "P", "d", "g",
+      "j/k", "Tab", "Enter", "w", "c", "C", "v", "M", "P",
     ]);
   });
 
   it("Level 3 Agent Focus keys match handler", () => {
     const keys = extractKeys("Level 3: Agent Focus");
-    expect(keys).toEqual(["j/k", "G", "g", "p", "S", "n/N", "m"]);
+    expect(keys).toEqual(["j/k", "G", "g", "p", "S", "n/N"]);
   });
 
   it("Level 3 Ticket Focus keys match handler", () => {
     const keys = extractKeys("Level 3: Ticket Focus");
-    expect(keys).toEqual(["j/k", "G", "g", "w", "e"]);
+    expect(keys).toEqual(["j/k", "G", "g", "w", "C", "e"]);
   });
 
   it("Level 3 Cloud Service Detail keys match handler", () => {
