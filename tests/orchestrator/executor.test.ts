@@ -249,9 +249,10 @@ describe("Executor", () => {
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
 
-    await waitFor(() => completedSteps.includes("t1"));
-
-    expect(completedSteps).toContain("t1");
+    // Wait for the async completion chain (loadProject, commitStepChanges, etc.)
+    await vi.waitFor(() => {
+      expect(completedSteps).toContain("t1");
+    }, { timeout: 5000, interval: 10 });
 
     executor.stop();
     await runPromise;
