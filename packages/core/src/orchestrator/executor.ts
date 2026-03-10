@@ -2400,7 +2400,19 @@ export class Executor {
   private async runStallChecks(): Promise<void> {
     if (this.plan.status !== "executing") return;
 
-    const signals = this.stallDetector.checkAll(this.plan);
+    // Check which in-progress steps have commits in their worktrees
+    // so the stall detector doesn't flag them as "no commits"
+    const stepsWithCommits = new Set<string>();
+    if (this.plan.config.worktree) {
+      for (const step of this.plan.steps) {
+        if (step.status === "in-progress" && step.worktreePath) {
+          const has = await this.worktreeManager.hasCommits(step.ticketId).catch(() => false);
+          if (has) stepsWithCommits.add(step.ticketId);
+        }
+      }
+    }
+
+    const signals = this.stallDetector.checkAll(this.plan, stepsWithCommits);
     let updated = false;
 
     for (const signal of signals) {

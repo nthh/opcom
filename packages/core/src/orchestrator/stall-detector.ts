@@ -141,9 +141,10 @@ export class StallDetector {
 
   /**
    * Run all stall checks for the current plan state.
+   * @param stepsWithCommits — step IDs whose worktrees have commits (not stalled)
    * Returns an array of detected stall signals.
    */
-  checkAll(plan: Plan): StallSignal[] {
+  checkAll(plan: Plan, stepsWithCommits?: Set<string>): StallSignal[] {
     if (!this.config.enabled) return [];
 
     const signals: StallSignal[] = [];
@@ -151,6 +152,8 @@ export class StallDetector {
     // Check each in-progress step for agent stalls
     for (const step of plan.steps) {
       if (step.status === "in-progress") {
+        // Skip agent stall check if the worktree has commits — agent is making progress
+        if (stepsWithCommits?.has(step.ticketId)) continue;
         const agentStall = this.checkAgentStall(step);
         if (agentStall) signals.push(agentStall);
       }

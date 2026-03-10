@@ -240,6 +240,25 @@ describe("StallDetector", () => {
       expect(signals.map((s) => s.type)).toContain("plan-stall");
     });
 
+    it("skips agent stall for steps with commits in worktree", () => {
+      // @ts-expect-error — testing private field
+      detector.lastStepTransitionAt = Date.now() - 35 * 60 * 1000;
+
+      const plan = makePlan([
+        makeStep({
+          ticketId: "step-1",
+          status: "in-progress",
+          startedAt: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+        }),
+      ]);
+
+      const stepsWithCommits = new Set(["step-1"]);
+      const signals = detector.checkAll(plan, stepsWithCommits);
+      // Should only have plan-stall, NOT long-running
+      expect(signals.length).toBe(1);
+      expect(signals[0].type).toBe("plan-stall");
+    });
+
     it("returns empty when disabled", () => {
       detector = new StallDetector(makeConfig({ enabled: false }));
       const plan = makePlan([
