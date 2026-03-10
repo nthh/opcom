@@ -1,7 +1,7 @@
 ---
 id: profile-detection
 title: "Auto-detect project profile during init/add/scan"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-10
