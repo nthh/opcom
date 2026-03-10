@@ -1,7 +1,7 @@
 ---
 id: tui-help-accuracy
 title: "TUI: Fix help view to match actual keybindings"
-status: open
+status: closed
 type: bug
 priority: 2
 deps: []
