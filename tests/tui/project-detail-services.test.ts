@@ -130,12 +130,13 @@ describe("project detail live services", () => {
     expect(services[2].instance).toBeUndefined();
   });
 
-  it("stack panel item count reflects services", () => {
+  it("stack panel item count reflects all stack items", () => {
     const state = createProjectDetailState(makeProject());
     state.projectConfig = makeProjectConfig();
 
+    // Stack items include: 1 language, 1 pkg manager, 1 testing, 3 services = 6
     const count = getPanelItemCount(state, 3);
-    expect(count).toBe(3);
+    expect(count).toBe(6);
   });
 
   it("stack panel item count is 0 without config", () => {

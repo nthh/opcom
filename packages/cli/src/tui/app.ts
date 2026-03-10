@@ -1225,7 +1225,7 @@ export class TuiApp {
       }
 
       case "d":
-        // Reserved for dev services (not yet implemented)
+        // Dev services handled in L2 project detail, no-op at L1
         return;
     }
   }
