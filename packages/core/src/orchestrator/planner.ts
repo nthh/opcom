@@ -4,6 +4,7 @@ import type {
   PlanStep,
   PlanStage,
   PlanScope,
+  PlanStrategy,
   OrchestratorConfig,
   WorkItem,
   StepStatus,
@@ -845,4 +846,57 @@ export function computeStageSummary(
     durationMs: completedAt - startedAt,
     ...(hasTestResults ? { testResults: { passed: totalPassed, failed: totalFailed } } : {}),
   };
+}
+
+/**
+ * Reorder priority-sorted ready steps according to the plan strategy.
+ *
+ * @param sorted - Steps already sorted by priority (lower number first)
+ * @param strategy - "spread" | "swarm" | "mixed"
+ * @returns Reordered steps
+ *
+ * - **mixed**: No change — return the priority-sorted order as-is.
+ * - **spread**: Round-robin across tracks. Pick one step per track in priority order,
+ *   then loop back for a second step per track, etc. Maximizes breadth.
+ * - **swarm**: Group by track, order tracks by highest-priority step.
+ *   Pick all steps from the first track, then the next, etc. Maximizes depth.
+ */
+export function applyStrategy(sorted: PlanStep[], strategy: PlanStrategy | undefined): PlanStep[] {
+  if (!strategy || strategy === "mixed") return sorted;
+  if (sorted.length <= 1) return sorted;
+
+  // Group steps by track, preserving priority order within each track
+  const trackGroups = new Map<string, PlanStep[]>();
+  for (const step of sorted) {
+    const track = step.track ?? step.ticketId;
+    if (!trackGroups.has(track)) trackGroups.set(track, []);
+    trackGroups.get(track)!.push(step);
+  }
+
+  if (strategy === "swarm") {
+    // Tracks are already ordered by the priority of their first step
+    // (since `sorted` is priority-ordered and we insert in order).
+    // Flatten: all steps from first track, then all from second, etc.
+    const result: PlanStep[] = [];
+    for (const steps of trackGroups.values()) {
+      result.push(...steps);
+    }
+    return result;
+  }
+
+  // strategy === "spread"
+  // Round-robin: pick one from each track, then loop
+  const trackQueues = [...trackGroups.values()];
+  const result: PlanStep[] = [];
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (const queue of trackQueues) {
+      if (queue.length > 0) {
+        result.push(queue.shift()!);
+        if (queue.length > 0) remaining = true;
+      }
+    }
+  }
+  return result;
 }

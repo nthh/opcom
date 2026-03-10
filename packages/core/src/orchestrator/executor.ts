@@ -23,7 +23,7 @@ import type {
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
-import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary, baseTicketId } from "./planner.js";
+import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary, baseTicketId, applyStrategy } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
@@ -1941,12 +1941,15 @@ export class Executor {
     }
 
     // Sort ready steps: lower priority number first, then fewer blockedBy, then array order
-    const sorted = [...ready].sort((a, b) => {
+    const prioritySorted = [...ready].sort((a, b) => {
       const pa = this.getStepPriority(a);
       const pb = this.getStepPriority(b);
       if (pa !== pb) return pa - pb;
       return a.blockedBy.length - b.blockedBy.length;
     });
+
+    // Apply strategy-based reordering (spread/swarm/mixed)
+    const sorted = applyStrategy(prioritySorted, this.plan.config.strategy);
 
     // Collect files claimed by active steps
     const claimedFiles = new Set<string>();

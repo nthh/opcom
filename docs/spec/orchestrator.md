@@ -283,6 +283,31 @@ private async startReadySteps(): Promise<void> {
 
 **Graph unavailable fallback.** If the context graph hasn't been built for a project, the executor skips overlap detection and starts all ready steps (current behavior). No graph = no file data = no overlap to detect.
 
+### Plan Strategy
+
+The `strategy` field on `OrchestratorConfig` controls how the executor distributes agents across ready steps. Three strategies are available:
+
+**spread** — Distribute agents across different tracks. Picks at most one ready step per track before doubling up. Maximizes breadth across feature areas.
+
+Algorithm: Group ready steps by track. Round-robin pick one from each track (sorted by priority). Continue rounds until available slots are filled.
+
+**swarm** — Focus all available agents on the fewest tracks possible. Picks all ready steps from the highest-priority track first, then moves to the next. Maximizes depth and throughput on one area before moving on.
+
+Algorithm: Group ready steps by track, sort tracks by priority. Pick all ready steps from the first track, then the next, until available slots are filled.
+
+**mixed** (default) — Current behavior. Pick highest-priority ready steps regardless of track distribution. No track-level scheduling.
+
+```typescript
+type PlanStrategy = "spread" | "swarm" | "mixed";
+
+interface OrchestratorConfig {
+  // ... existing fields ...
+  strategy: PlanStrategy;          // default "mixed"
+}
+```
+
+Strategy is applied after priority sorting and before file-overlap filtering. File-overlap rules still apply regardless of strategy — if two steps from the same track overlap on files, the second is held even under swarm.
+
 ### Starting a Step
 
 When the executor starts a step:
