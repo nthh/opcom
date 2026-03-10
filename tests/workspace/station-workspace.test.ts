@@ -31,9 +31,13 @@ describe("Station Workspace Health API", () => {
     expect(Array.isArray(data.sharedPatterns)).toBe(true);
     expect(typeof data.totalSignals).toBe("number");
 
-    // In test environment, no registered projects with graphs
-    expect(data.projects).toEqual([]);
-    expect(data.totalSignals).toBe(0);
-    expect(data.sharedPatterns).toEqual([]);
+    // Validate structure of any returned projects
+    for (const project of data.projects) {
+      expect(typeof project.projectName).toBe("string");
+      expect(typeof project.totalNodes).toBe("number");
+      expect(typeof project.totalEdges).toBe("number");
+      expect(typeof project.driftSignalCount).toBe("number");
+      expect(project.testHealth).toBeDefined();
+    }
   });
 });

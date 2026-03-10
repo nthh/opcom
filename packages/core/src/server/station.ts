@@ -1265,9 +1265,13 @@ export class Station {
 
     for (const project of projects) {
       if (!graphExists(project.name)) continue;
-      const db = openGraphDb(project.name);
-      if (!db) continue;
-      refs.push({ projectName: project.name, projectPath: project.path, db });
+      try {
+        const db = openGraphDb(project.name);
+        if (!db) continue;
+        refs.push({ projectName: project.name, projectPath: project.path, db });
+      } catch {
+        // Skip projects with corrupted or locked graph databases
+      }
     }
 
     if (refs.length === 0) {
