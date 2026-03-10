@@ -52,9 +52,34 @@ tests/                  — tests (source of truth: tests > code > docs)
 - `DetectionResult` — output of scanning a project directory with evidence trail
 - `AgentSession` — running agent linked to a project and optional work item (Phase 2 stub)
 
+## Runtime State
+
+opcom uses `~/.opcom/` for all persistent state:
+
+```
+~/.opcom/
+├── config.yaml              # Global preferences
+├── events.db                # SQLite event store (better-sqlite3) — agent sessions, events, changesets
+├── workspaces/
+│   └── <id>.yaml            # Workspace definitions
+├── projects/
+│   └── <id>.yaml            # Cached detection + user overrides
+├── plans/
+│   ├── <id>.yaml            # Plan definition + step/stage status
+│   └── <id>.context.md      # Accumulated context from planning sessions
+├── sessions/
+│   └── <id>.yaml            # Agent session metadata
+├── teams/
+│   └── <id>.yaml            # Custom team definitions
+└── skills/
+    └── <id>/SKILL.md        # Custom skill packages
+```
+
+The **event store** (`events.db`) is the persistence layer for agent sessions, normalized events, tool usage stats, and changesets. It uses `better-sqlite3` (native addon, loaded via `createRequire` for ESM compat). Key tables: `sessions`, `events`, `changesets`. See `packages/core/src/agents/event-store.ts`.
+
 ## Current State
 
-1530 tests passing across 87 test files. See docs/ROADMAP.md for what's next.
+2655 tests passing across 87+ test files. See docs/ROADMAP.md for what's next.
 
 ## Testing
 
