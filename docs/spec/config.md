@@ -129,6 +129,80 @@ linting:
     sourceFile: pyproject.toml
 ```
 
+## Project Profile {#project-profile}
+
+A project profile captures **operational semantics** that detection can't infer from file existence alone — how to run tests, what ticket fields mean, what agents are forbidden from doing. It lives alongside the existing `testing`, `services`, etc. fields on `ProjectConfig`.
+
+### Schema {#profile-schema}
+
+```yaml
+# Inside ~/.opcom/projects/<id>.yaml, alongside existing fields
+profile:
+  # Build & test commands (override detected testing.command)
+  commands:
+    test: "make test-smoke"          # fast gate for verification pipeline
+    testFull: "make test"            # full suite (optional, used for stage smoke tests)
+    build: "make build"             # build command
+    deploy: "make deploy"           # deploy command
+    lint: "ruff check ."            # lint command
+
+  # Ticket field semantics — how to interpret project-specific frontmatter
+  fieldMappings:
+    - field: demand                  # frontmatter field name
+      type: use-case                 # semantic type: use-case | tag | link | ignore
+      pattern: "UC-*"               # optional: validation pattern
+    - field: domains
+      type: tag
+    - field: services
+      type: tag
+    - field: milestone
+      type: tag
+
+  # Agent constraints extracted from project's agent config (CLAUDE.md, AGENTS.md)
+  agentConstraints:
+    forbiddenCommands:               # shell commands agents must never run
+      - "git reset"
+      - "git stash"
+      - "git checkout ."
+    commitRules:
+      - "always commit before session end"
+      - "two-commit structure for non-trivial changes"
+    workflowRules:
+      - "spec before ticket"
+      - "test before implementation"
+      - "never run full test suite — verification pipeline handles it"
+```
+
+### Field Mapping Types {#profile-field-mappings}
+
+| Type | Meaning | Effect |
+|------|---------|--------|
+| `use-case` | Values are use-case IDs | Create `implements` edges to `use_case:` nodes in context graph |
+| `tag` | Values are categorical labels | Store in `WorkItem.tags` (current behavior) |
+| `link` | Values are file paths or URLs | Store in `WorkItem.links` |
+| `ignore` | Field has no orchestration meaning | Skip during ingestion |
+
+When no field mapping exists for a frontmatter array field, the default behavior is `tag` — the current behavior. Field mappings only add semantics on top.
+
+### Agent Constraints {#profile-agent-constraints}
+
+Agent constraints are extracted from the project's agent config file (CLAUDE.md, AGENTS.md, .cursorrules). They are injected into the context packet for any agent working on that project, regardless of role.
+
+Constraint categories:
+- **forbiddenCommands** — patterns matched against bash tool invocations. The executor can enforce these as hard blocks (reject the command) or soft warnings (log and continue).
+- **commitRules** — natural language rules about git behavior. Injected into context, not mechanically enforced.
+- **workflowRules** — natural language workflow expectations. Injected into context.
+
+Only `forbiddenCommands` are mechanically enforceable. The rest are context for agent prompts.
+
+### Profile Precedence {#profile-precedence}
+
+Profile values override detected values where they overlap:
+
+1. **Detected** `testing.command` → used if no `profile.commands.test`
+2. **Profile** `commands.test` → overrides detected test command in verification pipeline
+3. **Plan-level** config → can override profile for specific plans (e.g., `testCommand` in `OrchestratorConfig`)
+
 Non-code project (no stack, description carries context):
 
 ```yaml

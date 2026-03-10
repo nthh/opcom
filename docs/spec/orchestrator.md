@@ -968,6 +968,143 @@ The plan view shows stage boundaries:
     ◌ serverless               blocked
 ```
 
+## Plan Strategy {#plan-strategy}
+
+Plans support different **strategies** for how agents are allocated to work. The default is "spread" (current behavior). Strategy is set at plan creation time and affects how the planner and executor handle steps.
+
+### Strategy Modes {#strategy-modes}
+
+```typescript
+type PlanStrategy = "spread" | "swarm" | "mixed";
+```
+
+**`spread`** (default) — distribute agents across independent tickets. Each agent owns one ticket. Tracks run in parallel up to `maxConcurrentAgents`. This is the current behavior.
+
+```
+Agent 1 → ticket-auth        (track: auth)
+Agent 2 → ticket-db-types    (track: database)
+Agent 3 → ticket-dashboard   (track: ui)
+```
+
+**`swarm`** — concentrate all agents on a single ticket (or its subtasks). The planner decomposes the target ticket's body into parallelizable subtasks, and the executor assigns all available agent slots to them. Useful for large features where throughput on one deliverable matters more than progress across many.
+
+```
+Target: ticket-platform (has 6 subtasks)
+Agent 1 → subtask: agent-auth       (parallel)
+Agent 2 → subtask: turso-migrations (parallel)
+Agent 3 → subtask: gcp-batch-client (blocked by agent-auth)
+```
+
+**`mixed`** — spread by default, but tickets with `strategy: swarm` in their frontmatter get multi-agent decomposition. Other tickets proceed as normal spread steps. Agent slots are shared — swarm tickets compete with spread tickets for available agents.
+
+### Swarm Target {#swarm-target}
+
+In `swarm` mode, the plan must specify a target:
+
+```yaml
+plan:
+  strategy: swarm
+  swarmTarget: ticket-id         # the ticket to decompose and swarm
+```
+
+In `mixed` mode, swarm targets are identified by ticket frontmatter:
+
+```yaml
+# In the ticket file
+---
+id: big-feature
+strategy: swarm
+---
+```
+
+### Subtask Extraction {#subtask-extraction}
+
+When a ticket is a swarm target, the planner extracts subtasks from the ticket body. Subtasks become ephemeral `PlanStep` entries — they are not separate ticket files, but schedulable units within the parent ticket.
+
+**Extraction format** — the ticket body's `## Tasks` section:
+
+```markdown
+## Tasks
+
+- [ ] T001 Set up auth types (parallel)
+- [ ] T002 Implement token refresh (parallel)
+- [ ] T003 Add session middleware (deps: T001)
+- [ ] T004 Write integration tests (deps: T001, T002)
+- [ ] T005 Deploy config (parallel)
+```
+
+**Parsing rules:**
+
+1. Task lines match: `- [ ] <id> <description> (<modifiers>)`
+2. Task ID: first word after checkbox (e.g., `T001`)
+3. Modifiers (parenthesized, comma-separated):
+   - `parallel` or `[P]` — no dependencies on other subtasks (can run immediately)
+   - `deps: T001, T002` — blocked by listed subtask IDs
+   - No modifier — sequential, depends on the previous task
+4. Tasks without any modifier are assumed **sequential** (each depends on the one above it)
+
+**Extracted subtask type:**
+
+```typescript
+interface ExtractedSubtask {
+  id: string;                    // e.g. "T001"
+  parentTicketId: string;        // the swarm target ticket
+  description: string;
+  deps: string[];                // subtask IDs this is blocked by
+  parallel: boolean;             // true if explicitly marked parallel
+}
+```
+
+### Swarm Execution {#swarm-execution}
+
+The executor treats swarm subtasks as first-class `PlanStep` entries:
+
+1. Each subtask gets a `PlanStep` with `parentTicketId` set
+2. `blockedBy` references other subtask step IDs (within the same parent)
+3. All parallel subtasks launch simultaneously up to `maxConcurrentAgents`
+4. Each subtask gets its **own worktree** (parallel execution would conflict in a shared worktree). This is the same isolation model as regular spread steps — separate branch per subtask, merge/rebase on completion.
+5. Parent ticket status = `done` when all subtasks complete
+6. Stages within a swarm = natural dependency layers of subtasks
+
+The executor's ready-step logic doesn't change — it already checks `blockedBy` and concurrency limits. The planner just produces more steps from a single ticket.
+
+**Context continuity:** Each subtask agent receives:
+- The full parent ticket body (for overall context)
+- Its specific subtask description
+- Results/diffs from completed sibling subtasks (via plan context injection)
+
+### Interaction with Team Formation {#strategy-team-interaction}
+
+A ticket can have both `team: feature-dev` and `strategy: swarm`. These compose:
+
+1. The planner extracts subtasks from the ticket body (swarm)
+2. Each subtask is then expanded through the team pipeline (team formation)
+3. Result: subtask T001 becomes T001/engineer → T001/qa → T001/reviewer
+
+Within a team sequence, steps are sequential and share a worktree (existing team formation behavior). Across subtasks, execution is parallel with separate worktrees (swarm behavior). This means for a ticket with 3 subtasks and the `feature-dev` team, the plan produces up to 9 steps (3 subtasks x 3 roles), with 3 parallel tracks of 3 sequential steps each.
+
+If this complexity is not desired, set only one of `team` or `strategy: swarm` on a ticket — they are independently useful.
+
+### Strategy in OrchestratorConfig {#strategy-config}
+
+```typescript
+interface OrchestratorConfig {
+  // ... existing fields ...
+  strategy?: PlanStrategy;           // default "spread"
+  swarmTarget?: string;              // ticket ID, required when strategy = "swarm"
+}
+```
+
+### PlanStep Extensions {#plan-step-extensions}
+
+```typescript
+interface PlanStep {
+  // ... existing fields ...
+  parentTicketId?: string;           // set for swarm subtask steps
+  subtaskId?: string;                // e.g. "T001" — the task ID from ticket body
+}
+```
+
 ## Non-Goals
 
 - **Distributed execution** — the orchestrator runs on one machine. Multi-machine coordination is out of scope.

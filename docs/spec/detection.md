@@ -117,3 +117,87 @@ When no manifest files detect any language, scan for source files (excluding dep
 ## Sub-Project Detection
 
 Scan monorepo patterns: `packages/*/`, `apps/*/`, `services/*/`, `libs/*/`, `modules/*/`, plus root-level directories with their own `package.json` or `pyproject.toml`.
+
+## Profile Detection {#profile-detection}
+
+Profile detection runs after stack detection and populates the `profile` section of `ProjectConfig`. Like stack detection, it is purely code-based — no LLM calls.
+
+### Build System Parsing {#build-system-parsing}
+
+Extract named targets from build files to populate `profile.commands`:
+
+| File | Parse Strategy | Targets |
+|------|---------------|---------|
+| `Makefile` | Regex for target names (lines matching `^target-name:`) | `test`, `test-*`, `build`, `deploy`, `lint`, `format`, `dev`, `start` |
+| `package.json` scripts | JSON parse `scripts` object | Same target names |
+| `pyproject.toml` | TOML parse `[tool.pytest]`, `[tool.hatch.envs.*.scripts]` | Test commands, script aliases |
+| `justfile` | Regex for recipe names | Same target names |
+| `taskfile.yml` | YAML parse `tasks` keys | Same target names |
+
+**Matching rules:**
+- `test` or `test-smoke` or `test:smoke` → `profile.commands.test` (fast gate)
+- `test-all` or `test:all` or `test` (if no smoke variant) → `profile.commands.testFull`
+- `build` → `profile.commands.build`
+- `deploy` or `deploy-*` → `profile.commands.deploy`
+- `lint` or `check` → `profile.commands.lint`
+
+When multiple candidates exist (e.g., both `make test-smoke` and `npm run test`), prefer the top-level build system (Makefile > package.json scripts) since it typically wraps the others.
+
+### Agent Config Parsing {#agent-config-parsing}
+
+If the project has an agent config file (`docs.agentConfig` — typically CLAUDE.md or AGENTS.md), parse it for agent constraints:
+
+1. **Forbidden commands** — scan for patterns like "never run", "do NOT use", "forbidden", "NEVER" followed by backtick-quoted commands or code blocks
+2. **Commit rules** — scan for sections about git workflow, commit conventions
+3. **Workflow rules** — scan for sections about development process (spec-first, test-first, etc.)
+
+This is **best-effort extraction** using regex/heuristic parsing. The raw agent config file is always available in the context packet — constraint extraction is for mechanical enforcement (forbidden commands) and profile display, not a replacement for the full file.
+
+**Extraction patterns:**
+
+```
+# Forbidden commands
+/(?:NEVER|never|do NOT|forbidden|prohibited)\s+.*?`([^`]+)`/g
+/(?:NEVER|never|do NOT)\s+run\s+`([^`]+)`/g
+
+# Commit rules (section-based)
+/^##.*(?:git|commit|version control)/im → extract bullet points
+
+# Workflow rules
+/^##.*(?:process|workflow|development|conventions)/im → extract bullet points
+```
+
+### Ticket Field Inference {#ticket-field-inference}
+
+During scan, sample ticket frontmatter across the project's ticket directory to infer field mappings:
+
+1. **Collect unique fields** — read frontmatter from up to 20 tickets, collect all keys not in the standard set (`id`, `title`, `status`, `type`, `priority`, `deps`, `links`, `created`)
+2. **Infer types** by value patterns:
+   - Array values matching `UC-*` or `USE-CASE-*` → `use-case` type
+   - Array values that are file paths (`docs/`, `src/`, `*.md`) → `link` type
+   - All other arrays → `tag` type
+   - Scalar non-standard fields → `ignore`
+3. **Record field frequency** — only suggest mappings for fields that appear in >25% of sampled tickets (skip one-off metadata)
+
+### Interactive Confirmation {#profile-confirmation}
+
+During `opcom init` and `opcom add`, after detection runs, display the inferred profile and prompt for confirmation:
+
+```
+Profile:
+  Test gate:     make test-smoke          ← from Makefile
+  Full suite:    make test                ← from Makefile
+  Deploy:        make deploy              ← from Makefile
+  Ticket fields:
+    demand → use-case                     ← detected UC-xxx pattern
+    domains → tag                         ← detected as array
+    services → tag                        ← detected as array
+  Agent constraints:
+    Forbidden: git reset, git stash       ← from AGENTS.md
+
+  [Enter] accept  [e] edit  [s] skip profile
+```
+
+When the user chooses `[e] edit`, open the project YAML in `$EDITOR` at the `profile:` section.
+
+On `opcom scan` (re-detection), the profile is re-inferred but **does not overwrite user edits**. Re-detection only fills in fields that are currently absent. To force re-detection of all profile fields, use `opcom scan --reset-profile`.
