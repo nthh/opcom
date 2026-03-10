@@ -97,6 +97,7 @@ export interface OrchestratorConfig {
   stages?: string[][];
   maxStageSize?: number;
   strategy?: PlanStrategy;
+  testCommand?: string;            // plan-level override for test command
 }
 
 export interface TestGateResult {
