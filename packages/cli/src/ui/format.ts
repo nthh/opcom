@@ -1,4 +1,4 @@
-import type { StackInfo, GitInfo, AgentSession, WorkItem, ProjectCommand, AgentConstraint } from "@opcom/types";
+import type { StackInfo, GitInfo, AgentSession, WorkItem, ProjectCommand, AgentConstraint, ProjectProfileConfig, FieldMapping } from "@opcom/types";
 import type { ProjectStatus, ManagedProcess } from "@opcom/core";
 import type { DetectionResult } from "@opcom/types";
 
@@ -288,6 +288,47 @@ export function formatRelativeTime(isoDate: string): string {
   if (diffHr < 24) return `${diffHr}h ago`;
   if (diffDay < 30) return `${diffDay}d ago`;
   return `${Math.floor(diffDay / 30)}mo ago`;
+}
+
+/**
+ * Format a detected profile for interactive confirmation.
+ * Returns null if the profile is empty (nothing to confirm).
+ */
+export function formatProfilePrompt(profile: Partial<ProjectProfileConfig>): string | null {
+  const hasCommands = profile.commands && profile.commands.length > 0;
+  const hasMappings = profile.fieldMappings && profile.fieldMappings.length > 0;
+  const hasConstraints = profile.agentConstraints && profile.agentConstraints.length > 0;
+
+  if (!hasCommands && !hasMappings && !hasConstraints) return null;
+
+  const lines: string[] = [];
+  lines.push(`  ${BOLD}Detected profile:${RESET}`);
+
+  if (hasCommands) {
+    for (const cmd of profile.commands!) {
+      const desc = cmd.description ? `  ${DIM}(${cmd.description})${RESET}` : "";
+      lines.push(`    ${CYAN}${cmd.name}${RESET}: ${cmd.command}${desc}`);
+    }
+  }
+
+  if (hasMappings) {
+    lines.push(`    ${BOLD}Ticket fields:${RESET}`);
+    for (const fm of profile.fieldMappings!) {
+      lines.push(`      ${fm.field} ${DIM}\u2192${RESET} ${fm.type}`);
+    }
+  }
+
+  if (hasConstraints) {
+    lines.push(`    ${BOLD}Agent constraints:${RESET}`);
+    for (const c of profile.agentConstraints!) {
+      lines.push(`      ${YELLOW}${c.name}${RESET}: ${c.rule}`);
+    }
+  }
+
+  lines.push("");
+  lines.push(`  ${DIM}[Enter]${RESET} accept  ${DIM}[e]${RESET} edit  ${DIM}[s]${RESET} skip profile`);
+
+  return lines.join("\n");
 }
 
 function capitalize(s: string): string {

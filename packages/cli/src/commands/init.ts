@@ -19,7 +19,7 @@ import {
 } from "@opcom/core";
 import type { WorkspaceConfig, ProjectConfig, ProjectTemplate } from "@opcom/types";
 import { formatDetectionResult } from "../ui/format.js";
-import { detectionToProjectConfig } from "./add.js";
+import { detectionToProjectConfig, confirmProfile } from "./add.js";
 
 function prompt(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
@@ -67,7 +67,12 @@ export async function runInit(): Promise<void> {
 
         const confirm = (await prompt(rl, "  Add this project? [Y/n]: ")).trim().toLowerCase();
         if (confirm === "" || confirm === "y" || confirm === "yes") {
+          const ask = (q: string) => prompt(rl, q);
+          const confirmedProfile = await confirmProfile(result, ask);
           const config = detectionToProjectConfig(result);
+          if (confirmedProfile === undefined) {
+            delete config.profile;
+          }
           await saveProject(config);
           await writeProjectSummary(
             config.id,
@@ -136,6 +141,9 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
     } else {
       console.log("  No code detected — that's fine, not every project has code.\n");
     }
+
+    // 4b. Profile confirmation
+    const confirmedProfile = await confirmProfile(result, ask);
 
     // 5. Template selection
     const templates = await loadAllTemplates();
@@ -213,6 +221,9 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       id,
       name,
     };
+    if (confirmedProfile === undefined) {
+      delete config.profile;
+    }
     await saveProject(config);
     await writeProjectSummary(
       config.id,
