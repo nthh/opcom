@@ -20,6 +20,15 @@ export interface Plan {
   smokeTestResult?: IntegrationTestResult;
 }
 
+export interface PlanSummary {
+  id: string;
+  name: string;
+  status: PlanStatus;
+  stepsDone: number;
+  stepsTotal: number;
+  updatedAt: string;
+}
+
 export interface PlanScope {
   projectIds?: string[];
   ticketIds?: string[];

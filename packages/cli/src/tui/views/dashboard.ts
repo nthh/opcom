@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, StallSignal, DeploymentStatus, InfraHealthSummary } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, PlanSummary, StallSignal, DeploymentStatus, InfraHealthSummary } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -164,6 +164,7 @@ export interface DashboardState {
   searchQuery: string;
   deployStatuses: Map<string, DashboardDeployStatus>; // projectId → deploy status
   planPanel: PlanPanelState | null; // non-null when plan is active
+  allPlans: PlanSummary[]; // all plans for the switcher
   agentsComponent: AgentsListState; // component state for agents panel
   chatComponent: ChatState; // component state for chat panel
 }
@@ -184,6 +185,7 @@ export function createDashboardState(): DashboardState {
     projectFilter: null,
     searchQuery: "",
     planPanel: null,
+    allPlans: [],
     agentsComponent: AgentsListComponent.init(),
     chatComponent: ChatComponent.init(),
   };
@@ -459,7 +461,16 @@ function renderPlanPanel(
     stageStr = dim(` [stage ${plan.currentStage + 1}/${plan.stages.length}${stageName}]`);
   }
 
-  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${stageStr}${planStallStr}`;
+  // Show plan index in switcher if multiple plans exist
+  const planCount = state.allPlans.length;
+  const planIdx = planCount > 1
+    ? (() => {
+        const idx = state.allPlans.findIndex((p) => p.id === plan.id);
+        return dim(` (${idx + 1}/${planCount})`);
+      })()
+    : "";
+
+  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${stageStr}${planStallStr}${planIdx}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -661,6 +672,43 @@ export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
     ordered.push(...steps);
   }
   return ordered;
+}
+
+/**
+ * Compute the next plan ID when cycling through plans.
+ * Prioritizes non-terminal plans (executing, paused, planning) so running plans
+ * are always immediately discoverable — never hidden behind cancelled/done plans.
+ * When all plans are terminal, cycles through them normally.
+ * @param offset +1 for next, -1 for previous
+ */
+export function getNextPlanId(state: DashboardState, offset: number): string | null {
+  const { allPlans, planPanel } = state;
+  if (allPlans.length <= 1) return null;
+
+  const currentId = planPanel?.plan.id;
+  const terminalStatuses = new Set(["cancelled", "done"]);
+  const nonTerminal = allPlans.filter((p) => !terminalStatuses.has(p.status));
+
+  // Multiple non-terminal plans: cycle only through those
+  if (nonTerminal.length > 1) {
+    const curIdx = currentId ? nonTerminal.findIndex((p) => p.id === currentId) : -1;
+    const nextIdx = curIdx === -1
+      ? 0
+      : ((curIdx + offset) % nonTerminal.length + nonTerminal.length) % nonTerminal.length;
+    return nonTerminal[nextIdx].id;
+  }
+
+  // Exactly 1 non-terminal plan: jump to it if we're not on it, otherwise nothing to cycle to
+  if (nonTerminal.length === 1) {
+    return currentId === nonTerminal[0].id ? null : nonTerminal[0].id;
+  }
+
+  // All plans are terminal — cycle through all normally
+  const currentIdx = currentId ? allPlans.findIndex((p) => p.id === currentId) : -1;
+  const nextIdx = currentIdx === -1
+    ? 0
+    : ((currentIdx + offset) % allPlans.length + allPlans.length) % allPlans.length;
+  return allPlans[nextIdx].id;
 }
 
 export function clampSelection(state: DashboardState): void {

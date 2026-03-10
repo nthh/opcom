@@ -31,6 +31,7 @@ export type ClientCommand =
   | { type: "advance_stage"; planId: string }
   | { type: "cancel_plan"; planId: string }
   | { type: "delete_plan"; planId: string }
+  | { type: "list_plans"; statusFilter?: import("./plan.js").PlanStatus }
   | { type: "run_hygiene" }
   // Changeset queries
   | { type: "get_changesets"; ticketId?: string; sessionId?: string; projectId?: string };
@@ -70,6 +71,7 @@ export type ServerEvent =
   | { type: "plan_paused"; plan: import("./plan.js").Plan }
   | { type: "plan_cancelled"; planId: string }
   | { type: "plan_deleted"; planId: string }
+  | { type: "plans_list"; plans: import("./plan.js").PlanSummary[] }
   | { type: "hygiene_report"; report: import("./plan.js").HygieneReport }
 
   // CI/CD events
