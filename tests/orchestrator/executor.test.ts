@@ -5,6 +5,7 @@ import type { Plan, PlanStep, AgentSession, AgentState } from "@opcom/types";
 import { writeFile, readFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -208,8 +209,7 @@ describe("Executor", () => {
     // Run in background, stop after first batch starts
     const runPromise = executor.run();
 
-    // Give it a tick to start
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.filter((s) => s.status === "in-progress").length === 2);
 
     expect(mockSM.startCalls).toHaveLength(2); // respects concurrency limit
     expect(plan.steps.filter((s) => s.status === "in-progress")).toHaveLength(2);
@@ -231,7 +231,7 @@ describe("Executor", () => {
     executor.on("step_completed", ({ step }) => completedSteps.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.find((s) => s.ticketId === "t1")!.status === "in-progress");
 
     // t1 should be started
     expect(mockSM.startCalls).toHaveLength(1);
@@ -242,11 +242,9 @@ describe("Executor", () => {
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
 
-    // Wait for the async completion chain (loadProject, commitStepChanges, etc.)
-    // rather than relying on a fixed timeout that can be too short under load.
-    await vi.waitFor(() => {
-      expect(completedSteps).toContain("t1");
-    }, { timeout: 5000, interval: 10 });
+    await waitFor(() => completedSteps.includes("t1"));
+
+    expect(completedSteps).toContain("t1");
 
     executor.stop();
     await runPromise;
@@ -263,13 +261,13 @@ describe("Executor", () => {
     executor.on("plan_paused", () => { paused = true; });
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.find((s) => s.ticketId === "t1")!.status === "in-progress");
 
     // Simulate error
     const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
     mockSM.simulateError(sessionId);
 
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.find((s) => s.ticketId === "t1")!.status === "failed");
 
     expect(plan.steps.find((s) => s.ticketId === "t1")!.status).toBe("failed");
     expect(paused).toBe(true);
@@ -295,7 +293,7 @@ describe("Executor", () => {
     });
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length === 1);
 
     // t1 started
     expect(mockSM.startCalls).toHaveLength(1);
@@ -303,7 +301,7 @@ describe("Executor", () => {
     // Simulate t1 failure
     const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
     mockSM.simulateError(sessionId);
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => paused);
 
     expect(paused).toBe(true);
     expect(plan.status).toBe("paused");
@@ -312,7 +310,7 @@ describe("Executor", () => {
 
     // Resume — event loop must still be alive for this to work
     executor.resume();
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mockSM.startCalls.length > 1);
 
     expect(resumed).toBe(true);
     expect(executor.getPlan().status).not.toBe("paused");
@@ -333,19 +331,19 @@ describe("Executor", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.find((s) => s.ticketId === "t1")!.status === "in-progress");
 
     // Simulate failure
     const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
     mockSM.simulateError(sessionId);
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.status === "paused");
 
     expect(plan.status).toBe("paused");
 
     // Verify run() has NOT resolved — the event loop is still alive
     let runResolved = false;
     runPromise.then(() => { runResolved = true; });
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 10));
     expect(runResolved).toBe(false);
 
     executor.stop();
@@ -361,13 +359,13 @@ describe("Executor", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length === 1);
 
     expect(mockSM.startCalls).toHaveLength(1);
 
     // Pause — should stop running agent and reset step to ready
     executor.pause();
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => executor.getPlan().status === "paused" && executor.getPlan().steps.every((s) => s.status === "ready"));
     expect(executor.getPlan().status).toBe("paused");
     expect(executor.getPlan().steps.every((s) => s.status === "ready")).toBe(true);
 
@@ -375,7 +373,7 @@ describe("Executor", () => {
 
     // Resume — should restart agents
     executor.resume();
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mockSM.startCalls.length > startsBeforeResume);
 
     // After resume, plan should be executing and agents restarted
     expect(["executing", "done"]).toContain(executor.getPlan().status);
@@ -393,7 +391,7 @@ describe("Executor", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     await executor.injectContext("First note");
     expect(plan.context).toBe("First note");
@@ -414,11 +412,11 @@ describe("Executor", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Skip t1 instead of running it
     executor.skipStep("t1");
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.find((s) => s.ticketId === "t1")!.status === "skipped");
 
     expect(plan.steps.find((s) => s.ticketId === "t1")!.status).toBe("skipped");
 
@@ -455,7 +453,7 @@ describe("Executor plan event logging", () => {
     );
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Should have logged plan_started and step_started
     expect(planEvents.some((e) => e.eventType === "plan_started")).toBe(true);
@@ -465,7 +463,7 @@ describe("Executor plan event logging", () => {
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => planEvents.some((e) => e.eventType === "plan_completed"));
 
     // Should have logged step_completed and plan_completed
     expect(planEvents.some((e) => e.eventType === "step_completed")).toBe(true);
@@ -492,12 +490,12 @@ describe("Executor auto-commit", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(mockCommitStepChanges).toHaveBeenCalledWith("/tmp/test-p", "t1");
 
@@ -513,12 +511,12 @@ describe("Executor auto-commit", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(mockCommitStepChanges).not.toHaveBeenCalled();
 
@@ -543,7 +541,7 @@ describe("Executor allowedTools passthrough", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     expect(mockSM.startCalls).toHaveLength(1);
     const config = mockSM.startCalls[0].config as { allowedTools?: string[] };
@@ -574,7 +572,7 @@ describe("Executor allowedTools passthrough", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const config = mockSM.startCalls[0].config as { allowedTools?: string[] };
     expect(config.allowedTools).toContain("Bash(docker compose*)");

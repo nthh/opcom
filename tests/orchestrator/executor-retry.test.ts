@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, AgentState, VerificationResult } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -212,7 +213,7 @@ describe("Executor verification retry loop", () => {
     // Instead, let's test the retry logic by directly examining step state transitions.
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Step should be in-progress with session assigned
     const step = plan.steps[0];
@@ -230,7 +231,7 @@ describe("Executor verification retry loop", () => {
     // Since npm test will fail (not actually runnable in test env), verification will fail
     // and the retry logic should kick in.
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => step.status !== "in-progress" || mockSM.startCalls.length >= 2);
 
     // The step should have been retried (since maxRetries=2, attempt goes from 1 to 2)
     // After the test gate fails (npm test won't work in test env), the retry logic fires.

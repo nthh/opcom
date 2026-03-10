@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, VerificationResult } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -239,11 +240,11 @@ describe("Executor auto-rebase on merge conflict", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done");
 
     expect(mockAttemptRebase).toHaveBeenCalledWith("t1");
     expect(mockMerge).toHaveBeenCalledTimes(2); // original + post-rebase
@@ -271,11 +272,11 @@ describe("Executor auto-rebase on merge conflict", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Step should have been re-queued with rebaseConflict
     const step = plan.steps[0];
@@ -315,11 +316,11 @@ describe("Executor auto-rebase on merge conflict", () => {
     executor.on("step_needs_rebase", ({ step }) => needsRebase.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "needs-rebase");
 
     // Should NOT attempt rebase
     expect(mockAttemptRebase).not.toHaveBeenCalled();
@@ -355,7 +356,7 @@ describe("Executor auto-rebase on merge conflict", () => {
     executor.on("step_needs_rebase", ({ step }) => needsRebase.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Simulate agents completing — each time merge conflicts, rebase conflicts,
     // new agent started. After 3 rebase attempts, should give up.
@@ -364,7 +365,10 @@ describe("Executor auto-rebase on merge conflict", () => {
       const sessionId = currentStep.agentSessionId;
       if (!sessionId) break;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 300));
+      await waitFor(() => {
+        const s = executor.getPlan().steps[0];
+        return s.status === "needs-rebase" || (s.agentSessionId !== sessionId);
+      });
     }
 
     const currentStep = executor.getPlan().steps[0];
@@ -394,12 +398,12 @@ describe("Executor auto-rebase on merge conflict", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // First agent completes
     const sessionId1 = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId1);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Worktree should have been created once for the original step,
     // NOT created again for the rebase resolution agent
@@ -488,12 +492,12 @@ describe("Executor auto-rebase on merge conflict", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // First agent completes → merge conflict → rebase conflict → agent re-queued
     const sessionId1 = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId1);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Rebase resolution agent should have started
     expect(mockSM.startCalls.length).toBeGreaterThanOrEqual(2);
@@ -504,7 +508,7 @@ describe("Executor auto-rebase on merge conflict", () => {
 
     // Second agent (rebase resolver) completes → merge succeeds → step done
     mockSM.simulateCompletion(sessionId2);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => executor.getPlan().steps[0].status === "done");
 
     expect(executor.getPlan().steps[0].status).toBe("done");
     expect(completed).toContain("t1");
@@ -534,11 +538,14 @@ describe("Executor auto-rebase on merge conflict", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 500));
+    await waitFor(() => {
+      const s = executor.getPlan().steps[0];
+      return s.status === "done" || s.status === "failed" || s.status === "needs-rebase" || (s.agentSessionId !== sessionId);
+    });
 
     // Merge conflicted → rebase succeeded → step completed
     const step = executor.getPlan().steps[0];

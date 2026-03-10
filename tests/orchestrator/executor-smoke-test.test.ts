@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, PlanStage, AgentSession, IntegrationTestResult } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -249,13 +250,13 @@ describe("Executor smoke tests — plan completion", () => {
     executor.on("smoke_test", (data) => smokeEvents.push(data as { result: IntegrationTestResult; trigger: string }));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Complete the step
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     const currentPlan = executor.getPlan();
     expect(currentPlan.status).toBe("done");
@@ -303,12 +304,12 @@ describe("Executor smoke tests — plan completion", () => {
     );
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     // Plan still completes (smoke test is non-fatal at plan completion)
     const currentPlan = executor.getPlan();
@@ -365,13 +366,13 @@ describe("Executor smoke tests — stage completion", () => {
     executor.on("smoke_test", (data) => smokeEvents.push(data as { result: IntegrationTestResult; trigger: string; stageIndex?: number }));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Complete t1 (stage 0)
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => smokeEvents.some((e) => e.trigger === "stage" && e.stageIndex === 0));
 
     // Smoke test should have been called for stage 0
     expect(smokeEvents.some((e) => e.trigger === "stage" && e.stageIndex === 0)).toBe(true);
@@ -411,13 +412,13 @@ describe("Executor smoke tests — stage completion", () => {
     executor.on("plan_paused", () => { paused = true; });
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Complete t1
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     // Plan should be paused because smoke test failed
     expect(paused).toBe(true);
@@ -468,12 +469,12 @@ describe("Executor smoke tests — stage completion", () => {
     );
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     // Should have a plan_paused event with test failure reason
     const pausedEvent = planEvents.find((e) => e.eventType === "plan_paused");
@@ -519,12 +520,12 @@ describe("Executor smoke tests — stage completion", () => {
     );
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     // smoke_test events should be in the event store
     const smokeEvents = planEvents.filter((e) => e.eventType === "smoke_test");
@@ -569,7 +570,7 @@ describe("Executor smoke tests — non-staged plans", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.every((s) => s.status === "in-progress"));
 
     // Complete both steps
     for (const step of plan.steps) {
@@ -577,7 +578,7 @@ describe("Executor smoke tests — non-staged plans", () => {
       mockSM.simulateWrite(sid);
       mockSM.simulateCompletion(sid);
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done");
 
     const currentPlan = executor.getPlan();
     expect(currentPlan.status).toBe("done");
@@ -608,12 +609,12 @@ describe("Executor — project summary updates", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done" || executor.getPlan().status === "paused");
 
     expect(mockUpdateProjectSummary).toHaveBeenCalledWith(
       "p",
@@ -636,14 +637,14 @@ describe("Executor — project summary updates", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps.every((s) => s.status === "in-progress"));
 
     for (const step of plan.steps) {
       const sid = step.agentSessionId!;
       mockSM.simulateWrite(sid);
       mockSM.simulateCompletion(sid);
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => executor.getPlan().status === "done");
 
     expect(mockUpdateProjectSummary).toHaveBeenCalledTimes(2);
     expect(mockUpdateProjectSummary).toHaveBeenCalledWith(

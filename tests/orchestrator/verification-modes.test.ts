@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, VerificationMode } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -245,11 +246,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "done");
 
       expect(completed).toContain("t1");
       expect(plan.steps[0].status).toBe("done");
@@ -274,11 +275,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "done");
 
       expect(completed).toContain("t1");
       expect(plan.steps[0].status).toBe("done");
@@ -303,11 +304,11 @@ describe("Verification Modes", () => {
       executor.on("step_pending_confirmation", ({ step }) => pendingEvents.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "pending-confirmation");
 
       expect(plan.steps[0].status).toBe("pending-confirmation");
       expect(pendingEvents).toContain("t1");
@@ -329,17 +330,17 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "pending-confirmation");
 
       expect(plan.steps[0].status).toBe("pending-confirmation");
 
       // User confirms
       executor.confirmStep("t1");
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "done");
 
       expect(plan.steps[0].status).toBe("done");
       expect(completed).toContain("t1");
@@ -358,17 +359,17 @@ describe("Verification Modes", () => {
       const executor = new Executor(plan, mockSM as unknown as SM);
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "pending-confirmation");
 
       expect(plan.steps[0].status).toBe("pending-confirmation");
 
       // User rejects
       executor.rejectStep("t1", "Not done yet");
-      await new Promise((r) => setTimeout(r, 150));
+      await waitFor(() => plan.steps[0].status === "ready");
 
       expect(plan.steps[0].status).toBe("ready");
       expect(plan.steps[0].attempt).toBe(2);
@@ -406,11 +407,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status === "done");
 
       expect(completed).toContain("t1");
       expect(plan.steps[0].status).toBe("done");
@@ -444,11 +445,11 @@ describe("Verification Modes", () => {
       executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status === "failed");
 
       expect(failed).toContain("t1");
       expect(plan.steps[0].status).toBe("failed");
@@ -482,11 +483,11 @@ describe("Verification Modes", () => {
       executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status === "failed");
 
       expect(failed).toContain("t1");
       expect(plan.steps[0].status).toBe("failed");
@@ -520,11 +521,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status === "done");
 
       expect(completed).toContain("t1");
       expect(plan.steps[0].status).toBe("done");
@@ -548,11 +549,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status !== "in-progress" && plan.steps[0].status !== "verifying");
 
       // Step should complete (oracle is enabled but no oracle agent will actually run
       // since we haven't mocked the full oracle flow — the verification will pass
@@ -577,11 +578,11 @@ describe("Verification Modes", () => {
       executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 50));
+      await waitFor(() => plan.steps[0].status === "in-progress");
 
       const sessionId = plan.steps[0].agentSessionId!;
       mockSM.simulateCompletion(sessionId);
-      await new Promise((r) => setTimeout(r, 200));
+      await waitFor(() => plan.steps[0].status === "done");
 
       // With no explicit verificationMode, uses existing pipeline.
       // runTests=false, runOracle=false → verification returns null → step done
@@ -620,7 +621,7 @@ describe("Verification Modes", () => {
       }));
 
       const runPromise = executor.run();
-      await new Promise((r) => setTimeout(r, 100));
+      await waitFor(() => plan.steps.every((s) => s.status === "in-progress"));
 
       // Complete all agents
       for (const step of plan.steps) {
@@ -628,7 +629,12 @@ describe("Verification Modes", () => {
           mockSM.simulateCompletion(step.agentSessionId);
         }
       }
-      await new Promise((r) => setTimeout(r, 300));
+      await waitFor(() => {
+        const fire = plan.steps.find(s => s.ticketId === "fire-task")?.status;
+        const confirm = plan.steps.find(s => s.ticketId === "confirm-task")?.status;
+        const code = plan.steps.find(s => s.ticketId === "code-task")?.status;
+        return fire === "done" && confirm === "pending-confirmation" && code === "done";
+      });
 
       // fire-task: none → done immediately
       expect(plan.steps.find(s => s.ticketId === "fire-task")?.status).toBe("done");

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, AgentStartConfig } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager with oracle event simulation
 type EventHandler<T> = (data: T) => void;
@@ -296,12 +297,12 @@ describe("Executor oracle agent session", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Complete the coding agent
     const codingSessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(codingSessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // Should have started 2 sessions: coding agent + oracle agent
     expect(mockSM.startCalls.length).toBe(2);
@@ -332,10 +333,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const oracleCall = mockSM.startCalls.find((c) => c.ticketId?.startsWith("oracle:"));
     expect(oracleCall).toBeDefined();
@@ -357,10 +358,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const step = plan.steps[0];
     expect(step.verification).toBeDefined();
@@ -387,10 +388,10 @@ describe("Executor oracle agent session", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(completed).toContain("t1");
     expect(plan.steps[0].status).toBe("done");
@@ -416,10 +417,10 @@ describe("Executor oracle agent session", () => {
     executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(failed).toContain("t1");
     expect(plan.steps[0].status).toBe("failed");
@@ -448,10 +449,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const step = plan.steps[0];
     expect(step.status).toBe("failed");
@@ -473,10 +474,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const oracleCall = mockSM.startCalls.find((c) => c.ticketId?.startsWith("oracle:"));
     // Prompt is delivered via systemPrompt, not as a CLI argument
@@ -501,10 +502,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const oracleCall = mockSM.startCalls.find((c) => c.ticketId?.startsWith("oracle:"));
     expect(oracleCall!.config.model).toBe("claude-haiku-4-5-20251001");
@@ -551,10 +552,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // Response was assembled from two chunks and parsed correctly
     const step = plan.steps[0];
@@ -588,10 +589,10 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done");
 
     expect(verifyingObserved).toBe(true);
     expect(plan.steps[0].status).toBe("done");

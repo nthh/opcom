@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, AgentStartConfig } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Oracle response fixtures
 const ORACLE_RESPONSE_ALL_MET = `## Criteria
@@ -288,11 +289,11 @@ describe("Zero-commit oracle arbitration", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Complete the coding agent (which made no commits)
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(completed).toContain("t1");
     expect(plan.steps[0].status).toBe("done");
@@ -319,10 +320,10 @@ describe("Zero-commit oracle arbitration", () => {
     executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(failed).toContain("t1");
     expect(plan.steps[0].status).toBe("failed");
@@ -361,10 +362,10 @@ describe("Zero-commit oracle arbitration", () => {
     executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     expect(failed).toContain("t1");
     expect(plan.steps[0].status).toBe("failed");
@@ -395,10 +396,10 @@ describe("Zero-commit oracle arbitration", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     expect(verifyingObserved).toBe(true);
 
@@ -421,10 +422,10 @@ describe("Zero-commit oracle arbitration", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // Oracle should have been called (for zero-commit arbitration)
     const oracleCalls = mockSM.startCalls.filter((c) => c.ticketId?.startsWith("oracle:"));
@@ -451,10 +452,10 @@ describe("Zero-commit oracle arbitration", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // Worktree should be cleaned up
     expect(mockRemove).toHaveBeenCalledWith("t1");
@@ -477,10 +478,10 @@ describe("Zero-commit oracle arbitration", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
-    await new Promise((r) => setTimeout(r, 300));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // No merge should be attempted — no commits to merge
     expect(mockMerge).not.toHaveBeenCalled();

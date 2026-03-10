@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession, AgentState } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -217,7 +218,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Worktree should have been created
     expect(mockCreate).toHaveBeenCalledWith(
@@ -248,7 +249,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     expect(mockCreate).not.toHaveBeenCalled();
 
@@ -270,12 +271,12 @@ describe("Executor with worktree isolation", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Agent completes WITHOUT any write events (worktree mode doesn't need them)
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => completed.includes("t1"));
 
     // hasCommits should have been called
     expect(mockHasCommits).toHaveBeenCalledWith("t1");
@@ -299,11 +300,11 @@ describe("Executor with worktree isolation", () => {
     executor.on("step_failed", ({ step }) => failed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => failed.includes("t1"));
 
     expect(failed).toContain("t1");
     expect(plan.steps[0].error).toContain("without making any commits");
@@ -335,11 +336,11 @@ describe("Executor with worktree isolation", () => {
     executor.on("step_completed", ({ step }) => completed.push(step.ticketId));
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => completed.includes("t1"));
 
     // commitStepChanges should have been called with the worktree path
     expect(mockCommitStepChanges).toHaveBeenCalled();
@@ -361,11 +362,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "done");
 
     expect(mockMerge).toHaveBeenCalledWith("t1");
     expect(mockRemove).toHaveBeenCalledWith("t1");
@@ -395,11 +396,11 @@ describe("Executor with worktree isolation", () => {
     executor.on("plan_paused", () => { paused = true; });
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "needs-rebase");
 
     expect(needsRebase).toContain("t1");
     expect(plan.steps[0].status).toBe("needs-rebase");
@@ -423,11 +424,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "needs-rebase");
 
     expect(plan.steps[0].status).toBe("needs-rebase");
     expect(plan.steps[0].error).toContain("Merge failed");
@@ -448,7 +449,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     expect(mockCleanupOrphaned).toHaveBeenCalledWith("/tmp/test-p", expect.any(Set));
 
@@ -464,7 +465,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // writeLock should have been called with the ticketId and the session PID
     expect(mockWriteLock).toHaveBeenCalledWith("t1", 12345);
@@ -487,11 +488,11 @@ describe("Executor with worktree isolation", () => {
     executor.on("plan_completed", () => { planDone = true; });
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 200));
+    await waitFor(() => planDone);
 
     expect(plan.steps[0].status).toBe("needs-rebase");
     expect(planDone).toBe(true);
@@ -509,7 +510,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Step should have worktree info from creation
     expect(plan.steps[0].worktreePath).toBe("/tmp/test-p/.opcom/worktrees/t1");
@@ -525,7 +526,7 @@ describe("Executor with worktree isolation", () => {
       id: sessionId, backend: "claude-code", projectId: "test",
       state: "stopped", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     expect(plan.steps[0].status).toBe("failed");
     // Empty worktree (no commits, no uncommitted changes) gets cleaned up
@@ -548,11 +549,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     expect(plan.steps[0].status).toBe("failed");
     // updateTicketStatus should have written "open" back to the ticket file
@@ -578,7 +579,7 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Simulate agent error then stop
     const sessionId = plan.steps[0].agentSessionId!;
@@ -591,7 +592,7 @@ describe("Executor with worktree isolation", () => {
       id: sessionId, backend: "claude-code", projectId: "test",
       state: "stopped", startedAt: new Date().toISOString(), stoppedAt: new Date().toISOString(),
     });
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     expect(plan.steps[0].status).toBe("failed");
     expect(mockWriteFile).toHaveBeenCalledWith(
@@ -617,11 +618,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     expect(plan.steps[0].status).toBe("failed");
     // writeFile should NOT have been called since ticketTransitions is off
@@ -644,11 +645,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     // Ticket status was written
     expect(mockWriteFile).toHaveBeenCalledWith(
@@ -691,11 +692,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "done");
 
     expect(plan.steps[0].status).toBe("done");
 
@@ -738,11 +739,11 @@ describe("Executor with worktree isolation", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "failed");
 
     // Step still completed its normal flow despite git commit failure
     expect(plan.steps[0].status).toBe("failed");

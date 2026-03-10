@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Executor } from "../../packages/core/src/orchestrator/executor.js";
 import { defaultConfig } from "../../packages/core/src/orchestrator/persistence.js";
 import type { Plan, PlanStep, AgentSession } from "@opcom/types";
+import { waitFor } from "./_helpers.js";
 
 // Mock SessionManager
 type EventHandler<T> = (data: T) => void;
@@ -213,7 +214,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // Only 1 of the 2 should have started — they overlap on src/foo.ts
     expect(mockSM.startCalls).toHaveLength(1);
@@ -247,7 +248,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Both should start — no file overlap
     expect(mockSM.startCalls).toHaveLength(2);
@@ -281,7 +282,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // Only 1 should start (they overlap), and it should be the higher-priority one
     expect(mockSM.startCalls).toHaveLength(1);
@@ -315,7 +316,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // Only 1 should start; the one with fewer blockedBy should win the tie
     expect(mockSM.startCalls).toHaveLength(1);
@@ -341,7 +342,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 3);
 
     // All 3 should start — no file data means no overlap can be detected
     expect(mockSM.startCalls).toHaveLength(3);
@@ -367,7 +368,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Both should start — exception is caught, files default to []
     expect(mockSM.startCalls).toHaveLength(2);
@@ -403,7 +404,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // t-active is already in-progress (not re-started by executor)
     // t-waiting overlaps with t-active on src/model.ts → held back
@@ -441,7 +442,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // Only 1 of 2 should have started
     expect(mockSM.startCalls).toHaveLength(1);
@@ -475,7 +476,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // Only t1 should start (higher priority, overlapping files)
     expect(mockSM.startCalls).toHaveLength(1);
@@ -485,7 +486,7 @@ describe("Executor file-overlap scheduling", () => {
     const sessionId = plan.steps.find((s) => s.ticketId === "t1")!.agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // After t1 completes, t2 should now start (no longer blocked by file overlap)
     expect(mockSM.startCalls).toHaveLength(2);
@@ -519,7 +520,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Both should start — empty file lists mean no overlap
     expect(mockSM.startCalls).toHaveLength(2);
@@ -554,7 +555,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // t1 and t2 overlap on src/shared.ts — t1 wins (priority 1 vs 2)
     // t3 has no overlap with anyone — should also start
@@ -601,7 +602,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 1);
 
     // t-ready overlaps with t-verifying on src/api.ts → held back
     // t-nonoverlap has no overlap → should start
@@ -641,7 +642,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => mockSM.startCalls.length >= 2);
 
     // Only 2 should start despite 3 being ready with no overlaps
     expect(mockSM.startCalls).toHaveLength(2);
@@ -673,7 +674,7 @@ describe("Executor file-overlap scheduling", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
-    await new Promise((r) => setTimeout(r, 50));
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
     // t1 started
     expect(mockSM.startCalls).toHaveLength(1);
@@ -682,7 +683,7 @@ describe("Executor file-overlap scheduling", () => {
     const sessionId = plan.steps[0].agentSessionId!;
     mockSM.simulateWrite(sessionId);
     mockSM.simulateCompletion(sessionId);
-    await new Promise((r) => setTimeout(r, 100));
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     // queryGraphContext should have been called only once for t1 (cached)
     const t1Calls = mockQueryGraphContext.mock.calls.filter(
