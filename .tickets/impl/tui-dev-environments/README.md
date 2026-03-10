@@ -1,7 +1,7 @@
 ---
 id: tui-dev-environments
 title: "TUI: Wire dev environment management into station and TUI"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:

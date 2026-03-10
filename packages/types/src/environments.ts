@@ -40,6 +40,7 @@ export interface ServiceInstance {
   startedAt: string;
   lastHealthCheck?: HealthCheckResult;
   restartCount: number;
+  logs?: string[];
 }
 
 // --- Health Checks ---

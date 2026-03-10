@@ -2,7 +2,7 @@
 // Manages navigation, input, rendering, and data flow
 
 import { spawn } from "node:child_process";
-import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService, Pipeline, PodDetail } from "@opcom/types";
+import type { AgentSession, WorkItem, ProjectStatusSnapshot, CloudService, Pipeline, PodDetail, ServiceInstance } from "@opcom/types";
 import { ScreenBuffer, ANSI, bold, dim, color, padRight } from "./renderer.js";
 import { getLayout, TerminalSize, type NavigationLevel } from "./layout.js";
 import { TuiClient } from "./client.js";
@@ -40,6 +40,7 @@ import {
   getCloudServicesList,
   getInfraResourcesList,
   getStackList,
+  getServicesList,
   getPanelItemCount as getProjectItemCount,
   PANEL_COUNT as PROJECT_PANEL_COUNT,
   type ProjectDetailState,
@@ -171,6 +172,16 @@ import {
   switchContainer as podSwitchContainer,
   type PodDetailState,
 } from "./views/pod-detail.js";
+import {
+  renderServiceDetail,
+  createServiceDetailState,
+  rebuildDisplayLines as rebuildServiceDetailLines,
+  scrollUp as serviceScrollUp,
+  scrollDown as serviceScrollDown,
+  scrollToTop as serviceScrollToTop,
+  scrollToBottom as serviceScrollToBottom,
+  type ServiceDetailState,
+} from "./views/service-detail.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -194,6 +205,7 @@ export class TuiApp {
   private pipelineDetailState: PipelineDetailState | null = null;
   private deploymentDetailState: DeploymentDetailState | null = null;
   private podDetailState: PodDetailState | null = null;
+  private serviceDetailState: ServiceDetailState | null = null;
 
   // Navigation stack for back navigation
   private navStack: Array<{
@@ -230,6 +242,9 @@ export class TuiApp {
   // Chat input mode (chat panel focused and accepting text input)
   private chatInputMode = false;
 
+  // Flash notification (port conflicts, etc.)
+  private notificationMessage: string | null = null;
+  private notificationTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.client = new TuiClient();
@@ -261,8 +276,13 @@ export class TuiApp {
     this.refreshHealthData();
 
     // Listen for data changes
-    this.client.onEvent(() => {
+    this.client.onEvent((event) => {
       this.syncData();
+      if (event.type === "port_conflict") {
+        this.showNotification(
+          `Port conflict: ${event.serviceName} wants :${event.port} (used by ${event.conflictsWith.projectId}/${event.conflictsWith.serviceName})`,
+        );
+      }
       this.scheduleRender();
     });
 
@@ -294,9 +314,20 @@ export class TuiApp {
 
   private _resolveQuit: (() => void) | null = null;
 
+  private showNotification(message: string, durationMs = 8000): void {
+    this.notificationMessage = message;
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    this.notificationTimer = setTimeout(() => {
+      this.notificationMessage = null;
+      this.notificationTimer = null;
+      this.scheduleRender();
+    }, durationMs);
+  }
+
   private quit(): void {
     this.running = false;
     if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
 
     // Restore terminal
     if (process.stdin.isTTY) {
@@ -376,6 +407,9 @@ export class TuiApp {
         this.projectDetailState.pipelines = pipelines;
         const deployments = this.client.projectDeployments.get(this.focusedProjectId) ?? [];
         this.projectDetailState.deployments = deployments;
+        // Sync environment status
+        this.projectDetailState.environmentStatus =
+          this.client.projectEnvironmentStatus.get(this.focusedProjectId) ?? project.environmentStatus ?? null;
         // Sync agents component state (project-detail)
         this.projectDetailState.agentsComponent.agents = this.client.agents;
         this.projectDetailState.agentsComponent.projectId = this.focusedProjectId;
@@ -402,6 +436,18 @@ export class TuiApp {
           deployments.some((d, i) => d.status !== this.deploymentDetailState!.deployments[i]?.status)) {
         this.deploymentDetailState.deployments = deployments;
         rebuildDeploymentDisplayLines(this.deploymentDetailState, this.termSize.cols - 4);
+      }
+    }
+
+    // Update service detail if active
+    if (this.serviceDetailState && this.focusedProjectId) {
+      const envStatus = this.client.projectEnvironmentStatus.get(this.focusedProjectId);
+      if (envStatus) {
+        const updated = envStatus.services.find((s) => s.serviceName === this.serviceDetailState!.serviceName);
+        if (updated && updated !== this.serviceDetailState.instance) {
+          this.serviceDetailState.instance = updated;
+          rebuildServiceDetailLines(this.serviceDetailState, this.termSize.cols - 4);
+        }
       }
     }
 
@@ -525,6 +571,8 @@ export class TuiApp {
             renderDeploymentDetail(this.buf, layout.panels[0], this.deploymentDetailState);
           } else if (this.podDetailState) {
             renderPodDetail(this.buf, layout.panels[0], this.podDetailState);
+          } else if (this.serviceDetailState) {
+            renderServiceDetail(this.buf, layout.panels[0], this.serviceDetailState);
           }
           break;
       }
@@ -579,7 +627,7 @@ export class TuiApp {
         } else if (this.createTicketMode) {
           keysStr = dim(this.ticketPromptLabel());
         } else {
-          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  c:chat  v:cloud  M:migrate  Esc:back  ?:help");
+          keysStr = dim("j/k:nav  Tab:panel  Enter:drill  w:work  d:dev  D:stop  c:chat  v:cloud  Esc:back  ?:help");
         }
         break;
       case 3:
@@ -590,8 +638,15 @@ export class TuiApp {
         break;
     }
 
-    const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${keysStr}`;
-    this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    // Show notification if active (overrides keys display)
+    if (this.notificationMessage) {
+      const notifStr = color(ANSI.yellow, this.notificationMessage);
+      const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${notifStr}`;
+      this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    } else {
+      const statusLine = ` ${modeStr} ${dim("|")} ${levelStr}${healthStr} ${dim("|")} ${keysStr}`;
+      this.buf.writeLine(y, 0, ANSI.reverse + padRight(statusLine, cols) + ANSI.reset, cols);
+    }
   }
 
   private renderHelp(): void {
@@ -707,6 +762,8 @@ export class TuiApp {
           this.handleDeploymentDetailInput(data);
         } else if (this.podDetailState) {
           this.handlePodDetailInput(data);
+        } else if (this.serviceDetailState) {
+          this.handleServiceDetailInput(data);
         }
         break;
     }
@@ -1131,6 +1188,20 @@ export class TuiApp {
         }
         return;
 
+      case "d":
+        // Start all dev services for this project
+        if (this.focusedProjectId) {
+          this.client.send({ type: "start_services", projectId: this.focusedProjectId });
+        }
+        return;
+
+      case "D":
+        // Stop all dev services for this project
+        if (this.focusedProjectId) {
+          this.client.send({ type: "stop_services", projectId: this.focusedProjectId });
+        }
+        return;
+
       case "]": { // Next plan
         const nextId = getNextPlanId(this.dashboardState, 1);
         if (nextId) {
@@ -1154,7 +1225,7 @@ export class TuiApp {
       }
 
       case "d":
-        // Reserved for dev services (not yet implemented)
+        // Dev services handled in L2 project detail, no-op at L1
         return;
     }
   }
@@ -1193,10 +1264,16 @@ export class TuiApp {
         }).catch(() => {});
       }
     } else if (panel === 3) {
-      // Drill into stack item
+      // Drill into stack item (service items navigate to service detail)
       const items = getStackList(state);
       const item = items[selected];
-      if (item && state.projectConfig) {
+      if (item && item.category === "service" && this.focusedProjectId) {
+        const services = getServicesList(state);
+        const svc = services.find((s) => s.name === item.name);
+        if (svc) {
+          this.navigateToServiceDetail(this.focusedProjectId, svc.name, svc.instance);
+        }
+      } else if (item && state.projectConfig) {
         this.navigateToStackItem(item, state.projectConfig);
       }
     } else if (panel === 4) {
@@ -2555,6 +2632,75 @@ export class TuiApp {
     }
   }
 
+  private navigateToServiceDetail(projectId: string, serviceName: string, instance?: ServiceInstance): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+    this.serviceDetailState = createServiceDetailState(projectId, serviceName, instance);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
+    this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
+    this.podDetailState = null;
+  }
+
+  private handleServiceDetailInput(data: string): void {
+    if (!this.serviceDetailState) return;
+    const state = this.serviceDetailState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 2;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        serviceScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        serviceScrollUp(state, 1);
+        return;
+
+      case "G":
+        serviceScrollToBottom(state);
+        return;
+
+      case "g":
+        serviceScrollToTop(state);
+        return;
+
+      case "r":
+        // Restart service
+        this.client.send({
+          type: "restart_service",
+          projectId: state.projectId,
+          serviceName: state.serviceName,
+        });
+        return;
+
+      case "s":
+        // Stop service
+        this.client.send({
+          type: "stop_services",
+          projectId: state.projectId,
+          serviceName: state.serviceName,
+        });
+        return;
+    }
+  }
+
   private navigateToPod(pod: PodDetail): void {
     this.navStack.push({
       level: this.level,
@@ -2573,6 +2719,7 @@ export class TuiApp {
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
+    this.serviceDetailState = null;
   }
 
   private handlePodDetailInput(data: string): void {
@@ -2796,6 +2943,7 @@ export class TuiApp {
         this.pipelineDetailState = null;
         this.deploymentDetailState = null;
         this.podDetailState = null;
+        this.serviceDetailState = null;
         this.focusedProjectId = null;
       }
       return;
@@ -2815,6 +2963,7 @@ export class TuiApp {
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
+      this.serviceDetailState = null;
     }
     if (this.level <= 1) {
       this.projectDetailState = null;
