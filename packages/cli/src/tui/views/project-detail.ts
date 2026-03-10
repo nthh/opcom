@@ -28,6 +28,7 @@ import {
 } from "../renderer.js";
 import { healthDot } from "./cloud-service-detail.js";
 import { renderCICDPanel, getCICDItemCount } from "./cicd-pane.js";
+import { buildStackItemList, type StackItem } from "./stack-detail.js";
 import {
   AgentsListComponent,
   getVisibleAgents,
@@ -306,84 +307,96 @@ export function getSpecsList(state: ProjectDetailState): SpecCoverageItem[] {
 
 // --- Stack Panel ---
 
+/** Flat list of stack items for navigation. */
+export function getStackList(state: ProjectDetailState): StackItem[] {
+  if (!state.projectConfig) return [];
+  return buildStackItemList(state.projectConfig);
+}
+
 function renderStackPanel(
   buf: ScreenBuffer,
   panel: Panel,
   state: ProjectDetailState,
   focused: boolean,
 ): void {
-  const title = "Stack";
+  const config = state.projectConfig;
+  const items = getStackList(state);
+  const count = items.length;
+  const title = count > 0 ? `Stack (${count})` : "Stack";
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
   const contentWidth = panel.width - 4;
-  let row = panel.y + 1;
-  const maxRow = panel.y + panel.height - 1;
+  const maxRows = panel.height - 2;
+  const selected = state.selectedIndex[3] ?? 0;
+  const scroll = state.scrollOffset[3] ?? 0;
 
-  const config = state.projectConfig;
   if (!config) {
-    buf.writeLine(row, panel.x + 2, dim("Loading..."), contentWidth);
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("Loading..."), contentWidth);
     return;
   }
 
-  const stack = config.stack;
-
-  // Languages
-  if (stack.languages.length > 0 && row < maxRow) {
-    buf.writeLine(row++, panel.x + 2, bold("Languages"), contentWidth);
-    for (const lang of stack.languages) {
-      if (row >= maxRow) break;
-      const version = lang.version ? dim(` v${lang.version}`) : "";
-      buf.writeLine(row++, panel.x + 4, `${lang.name}${version}`, contentWidth - 2);
-    }
+  if (items.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No stack detected"), contentWidth);
+    return;
   }
 
-  // Frameworks
-  if (stack.frameworks.length > 0 && row < maxRow) {
-    if (row > panel.y + 1) row++; // spacer
-    buf.writeLine(row++, panel.x + 2, bold("Frameworks"), contentWidth);
-    for (const fw of stack.frameworks) {
-      if (row >= maxRow) break;
-      const version = fw.version ? dim(` v${fw.version}`) : "";
-      buf.writeLine(row++, panel.x + 4, `${fw.name}${version}`, contentWidth - 2);
-    }
+  // Build display rows with category headers
+  interface StackDisplayRow {
+    type: "header" | "item";
+    text?: string;
+    item?: StackItem;
+    itemIndex?: number;
   }
 
-  // Infrastructure
-  if (stack.infrastructure.length > 0 && row < maxRow) {
-    if (row > panel.y + 1) row++;
-    buf.writeLine(row++, panel.x + 2, bold("Infrastructure"), contentWidth);
-    for (const infra of stack.infrastructure) {
-      if (row >= maxRow) break;
-      buf.writeLine(row++, panel.x + 4, infra.name, contentWidth - 2);
+  const rows: StackDisplayRow[] = [];
+  let itemIdx = 0;
+  let lastCategory: string | null = null;
+
+  for (const item of items) {
+    const cat = categoryHeader(item.category);
+    if (cat !== lastCategory) {
+      rows.push({ type: "header", text: cat });
+      lastCategory = cat;
     }
+    rows.push({ type: "item", item, itemIndex: itemIdx++ });
   }
 
-  // Package managers
-  if (stack.packageManagers.length > 0 && row < maxRow) {
-    if (row > panel.y + 1) row++;
-    buf.writeLine(row++, panel.x + 2, bold("Package Managers"), contentWidth);
-    for (const pm of stack.packageManagers) {
-      if (row >= maxRow) break;
-      buf.writeLine(row++, panel.x + 4, pm.name, contentWidth - 2);
+  for (let i = 0; i < maxRows && i + scroll < rows.length; i++) {
+    const rowIdx = i + scroll;
+    const row = rows[rowIdx];
+    const y = panel.y + 1 + i;
+
+    if (row.type === "header") {
+      buf.writeLine(y, panel.x + 2, bold(row.text ?? ""), contentWidth);
+    } else if (row.item) {
+      const isSelected = row.itemIndex === selected && focused;
+      const line = formatStackItemLine(row.item, contentWidth);
+      if (isSelected) {
+        buf.writeLine(y, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
+      } else {
+        buf.writeLine(y, panel.x + 2, line, contentWidth);
+      }
     }
   }
+}
 
-  // Testing
-  if (config.testing && row < maxRow) {
-    if (row > panel.y + 1) row++;
-    buf.writeLine(row++, panel.x + 2, bold("Testing"), contentWidth);
-    buf.writeLine(row++, panel.x + 4, config.testing.framework, contentWidth - 2);
-  }
+function formatStackItemLine(item: StackItem, maxWidth: number): string {
+  const version = item.version ? dim(` v${item.version}`) : "";
+  const port = item.port !== undefined ? dim(` :${item.port}`) : "";
+  const source = item.sourceFile ? dim(`  ${item.sourceFile}`) : "";
+  const line = `  ${item.name}${version}${port}${source}`;
+  return truncate(line, maxWidth);
+}
 
-  // Services
-  if (config.services.length > 0 && row < maxRow) {
-    if (row > panel.y + 1) row++;
-    buf.writeLine(row++, panel.x + 2, bold("Services"), contentWidth);
-    for (const svc of config.services) {
-      if (row >= maxRow) break;
-      const port = svc.port ? dim(`:${svc.port}`) : "";
-      buf.writeLine(row++, panel.x + 4, `${svc.name}${port}`, contentWidth - 2);
-    }
+function categoryHeader(category: StackItem["category"]): string {
+  switch (category) {
+    case "language": return "Languages";
+    case "framework": return "Frameworks";
+    case "infrastructure": return "Infrastructure";
+    case "package-manager": return "Package Managers";
+    case "version-manager": return "Version Managers";
+    case "testing": return "Testing";
+    case "service": return "Services";
   }
 }
 
@@ -764,7 +777,7 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
     case 0: return getTicketsList(state).length;
     case 1: return getVisibleAgents(state.agentsComponent).length;
     case 2: return getSpecsList(state).length;
-    case 3: return 0; // stack is not navigable
+    case 3: return getStackList(state).length;
     case 4: return getCloudServicesList(state).length;
     case 5: return getCICDItemCount(state.pipelines, state.deployments);
     case 6: return getInfraResourcesList(state).length;

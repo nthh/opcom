@@ -38,6 +38,7 @@ import {
   getSpecsList,
   getCloudServicesList,
   getInfraResourcesList,
+  getStackList,
   getPanelItemCount as getProjectItemCount,
   PANEL_COUNT as PROJECT_PANEL_COUNT,
   type ProjectDetailState,
@@ -51,6 +52,15 @@ import {
   scrollToBottom as cloudScrollToBottom,
   type CloudServiceDetailState,
 } from "./views/cloud-service-detail.js";
+import {
+  renderStackDetail,
+  createStackDetailState,
+  scrollUp as stackScrollUp,
+  scrollDown as stackScrollDown,
+  scrollToTop as stackScrollToTop,
+  scrollToBottom as stackScrollToBottom,
+  type StackDetailState,
+} from "./views/stack-detail.js";
 import {
   renderAgentFocus,
   createAgentFocusState,
@@ -178,6 +188,7 @@ export class TuiApp {
   private planStepFocusState: PlanStepFocusState | null = null;
   private planOverviewState: PlanOverviewState | null = null;
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
+  private stackDetailState: StackDetailState | null = null;
   private settingsViewState: SettingsViewState | null = null;
   private pipelineDetailState: PipelineDetailState | null = null;
   private deploymentDetailState: DeploymentDetailState | null = null;
@@ -500,6 +511,8 @@ export class TuiApp {
             renderPlanStepFocus(this.buf, layout.panels[0], this.planStepFocusState);
           } else if (this.planOverviewState) {
             renderPlanOverview(this.buf, layout.panels[0], this.planOverviewState);
+          } else if (this.stackDetailState) {
+            renderStackDetail(this.buf, layout.panels[0], this.stackDetailState);
           } else if (this.cloudServiceDetailState) {
             renderCloudServiceDetail(this.buf, layout.panels[0], this.cloudServiceDetailState);
           } else if (this.settingsViewState) {
@@ -679,6 +692,8 @@ export class TuiApp {
           this.handlePlanStepFocusInput(data);
         } else if (this.planOverviewState) {
           this.handlePlanOverviewInput(data);
+        } else if (this.stackDetailState) {
+          this.handleStackDetailInput(data);
         } else if (this.cloudServiceDetailState) {
           this.handleCloudServiceDetailInput(data);
         } else if (this.settingsViewState) {
@@ -1115,6 +1130,13 @@ export class TuiApp {
           this.healthViewState.sectionCoverage = sections;
           this.scheduleRender();
         }).catch(() => {});
+      }
+    } else if (panel === 3) {
+      // Drill into stack item
+      const items = getStackList(state);
+      const item = items[selected];
+      if (item && state.projectConfig) {
+        this.navigateToStackItem(item, state.projectConfig);
       }
     } else if (panel === 4) {
       // Drill into cloud service
@@ -1971,6 +1993,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2004,6 +2027,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2037,6 +2061,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2075,6 +2100,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2237,6 +2263,7 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.stackDetailState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
@@ -2249,6 +2276,7 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.stackDetailState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
       this.podDetailState = null;
@@ -2265,6 +2293,61 @@ export class TuiApp {
     }).catch(() => {});
   }
 
+  private navigateToStackItem(item: import("./views/stack-detail.js").StackItem, projectConfig: import("@opcom/types").ProjectConfig): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+    const projectName = this.client.projects.find((p) => p.id === this.focusedProjectId)?.name ?? "";
+    const infraResources = this.projectDetailState?.infraResources ?? [];
+    this.stackDetailState = createStackDetailState(item, projectName, projectConfig, infraResources);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
+    this.settingsViewState = null;
+    this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
+    this.podDetailState = null;
+  }
+
+  // --- L3: Stack Detail Input ---
+
+  private handleStackDetailInput(data: string): void {
+    if (!this.stackDetailState) return;
+    const state = this.stackDetailState;
+    const layout = getLayout(3, this.termSize.cols, this.termSize.rows);
+    const viewHeight = layout.panels[0].height - 4;
+
+    switch (data) {
+      case "q":
+      case "\x1b":
+        this.navigateBack();
+        return;
+
+      case "j":
+      case "\x1b[B":
+        stackScrollDown(state, 1, viewHeight);
+        return;
+
+      case "k":
+      case "\x1b[A":
+        stackScrollUp(state, 1);
+        return;
+
+      case "G":
+        stackScrollToBottom(state, viewHeight);
+        return;
+
+      case "g":
+        stackScrollToTop(state);
+        return;
+    }
+  }
+
   private navigateToCloudService(service: CloudService): void {
     this.navStack.push({
       level: this.level,
@@ -2278,6 +2361,7 @@ export class TuiApp {
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.planOverviewState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2298,6 +2382,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
@@ -2332,6 +2417,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.podDetailState = null;
@@ -2383,6 +2469,7 @@ export class TuiApp {
     this.planStepFocusState = null;
     this.planOverviewState = null;
     this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
     this.settingsViewState = null;
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
@@ -2604,6 +2691,7 @@ export class TuiApp {
         this.planStepFocusState = null;
         this.planOverviewState = null;
         this.cloudServiceDetailState = null;
+        this.stackDetailState = null;
         this.settingsViewState = null;
         this.pipelineDetailState = null;
         this.deploymentDetailState = null;
@@ -2622,6 +2710,7 @@ export class TuiApp {
       this.planStepFocusState = null;
       this.planOverviewState = null;
       this.cloudServiceDetailState = null;
+      this.stackDetailState = null;
       this.settingsViewState = null;
       this.pipelineDetailState = null;
       this.deploymentDetailState = null;
