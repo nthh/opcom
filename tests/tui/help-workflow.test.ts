@@ -87,7 +87,7 @@ describe("buildHelpLines", () => {
     const keys = extractKeys("Level 1: Dashboard");
     expect(keys).toEqual([
       "j/k", "Tab", "Enter", "w", "c", "C", "s", "S",
-      "/", "f", "F", "1-4", "d", "H", "[/]", "O", "P",
+      "/", "f", "F", "1-4", "d", "H", "[/]", "O", "P", "K",
     ]);
   });
 
