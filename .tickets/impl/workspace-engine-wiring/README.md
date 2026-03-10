@@ -1,7 +1,7 @@
 ---
 id: workspace-engine-wiring
 title: "Wire WorkspaceEngine into CLI and TUI for cross-project analysis"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
