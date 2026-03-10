@@ -28,7 +28,8 @@ import { reconcilePlans } from "../orchestrator/reconcile.js";
 import { GitHubActionsAdapter } from "../integrations/github-actions.js";
 import { CICDPoller } from "../integrations/cicd-poller.js";
 import type { ProjectCICDState } from "../integrations/cicd-poller.js";
-import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
+import { buildGraph, queryProjectDrift, getGraphStats, graphExists, openGraphDb } from "../graph/graph-service.js";
+import { WorkspaceEngine, type ProjectGraphRef, type WorkspaceHealth } from "@opcom/context-graph";
 import { KubernetesAdapter, computeInfraHealthSummary } from "../infra/kubernetes.js";
 import { detectInfrastructure } from "../infra/detect.js";
 import type { Disposable, InfraEvent, EnvironmentStatus } from "@opcom/types";
@@ -604,6 +605,12 @@ export class Station {
       if (!project) return { status: 404, data: { error: "Project not found" } };
       const signals = queryProjectDrift(project.name);
       return { status: 200, data: signals };
+    }
+
+    // GET /workspace/health
+    if (method === "GET" && path === "/workspace/health") {
+      const health = await this.computeWorkspaceHealth();
+      return { status: 200, data: health };
     }
 
     // --- Infrastructure endpoints ---
@@ -1219,9 +1226,89 @@ export class Station {
         if (signals.length > 0) {
           this.broadcast({ type: "drift_detected", projectId, signals });
         }
+
+        // Refresh workspace health after graph build
+        this.refreshWorkspaceHealth();
       })
       .catch(() => {
         // Graph build failure is non-fatal — station continues without graph
+      });
+  }
+
+  /** Compute workspace-level health from all project graphs. */
+  private async computeWorkspaceHealth(): Promise<{
+    projects: Array<{
+      projectName: string;
+      totalNodes: number;
+      totalEdges: number;
+      driftSignalCount: number;
+      topDriftType: string | null;
+      testHealth: { total: number; passed: number; failed: number; flaky: number };
+    }>;
+    totalSignals: number;
+    sharedPatterns: Array<{
+      patternId: string;
+      type: string;
+      description: string;
+      projects: string[];
+      signalCount: number;
+      suggestedAction: string;
+    }>;
+  }> {
+    let projects: Awaited<ReturnType<typeof listProjects>>;
+    try {
+      projects = await listProjects();
+    } catch {
+      return { projects: [], totalSignals: 0, sharedPatterns: [] };
+    }
+    const refs: ProjectGraphRef[] = [];
+
+    for (const project of projects) {
+      if (!graphExists(project.name)) continue;
+      const db = openGraphDb(project.name);
+      if (!db) continue;
+      refs.push({ projectName: project.name, projectPath: project.path, db });
+    }
+
+    if (refs.length === 0) {
+      return { projects: [], totalSignals: 0, sharedPatterns: [] };
+    }
+
+    const engine = new WorkspaceEngine(refs);
+    try {
+      const health = await engine.getHealth();
+      return {
+        projects: health.projects.map((p) => ({
+          projectName: p.projectName,
+          totalNodes: p.totalNodes,
+          totalEdges: p.totalEdges,
+          driftSignalCount: p.driftSignalCount,
+          topDriftType: p.topDriftType,
+          testHealth: p.testHealth,
+        })),
+        totalSignals: health.totalSignals,
+        sharedPatterns: health.sharedPatterns.map((sp) => ({
+          patternId: sp.patternId,
+          type: sp.type,
+          description: sp.description,
+          projects: sp.projects,
+          signalCount: sp.signalCount,
+          suggestedAction: sp.suggestedAction,
+        })),
+      };
+    } finally {
+      engine.close();
+    }
+  }
+
+  /** Compute and broadcast workspace health in background. */
+  private refreshWorkspaceHealth(): void {
+    this.computeWorkspaceHealth()
+      .then((health) => {
+        this.broadcast({ type: "workspace_health", health } as unknown as ServerEvent);
+      })
+      .catch(() => {
+        // Workspace health is non-critical
       });
   }
 

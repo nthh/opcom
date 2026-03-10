@@ -3006,6 +3006,7 @@ export class TuiApp {
     this.healthVisible = true;
     this.healthViewState = createHealthViewState();
     this.healthViewState.data = this.healthData;
+    this.healthViewState.workspaceHealth = this.client.workspaceHealth;
 
     // If data is stale or missing, refresh
     if (!this.healthData) {
@@ -3075,6 +3076,7 @@ export class TuiApp {
       this.healthData = data;
       if (this.healthVisible) {
         this.healthViewState.data = data;
+        this.healthViewState.workspaceHealth = this.client.workspaceHealth;
       }
       // Update project specs if we're viewing a project detail
       if (this.projectDetailState && this.projectDetailState.tickets.length > 0) {

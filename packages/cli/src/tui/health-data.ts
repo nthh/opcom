@@ -8,6 +8,28 @@ import type { WorkItem } from "@opcom/types";
 
 // --- Types ---
 
+export interface WorkspaceHealthProject {
+  projectName: string;
+  totalNodes: number;
+  totalEdges: number;
+  driftSignalCount: number;
+  topDriftType: string | null;
+  testHealth: { total: number; passed: number; failed: number; flaky: number };
+}
+
+export interface WorkspaceHealthSummary {
+  projects: WorkspaceHealthProject[];
+  totalSignals: number;
+  sharedPatterns: Array<{
+    patternId: string;
+    type: string;
+    description: string;
+    projects: string[];
+    signalCount: number;
+    suggestedAction: string;
+  }>;
+}
+
 export interface SpecCoverageItem {
   name: string;
   sections: number;

@@ -1,0 +1,39 @@
+/**
+ * Tests for Station workspace health endpoint.
+ */
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { Station } from "@opcom/core";
+
+describe("Station Workspace Health API", () => {
+  let station: Station;
+  let port: number;
+
+  beforeAll(async () => {
+    port = 17000 + Math.floor(Math.random() * 1000);
+    station = new Station(port, { skipCICD: true, skipReconcile: true, skipInfra: true });
+    await station.start();
+  }, 30000);
+
+  afterAll(async () => {
+    await station.stop();
+    await new Promise((r) => setTimeout(r, 100));
+  }, 30000);
+
+  it("GET /workspace/health returns valid response", async () => {
+    const res = await fetch(`http://localhost:${port}/workspace/health`);
+    expect(res.status).toBe(200);
+
+    const data = await res.json();
+    expect(data).toHaveProperty("projects");
+    expect(data).toHaveProperty("totalSignals");
+    expect(data).toHaveProperty("sharedPatterns");
+    expect(Array.isArray(data.projects)).toBe(true);
+    expect(Array.isArray(data.sharedPatterns)).toBe(true);
+    expect(typeof data.totalSignals).toBe("number");
+
+    // In test environment, no registered projects with graphs
+    expect(data.projects).toEqual([]);
+    expect(data.totalSignals).toBe(0);
+    expect(data.sharedPatterns).toEqual([]);
+  });
+});

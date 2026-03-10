@@ -40,6 +40,7 @@ import { runImportCalendar, runImportPaste } from "./commands/import.js";
 import { runSkillsList, runSkillsShow, runSkillsCreate } from "./commands/skills.js";
 import { runState } from "./commands/state.js";
 import { runTeamList, runTeamShow } from "./commands/team.js";
+import { runWorkspaceHealth, runWorkspaceDrift, runWorkspacePatterns } from "./commands/workspace.js";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -300,6 +301,23 @@ async function main(): Promise<void> {
           return runGraphDrift(args[2]);
         default:
           console.error("  Usage: opcom graph <build|stats|drift> [project]");
+          process.exit(1);
+      }
+      break;
+    }
+
+    case "workspace": {
+      const wsSub = args[1];
+      switch (wsSub) {
+        case "health":
+        case undefined:
+          return runWorkspaceHealth();
+        case "drift":
+          return runWorkspaceDrift();
+        case "patterns":
+          return runWorkspacePatterns();
+        default:
+          console.error("  Usage: opcom workspace <health|drift|patterns>");
           process.exit(1);
       }
       break;
@@ -626,6 +644,9 @@ function printHelp(): void {
     graph build [project]        Build context graph (all projects if none specified)
     graph stats [project]        Show graph node/edge statistics
     graph drift [project]        Show drift signals (uncovered specs, untested files, etc.)
+    workspace [health]           Aggregate health across all projects
+    workspace drift              Cross-project drift signals ranked by severity
+    workspace patterns           Shared patterns detected across projects
     ci [project]                 Show CI/CD pipeline status
     ci <project> --watch         Watch pipeline status live
     infra [project]              Show infrastructure status (K8s)

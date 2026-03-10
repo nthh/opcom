@@ -2,7 +2,7 @@
 // Equivalent of `opcom audit` + `opcom coverage` in the TUI
 
 import type { Panel } from "../layout.js";
-import type { HealthData, SpecSectionCoverage } from "../health-data.js";
+import type { HealthData, SpecSectionCoverage, WorkspaceHealthSummary } from "../health-data.js";
 import {
   ScreenBuffer,
   drawBox,
@@ -24,6 +24,8 @@ export interface HealthViewState {
   sectionCoverage: SpecSectionCoverage[] | null;
   drillSelectedIndex: number;
   drillScrollOffset: number;
+  // Workspace health (from WorkspaceEngine)
+  workspaceHealth: WorkspaceHealthSummary | null;
 }
 
 export function createHealthViewState(): HealthViewState {
@@ -35,6 +37,7 @@ export function createHealthViewState(): HealthViewState {
     sectionCoverage: null,
     drillSelectedIndex: 0,
     drillScrollOffset: 0,
+    workspaceHealth: null,
   };
 }
 
@@ -166,6 +169,36 @@ function renderOverview(
       buf.writeLine(row++, panel.x + 5,
         `${uc.id}: ${color(ucColor, `${uc.done}/${uc.total} (${ucPct}%)`)} ${dim(uc.title)}`,
         contentWidth);
+    }
+  }
+
+  // --- WORKSPACE HEALTH (cross-project analysis) ---
+  if (state.workspaceHealth && state.workspaceHealth.projects.length > 0) {
+    row++;
+    const ws = state.workspaceHealth;
+    buf.writeLine(row++, panel.x + 3, bold(`WORKSPACE (${ws.projects.length} projects, ${ws.totalSignals} drift signals)`), contentWidth);
+
+    for (const p of ws.projects) {
+      const driftStr = p.driftSignalCount > 0
+        ? color(ANSI.yellow, `${p.driftSignalCount} drift`)
+        : color(ANSI.green, "clean");
+      const testStr = p.testHealth.total > 0
+        ? `${p.testHealth.passed}/${p.testHealth.total} tests`
+        : dim("no tests");
+      buf.writeLine(row++, panel.x + 5,
+        `${p.projectName}: ${driftStr} ${dim("|")} ${testStr}`,
+        contentWidth);
+    }
+
+    if (ws.sharedPatterns.length > 0) {
+      row++;
+      buf.writeLine(row++, panel.x + 5, dim(`Shared patterns (${ws.sharedPatterns.length}):`), contentWidth);
+      for (const sp of ws.sharedPatterns.slice(0, 3)) {
+        buf.writeLine(row++, panel.x + 7, truncate(sp.description, contentWidth - 4), contentWidth - 2);
+      }
+      if (ws.sharedPatterns.length > 3) {
+        buf.writeLine(row++, panel.x + 7, dim(`... ${ws.sharedPatterns.length - 3} more`), contentWidth - 2);
+      }
     }
   }
 
