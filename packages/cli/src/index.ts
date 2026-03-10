@@ -60,8 +60,11 @@ async function main(): Promise<void> {
       }
       return runAdd(args[1]);
 
-    case "scan":
-      return runScan(args[1]);
+    case "scan": {
+      const resetProfile = args.includes("--reset-profile");
+      const scanProjectId = args.find((a) => a !== "--reset-profile" && args.indexOf(a) > 0);
+      return runScan(scanProjectId, { resetProfile });
+    }
 
     case "status": {
       const projectIdx = args.indexOf("--project");
@@ -611,7 +614,7 @@ function printHelp(): void {
     init                         Interactive workspace setup
     init <folder>                Initialize a project in a folder
     add <path>                   Add a project to the workspace
-    scan [project]               Re-run detection for one or all projects
+    scan [project] [--reset-profile]  Re-run detection for one or all projects
     status [--project <name>]    Show workspace dashboard (default)
     tui                          Interactive terminal dashboard
     work <project>[/<ticket>]    Start agent on a work item

@@ -52,6 +52,27 @@ export function formatDetectionResult(result: DetectionResult): string {
     lines.push(`  Docs: ${docParts.join(", ")}`);
   }
 
+  // Profile summary
+  if (result.profile) {
+    const profileParts: string[] = [];
+    if (result.profile.commands && result.profile.commands.length > 0) {
+      for (const cmd of result.profile.commands) {
+        profileParts.push(`${cmd.name}: ${cmd.command}`);
+      }
+    }
+    if (result.profile.fieldMappings && result.profile.fieldMappings.length > 0) {
+      for (const fm of result.profile.fieldMappings) {
+        profileParts.push(`${fm.field} → ${fm.type}`);
+      }
+    }
+    if (result.profile.agentConstraints && result.profile.agentConstraints.length > 0) {
+      profileParts.push(`${result.profile.agentConstraints.length} agent constraint(s)`);
+    }
+    if (profileParts.length > 0) {
+      lines.push(`  Profile: ${profileParts.join(", ")}`);
+    }
+  }
+
   return lines.join("\n");
 }
 

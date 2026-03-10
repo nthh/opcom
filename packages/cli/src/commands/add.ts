@@ -27,6 +27,7 @@ export function detectionToProjectConfig(result: DetectionResult, opts?: { descr
     subProjects: result.subProjects,
     cloudServices: result.cloudServices,
     lastScannedAt: new Date().toISOString(),
+    ...(result.profile ? { profile: result.profile as ProjectConfig["profile"] } : {}),
   };
 }
 
