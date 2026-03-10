@@ -241,107 +241,132 @@ export class DriftEngine {
   }
 
   private detectTestRegression(): DriftSignal[] {
-    // Find the latest run
-    const latestRun = this.db.query(`
-      SELECT run_id FROM run_summary ORDER BY timestamp DESC LIMIT 1
-    `);
-    if (latestRun.rows.length === 0) return [];
+    try {
+      // Find the latest run
+      const latestRun = this.db.query(`
+        SELECT run_id FROM run_summary ORDER BY timestamp DESC LIMIT 1
+      `);
+      if (latestRun.rows.length === 0) return [];
 
-    const runId = latestRun.rows[0][0] as string;
-    const failures = this.db.newFailures(runId);
+      const runId = latestRun.rows[0][0] as string;
+      const failures = this.db.newFailures(runId);
 
-    return failures.map((f) => {
-      const node = this.db.getNode(f.testId);
-      return this.makeSignal(
-        "test_regression",
-        f.testId,
-        node?.path ?? "",
-        node?.title ?? f.testId,
-        "fix_test",
-        "unit",
-        f.errorMsg ? `Regression: ${f.errorMsg}` : undefined,
-      );
-    });
+      return failures.map((f) => {
+        const node = this.db.getNode(f.testId);
+        return this.makeSignal(
+          "test_regression",
+          f.testId,
+          node?.path ?? "",
+          node?.title ?? f.testId,
+          "fix_test",
+          "unit",
+          f.errorMsg ? `Regression: ${f.errorMsg}` : undefined,
+        );
+      });
+    } catch {
+      // Phase 2 tables (run_summary, test_results) may not exist yet
+      return [];
+    }
   }
 
   private detectFlakyTests(): DriftSignal[] {
-    const flaky = this.db.flakyTests(30);
+    try {
+      const flaky = this.db.flakyTests(30);
 
-    return flaky.map((f) => {
-      const node = this.db.getNode(f.testId);
-      return this.makeSignal(
-        "flaky_test",
-        f.testId,
-        node?.path ?? "",
-        node?.title ?? f.testId,
-        "fix_test",
-        "unit",
-        `Flaky: ${f.passCount} passes, ${f.failCount} failures in last 30 days`,
-      );
-    });
+      return flaky.map((f) => {
+        const node = this.db.getNode(f.testId);
+        return this.makeSignal(
+          "flaky_test",
+          f.testId,
+          node?.path ?? "",
+          node?.title ?? f.testId,
+          "fix_test",
+          "unit",
+          `Flaky: ${f.passCount} passes, ${f.failCount} failures in last 30 days`,
+        );
+      });
+    } catch {
+      // Phase 2 tables (test_results) may not exist yet
+      return [];
+    }
   }
 
   private detectStaleAssertions(): DriftSignal[] {
-    // Tests where the asserted spec was modified after the test was last seen
-    const rows = this.db.query(`
-      SELECT e.source as test_id, e.target as spec_id,
-             n_test.last_seen as test_last_seen,
-             n_spec.last_seen as spec_last_seen,
-             n_test.path as test_path, n_test.title as test_title,
-             n_spec.title as spec_title
-      FROM edges e
-      JOIN nodes n_test ON n_test.id = e.source
-      JOIN nodes n_spec ON n_spec.id = e.target
-      WHERE e.relation = 'asserts'
-        AND n_spec.last_seen > n_test.last_seen
-    `);
+    try {
+      // Tests where the asserted spec was modified after the test was last seen
+      const rows = this.db.query(`
+        SELECT e.source as test_id, e.target as spec_id,
+               n_test.last_seen as test_last_seen,
+               n_spec.last_seen as spec_last_seen,
+               n_test.path as test_path, n_test.title as test_title,
+               n_spec.title as spec_title
+        FROM edges e
+        JOIN nodes n_test ON n_test.id = e.source
+        JOIN nodes n_spec ON n_spec.id = e.target
+        WHERE e.relation = 'asserts'
+          AND n_spec.last_seen > n_test.last_seen
+      `);
 
-    return rows.rows.map((row) => {
-      const [testId, specId, , , testPath, testTitle, specTitle] = row as string[];
-      return this.makeSignal(
-        "stale_assertion",
-        testId,
-        testPath ?? "",
-        testTitle ?? testId,
-        "update_test",
-        "unit",
-        `Spec "${specTitle}" was modified after test was last updated`,
-      );
-    });
+      return rows.rows.map((row) => {
+        const [testId, specId, , , testPath, testTitle, specTitle] = row as string[];
+        return this.makeSignal(
+          "stale_assertion",
+          testId,
+          testPath ?? "",
+          testTitle ?? testId,
+          "update_test",
+          "unit",
+          `Spec "${specTitle}" was modified after test was last updated`,
+        );
+      });
+    } catch {
+      // Schema may lack last_seen column in older graph databases
+      return [];
+    }
   }
 
   private detectCouplingGaps(): DriftSignal[] {
-    const coupling = this.db.couplingAnalysis(3);
-    return coupling
-      .filter((c) => !c.sharedTests)
-      .map((c) => {
-        return this.makeSignal(
-          "coupling_gap",
-          `file:${c.file1}`,
-          c.file1,
-          `${c.file1} <-> ${c.file2}`,
-          "write_test",
-          "integration",
-          `${c.cochanges} co-changes without shared tests`,
-        );
-      });
+    try {
+      const coupling = this.db.couplingAnalysis(3);
+      return coupling
+        .filter((c) => !c.sharedTests)
+        .map((c) => {
+          return this.makeSignal(
+            "coupling_gap",
+            `file:${c.file1}`,
+            c.file1,
+            `${c.file1} <-> ${c.file2}`,
+            "write_test",
+            "integration",
+            `${c.cochanges} co-changes without shared tests`,
+          );
+        });
+    } catch {
+      // Phase 2/3 tables (file_history, commit_log) may not exist yet
+      return [];
+    }
   }
 
   private detectChurnUntested(): DriftSignal[] {
-    const churn = this.db.churnAnalysis(90);
-    return churn
-      .filter((c) => !c.hasCoverage && c.changes >= 3)
-      .map((c) => {
-        return this.makeSignal(
-          "churn_untested",
-          `file:${c.filePath}`,
-          c.filePath,
-          c.filePath,
-          "write_test",
-          "unit",
-          `${c.changes} changes in last 90 days with no test coverage`,
-        );
-      });
+    try {
+      const churn = this.db.churnAnalysis(90);
+      return churn
+        .filter((c) => !c.hasCoverage && c.changes >= 3)
+        .map((c) => {
+          return this.makeSignal(
+            "churn_untested",
+            `file:${c.filePath}`,
+            c.filePath,
+            c.filePath,
+            "write_test",
+            "unit",
+            `${c.changes} changes in last 90 days with no test coverage`,
+          );
+        });
+    } catch {
+      // Phase 2/3 tables (file_history, commit_log) may not exist yet
+      return [];
+    }
   }
 
   private detectUiSpecNoE2e(): DriftSignal[] {

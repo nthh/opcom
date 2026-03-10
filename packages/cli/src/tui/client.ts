@@ -94,6 +94,9 @@ export class TuiClient {
   // Port conflict notifications (most recent per project/service)
   portConflicts: Array<{ projectId: string; serviceName: string; port: number; conflictsWith: import("@opcom/types").PortAllocation; timestamp: string }> = [];
 
+  // Workspace-level health (from WorkspaceEngine via station)
+  workspaceHealth: import("./health-data.js").WorkspaceHealthSummary | null = null;
+
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
@@ -614,6 +617,11 @@ export class TuiClient {
         if (this.portConflicts.length > 20) this.portConflicts.splice(0, this.portConflicts.length - 20);
         break;
       }
+    }
+
+    // Handle workspace_health event (new event type, cast needed for worktree builds)
+    if ((event as { type: string }).type === "workspace_health") {
+      this.workspaceHealth = (event as unknown as { health: import("./health-data.js").WorkspaceHealthSummary }).health;
     }
 
     // Notify handlers
