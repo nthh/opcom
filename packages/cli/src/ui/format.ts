@@ -1,4 +1,4 @@
-import type { StackInfo, GitInfo, AgentSession, WorkItem } from "@opcom/types";
+import type { StackInfo, GitInfo, AgentSession, WorkItem, ProjectCommand, AgentConstraint } from "@opcom/types";
 import type { ProjectStatus, ManagedProcess } from "@opcom/core";
 import type { DetectionResult } from "@opcom/types";
 
@@ -98,16 +98,39 @@ export function formatStatusDashboard(
       lines.push(`    Last commit: ${formatRelativeTime(git.lastCommitAt)}`);
     }
 
-    // In single-project view, show full ticket list
-    if (isSingleProject && projectTickets) {
-      const tickets = projectTickets.get(project.id) ?? [];
-      if (tickets.length > 0) {
+    // In single-project view, show profile and full ticket list
+    if (isSingleProject) {
+      // Profile: commands
+      const commands = project.profile?.commands;
+      if (commands && commands.length > 0) {
         lines.push("");
-        lines.push(`    ${BOLD}Tickets${RESET}`);
-        const sorted = [...tickets].sort((a, b) => a.priority - b.priority);
-        for (const t of sorted) {
-          const hasAgent = agents?.some((a) => a.workItemId === t.id && a.state !== "stopped") ?? false;
-          lines.push(`    ${formatWorkItemCli(t, hasAgent)}`);
+        lines.push(`    ${BOLD}Commands${RESET}`);
+        for (const cmd of commands) {
+          const desc = cmd.description ? `${DIM} — ${cmd.description}${RESET}` : "";
+          lines.push(`    ${CYAN}${cmd.name}${RESET}: ${cmd.command}${desc}`);
+        }
+      }
+
+      // Profile: agent constraints
+      const constraints = project.profile?.agentConstraints;
+      if (constraints && constraints.length > 0) {
+        lines.push("");
+        lines.push(`    ${BOLD}Agent Constraints${RESET}`);
+        for (const c of constraints) {
+          lines.push(`    ${YELLOW}${c.name}${RESET}: ${c.rule}`);
+        }
+      }
+
+      if (projectTickets) {
+        const tickets = projectTickets.get(project.id) ?? [];
+        if (tickets.length > 0) {
+          lines.push("");
+          lines.push(`    ${BOLD}Tickets${RESET}`);
+          const sorted = [...tickets].sort((a, b) => a.priority - b.priority);
+          for (const t of sorted) {
+            const hasAgent = agents?.some((a) => a.workItemId === t.id && a.state !== "stopped") ?? false;
+            lines.push(`    ${formatWorkItemCli(t, hasAgent)}`);
+          }
         }
       }
     }

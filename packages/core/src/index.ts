@@ -4,7 +4,7 @@ export type { LogLevel, Logger } from "./logger.js";
 
 export { detectProject } from "./detection/detect.js";
 export { detectGit } from "./detection/git.js";
-export { scanTickets, summarizeWorkItems, parseFrontmatter, parseTicketFile } from "./detection/tickets.js";
+export { scanTickets, summarizeWorkItems, parseFrontmatter, parseTicketFile, applyFieldMappings } from "./detection/tickets.js";
 export { detectSubProjects } from "./detection/services.js";
 export { mergeStacks } from "./detection/stack.js";
 export {

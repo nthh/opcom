@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { buildProjectProfile, buildContextPacket, contextPacketToMarkdown } from "@opcom/core";
-import type { ProjectConfig } from "@opcom/types";
+import { buildProjectProfile, buildContextPacket, contextPacketToMarkdown, applyFieldMappings, validateProjectConfig } from "@opcom/core";
+import type { ProjectConfig, WorkItem, FieldMapping } from "@opcom/types";
 
 function makeProject(overrides?: Partial<ProjectConfig>): ProjectConfig {
   return {
@@ -160,5 +160,283 @@ describe("buildContextPacket uses buildProjectProfile", () => {
     expect(packet.project.name).toBe("test-project");
     expect(packet.project.description).toBe("Test app");
     expect(packet.project.environments).toHaveLength(3);
+  });
+});
+
+describe("ProjectProfile with commands, fieldMappings, agentConstraints", () => {
+  it("includes commands from profile config", () => {
+    const project = makeProject({
+      profile: {
+        commands: [
+          { name: "build", command: "npm run build", description: "Build the project" },
+          { name: "test", command: "npx vitest run" },
+          { name: "dev", command: "npm run dev" },
+        ],
+      },
+    });
+    const profile = buildProjectProfile(project);
+
+    expect(profile.commands).toHaveLength(3);
+    expect(profile.commands![0]).toEqual({ name: "build", command: "npm run build", description: "Build the project" });
+    expect(profile.commands![1]).toEqual({ name: "test", command: "npx vitest run" });
+    expect(profile.commands![2]).toEqual({ name: "dev", command: "npm run dev" });
+  });
+
+  it("includes fieldMappings from profile config", () => {
+    const project = makeProject({
+      profile: {
+        fieldMappings: [
+          { field: "use-case", type: "use-case" as const, targetPath: "docs/use-cases/" },
+          { field: "component", type: "tag" as const },
+        ],
+      },
+    });
+    const profile = buildProjectProfile(project);
+
+    expect(profile.fieldMappings).toHaveLength(2);
+    expect(profile.fieldMappings![0].field).toBe("use-case");
+    expect(profile.fieldMappings![0].type).toBe("use-case");
+    expect(profile.fieldMappings![1].type).toBe("tag");
+  });
+
+  it("includes agentConstraints from profile config", () => {
+    const project = makeProject({
+      profile: {
+        agentConstraints: [
+          { name: "test-required", rule: "All changes must include tests" },
+          { name: "no-force-push", rule: "Never force push to main" },
+        ],
+      },
+    });
+    const profile = buildProjectProfile(project);
+
+    expect(profile.agentConstraints).toHaveLength(2);
+    expect(profile.agentConstraints![0]).toEqual({ name: "test-required", rule: "All changes must include tests" });
+    expect(profile.agentConstraints![1]).toEqual({ name: "no-force-push", rule: "Never force push to main" });
+  });
+
+  it("omits commands/fieldMappings/agentConstraints when profile absent", () => {
+    const project = makeProject();
+    const profile = buildProjectProfile(project);
+
+    expect(profile.commands).toBeUndefined();
+    expect(profile.fieldMappings).toBeUndefined();
+    expect(profile.agentConstraints).toBeUndefined();
+  });
+
+  it("omits commands/fieldMappings/agentConstraints when arrays are empty", () => {
+    const project = makeProject({
+      profile: { commands: [], fieldMappings: [], agentConstraints: [] },
+    });
+    const profile = buildProjectProfile(project);
+
+    expect(profile.commands).toBeUndefined();
+    expect(profile.fieldMappings).toBeUndefined();
+    expect(profile.agentConstraints).toBeUndefined();
+  });
+});
+
+describe("contextPacketToMarkdown with commands and constraints", () => {
+  it("renders commands section", async () => {
+    const project = makeProject({
+      profile: {
+        commands: [
+          { name: "build", command: "npm run build", description: "Build the project" },
+          { name: "test", command: "npx vitest run" },
+        ],
+      },
+    });
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("## Commands");
+    expect(md).toContain("`build`: `npm run build` — Build the project");
+    expect(md).toContain("`test`: `npx vitest run`");
+  });
+
+  it("renders agent constraints section", async () => {
+    const project = makeProject({
+      profile: {
+        agentConstraints: [
+          { name: "test-required", rule: "All changes must include tests" },
+        ],
+      },
+    });
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("## Agent Constraints");
+    expect(md).toContain("**test-required**: All changes must include tests");
+  });
+
+  it("omits commands/constraints sections when empty", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).not.toContain("## Commands");
+    expect(md).not.toContain("## Agent Constraints");
+  });
+});
+
+describe("profile persists in project YAML", () => {
+  it("validateProjectConfig preserves profile with commands", () => {
+    const raw = {
+      id: "my-project",
+      path: "/tmp/my-project",
+      profile: {
+        commands: [
+          { name: "build", command: "npm run build" },
+          { name: "test", command: "npx vitest run" },
+        ],
+        fieldMappings: [
+          { field: "use-case", type: "use-case", targetPath: "docs/use-cases/" },
+        ],
+        agentConstraints: [
+          { name: "test-required", rule: "All changes must include tests" },
+        ],
+      },
+    };
+    const config = validateProjectConfig(raw);
+
+    expect(config.profile).toBeDefined();
+    expect(config.profile!.commands).toHaveLength(2);
+    expect(config.profile!.commands![0].name).toBe("build");
+    expect(config.profile!.fieldMappings).toHaveLength(1);
+    expect(config.profile!.fieldMappings![0].type).toBe("use-case");
+    expect(config.profile!.agentConstraints).toHaveLength(1);
+    expect(config.profile!.agentConstraints![0].name).toBe("test-required");
+  });
+
+  it("validateProjectConfig returns undefined profile when absent", () => {
+    const raw = { id: "my-project", path: "/tmp/my-project" };
+    const config = validateProjectConfig(raw);
+
+    expect(config.profile).toBeUndefined();
+  });
+
+  it("validateProjectConfig filters invalid profile entries", () => {
+    const raw = {
+      id: "my-project",
+      path: "/tmp/my-project",
+      profile: {
+        commands: [
+          { name: "build", command: "npm run build" },
+          { name: "bad" }, // missing command
+          "not-an-object",
+        ],
+        fieldMappings: [
+          { field: "use-case", type: "use-case" },
+          { field: "bad", type: "invalid-type" }, // invalid type
+        ],
+        agentConstraints: [
+          { name: "test-required", rule: "test rule" },
+          { name: "missing-rule" }, // missing rule
+        ],
+      },
+    };
+    const config = validateProjectConfig(raw);
+
+    expect(config.profile!.commands).toHaveLength(1);
+    expect(config.profile!.fieldMappings).toHaveLength(1);
+    expect(config.profile!.agentConstraints).toHaveLength(1);
+  });
+});
+
+describe("applyFieldMappings", () => {
+  function makeWorkItem(overrides?: Partial<WorkItem>): WorkItem {
+    return {
+      id: "test-ticket",
+      title: "Test ticket",
+      status: "open",
+      priority: 2,
+      type: "feature",
+      filePath: "/tmp/test-ticket/README.md",
+      deps: [],
+      links: ["docs/spec/adapters.md"],
+      tags: {},
+      ...overrides,
+    };
+  }
+
+  it("converts use-case tag values to links", () => {
+    const items = [
+      makeWorkItem({
+        tags: { "use-case": ["authentication", "onboarding"] },
+      }),
+    ];
+    const mappings: FieldMapping[] = [
+      { field: "use-case", type: "use-case", targetPath: "docs/use-cases/" },
+    ];
+
+    const result = applyFieldMappings(items, mappings);
+
+    expect(result[0].links).toContain("docs/spec/adapters.md"); // original link preserved
+    expect(result[0].links).toContain("docs/use-cases/authentication.md");
+    expect(result[0].links).toContain("docs/use-cases/onboarding.md");
+    expect(result[0].tags["use-case"]).toBeUndefined(); // removed from tags
+  });
+
+  it("uses default targetPath when not specified", () => {
+    const items = [
+      makeWorkItem({ tags: { "use-case": ["login"] } }),
+    ];
+    const mappings: FieldMapping[] = [
+      { field: "use-case", type: "use-case" },
+    ];
+
+    const result = applyFieldMappings(items, mappings);
+
+    expect(result[0].links).toContain("docs/use-cases/login.md");
+  });
+
+  it("does not duplicate existing links", () => {
+    const items = [
+      makeWorkItem({
+        links: ["docs/use-cases/auth.md"],
+        tags: { "use-case": ["auth"] },
+      }),
+    ];
+    const mappings: FieldMapping[] = [
+      { field: "use-case", type: "use-case" },
+    ];
+
+    const result = applyFieldMappings(items, mappings);
+
+    const authLinks = result[0].links.filter((l) => l === "docs/use-cases/auth.md");
+    expect(authLinks).toHaveLength(1);
+  });
+
+  it("ignores tag-type field mappings (leaves tags alone)", () => {
+    const items = [
+      makeWorkItem({ tags: { component: ["frontend"] } }),
+    ];
+    const mappings: FieldMapping[] = [
+      { field: "component", type: "tag" },
+    ];
+
+    const result = applyFieldMappings(items, mappings);
+
+    expect(result[0].tags.component).toEqual(["frontend"]);
+    expect(result[0].links).toEqual(["docs/spec/adapters.md"]); // unchanged
+  });
+
+  it("returns items unchanged when no mappings provided", () => {
+    const items = [makeWorkItem({ tags: { "use-case": ["test"] } })];
+
+    const result = applyFieldMappings(items, []);
+    expect(result).toEqual(items);
+  });
+
+  it("handles items without matching tag fields", () => {
+    const items = [makeWorkItem({ tags: { component: ["api"] } })];
+    const mappings: FieldMapping[] = [
+      { field: "use-case", type: "use-case" },
+    ];
+
+    const result = applyFieldMappings(items, mappings);
+
+    expect(result[0].tags.component).toEqual(["api"]);
+    expect(result[0].links).toEqual(["docs/spec/adapters.md"]);
   });
 });

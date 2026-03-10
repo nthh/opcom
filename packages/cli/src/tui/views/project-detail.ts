@@ -365,6 +365,21 @@ function renderStackPanel(
     rows.push({ type: "item", item, itemIndex: itemIdx++ });
   }
 
+  // Profile section: commands and agent constraints
+  const profile = config.profile;
+  if (profile?.commands && profile.commands.length > 0) {
+    rows.push({ type: "header", text: "Commands" });
+    for (const cmd of profile.commands) {
+      rows.push({ type: "item", item: { name: `${cmd.name}: ${cmd.command}`, category: "service" }, itemIndex: itemIdx++ });
+    }
+  }
+  if (profile?.agentConstraints && profile.agentConstraints.length > 0) {
+    rows.push({ type: "header", text: "Agent Constraints" });
+    for (const c of profile.agentConstraints) {
+      rows.push({ type: "item", item: { name: `${c.name}: ${c.rule}`, category: "service" }, itemIndex: itemIdx++ });
+    }
+  }
+
   for (let i = 0; i < maxRows && i + scroll < rows.length; i++) {
     const rowIdx = i + scroll;
     const row = rows[rowIdx];

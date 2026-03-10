@@ -31,16 +31,38 @@ A `ProjectProfile` is the operational view of a project — the subset of `Proje
 interface ProjectProfile {
   name: string
   path: string
-  description?: string           // what the project is about
-  stack: StackInfo               // languages, frameworks, infra
-  testing: TestingConfig | null  // how to run tests
-  linting: LintConfig[]          // how to lint
-  services: ServiceDefinition[]  // runnable services
+  description?: string              // what the project is about
+  stack: StackInfo                  // languages, frameworks, infra
+  testing: TestingConfig | null     // how to run tests
+  linting: LintConfig[]             // how to lint
+  services: ServiceDefinition[]     // runnable services
   environments?: EnvironmentConfig[] // dev, staging, prod
+  commands?: ProjectCommand[]       // named project commands (build, test, dev, etc.)
+  fieldMappings?: FieldMapping[]    // map ticket fields to WorkItem properties
+  agentConstraints?: AgentConstraint[] // rules governing agent behavior
+}
+
+interface ProjectCommand {
+  name: string       // e.g. "build", "test", "dev"
+  command: string    // e.g. "npm run build"
+  description?: string
+}
+
+interface FieldMapping {
+  field: string                 // ticket frontmatter field name
+  type: "use-case" | "tag"     // "use-case" creates links, "tag" stays as tags
+  targetPath?: string          // path prefix for use-case links (default: "docs/use-cases/")
+}
+
+interface AgentConstraint {
+  name: string   // constraint identifier
+  rule: string   // human-readable constraint description
 }
 ```
 
 Built by `buildProjectProfile(config: ProjectConfig)` — a pure projection, no I/O. Used as the `project` field in `ContextPacket`.
+
+The `commands`, `fieldMappings`, and `agentConstraints` fields are persisted in the project YAML config under a `profile` section. Field mappings of type `use-case` cause ticket frontmatter values to become links on WorkItems (via `applyFieldMappings()`) rather than remaining as tags.
 
 ### Context Packets
 

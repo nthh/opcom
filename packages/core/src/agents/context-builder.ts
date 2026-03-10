@@ -17,6 +17,9 @@ export function buildProjectProfile(project: ProjectConfig): ProjectProfile {
     linting: project.linting,
     services: project.services,
     environments: project.environments,
+    ...(project.profile?.commands?.length ? { commands: project.profile.commands } : {}),
+    ...(project.profile?.fieldMappings?.length ? { fieldMappings: project.profile.fieldMappings } : {}),
+    ...(project.profile?.agentConstraints?.length ? { agentConstraints: project.profile.agentConstraints } : {}),
   };
 }
 
@@ -207,6 +210,25 @@ export function contextPacketToMarkdown(
     for (const env of packet.project.environments) {
       const url = env.url ? ` — ${env.url}` : "";
       lines.push(`- ${env.name} (${env.type})${url}`);
+    }
+    lines.push("");
+  }
+
+  // Commands
+  if (packet.project.commands && packet.project.commands.length > 0) {
+    lines.push(`## Commands`);
+    for (const cmd of packet.project.commands) {
+      const desc = cmd.description ? ` — ${cmd.description}` : "";
+      lines.push(`- \`${cmd.name}\`: \`${cmd.command}\`${desc}`);
+    }
+    lines.push("");
+  }
+
+  // Agent Constraints
+  if (packet.project.agentConstraints && packet.project.agentConstraints.length > 0) {
+    lines.push(`## Agent Constraints`);
+    for (const constraint of packet.project.agentConstraints) {
+      lines.push(`- **${constraint.name}**: ${constraint.rule}`);
     }
     lines.push("");
   }
