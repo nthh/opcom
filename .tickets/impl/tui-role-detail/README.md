@@ -1,7 +1,7 @@
 ---
 id: tui-role-detail
 title: "TUI: Show role definition details on agent focus view"
-status: open
+status: closed
 type: feature
 priority: 3
 deps: []
