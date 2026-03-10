@@ -1,7 +1,7 @@
 ---
 id: file-ticket-traceability
 title: "Hybrid file-ticket traceability: SQLite live index + frontmatter on close"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-10
@@ -47,13 +47,13 @@ links:
 
 ## Tasks
 
-- [ ] Add `file_ticket_map` table to EventStore schema and migration (deps: none)
-- [ ] Populate `file_ticket_map` when `insertChangeset()` is called — extract file paths from changeset
-- [ ] Add `queryFileTickets(filePath)` method to EventStore — returns ticket IDs that changed a file
-- [ ] Add `queryTicketFiles(ticketId)` method to EventStore — aggregated file list across all changesets
-- [ ] Stamp `files:` and `commits:` into ticket frontmatter on close in `updateTicketStatusSafe()` (deps: queryTicketFiles)
-- [ ] Enhance `opcom trace` to include "changed by" section from `file_ticket_map` (deps: queryFileTickets)
-- [ ] Tests: file_ticket_map population, frontmatter stamping, trace output with changeset data
+- [x] Add `file_ticket_map` table to EventStore schema and migration (deps: none)
+- [x] Populate `file_ticket_map` when `insertChangeset()` is called — extract file paths from changeset
+- [x] Add `queryFileTickets(filePath)` method to EventStore — returns ticket IDs that changed a file
+- [x] Add `queryTicketFiles(ticketId)` method to EventStore — aggregated file list across all changesets
+- [x] Stamp `files:` and `commits:` into ticket frontmatter on close in `updateTicketStatusSafe()` (deps: queryTicketFiles)
+- [x] Enhance `opcom trace` to include "changed by" section from `file_ticket_map` (deps: queryFileTickets)
+- [x] Tests: file_ticket_map population, frontmatter stamping, trace output with changeset data
 
 ## Notes
 

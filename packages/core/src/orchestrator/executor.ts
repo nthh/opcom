@@ -2565,6 +2565,25 @@ export class Executor {
       const ticket = tickets.find((t) => t.id === step.ticketId);
       if (ticket) {
         await updateTicketStatus(ticket.filePath, newStatus);
+
+        // Stamp files + commits into frontmatter on close
+        if (newStatus === "closed" && this.eventStore) {
+          try {
+            const ticketFiles = this.eventStore.queryTicketFiles(step.ticketId);
+            const changesets = this.eventStore.loadChangesets({ ticketId: step.ticketId });
+            const commitShas = [...new Set(changesets.flatMap((c) => c.commitShas))];
+            if (ticketFiles.length > 0 || commitShas.length > 0) {
+              await stampTicketFiles(
+                ticket.filePath,
+                ticketFiles.map((f) => ({ path: f.filePath, status: f.changeStatus })),
+                commitShas,
+              );
+            }
+          } catch (stampErr) {
+            log.warn("failed to stamp ticket files", { ticketId: step.ticketId, error: String(stampErr) });
+          }
+        }
+
         // Stage and commit the ticket status change so it's not left as dirty state
         try {
           await execFileAsync("git", ["add", ticket.filePath], { cwd: project.path });
@@ -2715,4 +2734,46 @@ export async function updateTicketStatus(ticketPath: string, newStatus: string):
   if (updated !== content) {
     await writeFile(ticketPath, updated, "utf-8");
   }
+}
+
+/**
+ * Stamp files: and commits: into ticket frontmatter from changeset data.
+ * Called when a ticket is closed to create a durable record of what changed.
+ */
+export async function stampTicketFiles(
+  ticketPath: string,
+  files: Array<{ path: string; status: string }>,
+  commits: string[],
+): Promise<void> {
+  const content = await readFile(ticketPath, "utf-8");
+  const fmEnd = content.indexOf("---", 4); // second --- delimiter
+  if (fmEnd === -1) return;
+
+  // Remove existing files: and commits: blocks if present
+  let frontmatter = content.slice(0, fmEnd);
+  frontmatter = frontmatter.replace(/^files:\n(?:  - .*\n)*/gm, "");
+  frontmatter = frontmatter.replace(/^commits:\n(?:  - .*\n)*/gm, "");
+  // Also remove single-line empty arrays
+  frontmatter = frontmatter.replace(/^files:\s*\[]\n/gm, "");
+  frontmatter = frontmatter.replace(/^commits:\s*\[]\n/gm, "");
+
+  // Build new fields
+  let newFields = "";
+  if (files.length > 0) {
+    newFields += "files:\n";
+    for (const f of files) {
+      newFields += `  - path: ${f.path}\n    status: ${f.status}\n`;
+    }
+  }
+  if (commits.length > 0) {
+    newFields += "commits:\n";
+    for (const c of commits) {
+      newFields += `  - ${c}\n`;
+    }
+  }
+
+  if (!newFields) return;
+
+  const updated = frontmatter + newFields + content.slice(fmEnd);
+  await writeFile(ticketPath, updated, "utf-8");
 }

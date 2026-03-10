@@ -97,6 +97,133 @@ describe("EventStore — Changesets", () => {
   });
 });
 
+describe("EventStore — File-Ticket Traceability", () => {
+  let store: EventStore;
+
+  beforeEach(() => {
+    store = new EventStore(":memory:");
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  it("populates file_ticket_map when changeset is inserted", () => {
+    store.insertChangeset({
+      sessionId: "s1",
+      ticketId: "auth-setup",
+      projectId: "proj",
+      commitShas: ["abc"],
+      files: [
+        { path: "src/auth/session.ts", status: "added", insertions: 50, deletions: 0 },
+        { path: "src/auth/middleware.ts", status: "modified", insertions: 10, deletions: 5 },
+      ],
+      totalInsertions: 60,
+      totalDeletions: 5,
+      timestamp: "2026-03-10T10:00:00Z",
+    });
+
+    const results = store.queryFileTickets("src/auth/session.ts");
+    expect(results).toHaveLength(1);
+    expect(results[0].ticketId).toBe("auth-setup");
+    expect(results[0].changeStatus).toBe("added");
+  });
+
+  it("queryFileTickets returns multiple tickets for same file", () => {
+    store.insertChangeset({
+      sessionId: "s1",
+      ticketId: "auth-setup",
+      projectId: "proj",
+      commitShas: ["abc"],
+      files: [{ path: "src/shared.ts", status: "added", insertions: 10, deletions: 0 }],
+      totalInsertions: 10,
+      totalDeletions: 0,
+      timestamp: "2026-03-10T10:00:00Z",
+    });
+    store.insertChangeset({
+      sessionId: "s2",
+      ticketId: "auth-bugfix",
+      projectId: "proj",
+      commitShas: ["def"],
+      files: [{ path: "src/shared.ts", status: "modified", insertions: 5, deletions: 2 }],
+      totalInsertions: 5,
+      totalDeletions: 2,
+      timestamp: "2026-03-11T10:00:00Z",
+    });
+
+    const results = store.queryFileTickets("src/shared.ts");
+    expect(results).toHaveLength(2);
+    // Most recent first
+    expect(results[0].ticketId).toBe("auth-bugfix");
+    expect(results[1].ticketId).toBe("auth-setup");
+  });
+
+  it("queryTicketFiles returns all files changed by a ticket", () => {
+    store.insertChangeset({
+      sessionId: "s1",
+      ticketId: "big-feature",
+      projectId: "proj",
+      commitShas: ["abc"],
+      files: [
+        { path: "src/api.ts", status: "added", insertions: 100, deletions: 0 },
+        { path: "src/types.ts", status: "modified", insertions: 20, deletions: 5 },
+        { path: "src/old.ts", status: "deleted", insertions: 0, deletions: 30 },
+      ],
+      totalInsertions: 120,
+      totalDeletions: 35,
+      timestamp: "2026-03-10T10:00:00Z",
+    });
+
+    const files = store.queryTicketFiles("big-feature");
+    expect(files).toHaveLength(3);
+    // Sorted by file_path ASC
+    expect(files[0].filePath).toBe("src/api.ts");
+    expect(files[0].changeStatus).toBe("added");
+    expect(files[1].filePath).toBe("src/old.ts");
+    expect(files[1].changeStatus).toBe("deleted");
+    expect(files[2].filePath).toBe("src/types.ts");
+    expect(files[2].changeStatus).toBe("modified");
+  });
+
+  it("queryTicketFiles aggregates across multiple changesets", () => {
+    // Two sessions for same ticket
+    store.insertChangeset({
+      sessionId: "s1",
+      ticketId: "multi-session",
+      projectId: "proj",
+      commitShas: ["abc"],
+      files: [{ path: "src/a.ts", status: "added", insertions: 10, deletions: 0 }],
+      totalInsertions: 10,
+      totalDeletions: 0,
+      timestamp: "2026-03-10T10:00:00Z",
+    });
+    store.insertChangeset({
+      sessionId: "s2",
+      ticketId: "multi-session",
+      projectId: "proj",
+      commitShas: ["def"],
+      files: [
+        { path: "src/a.ts", status: "modified", insertions: 5, deletions: 2 },
+        { path: "src/b.ts", status: "added", insertions: 20, deletions: 0 },
+      ],
+      totalInsertions: 25,
+      totalDeletions: 2,
+      timestamp: "2026-03-11T10:00:00Z",
+    });
+
+    const files = store.queryTicketFiles("multi-session");
+    expect(files).toHaveLength(2);
+    // src/a.ts appeared twice — latest status wins (modified)
+    expect(files[0]).toMatchObject({ filePath: "src/a.ts", changeStatus: "modified" });
+    expect(files[1]).toMatchObject({ filePath: "src/b.ts", changeStatus: "added" });
+  });
+
+  it("returns empty arrays for unknown file/ticket", () => {
+    expect(store.queryFileTickets("nonexistent.ts")).toHaveLength(0);
+    expect(store.queryTicketFiles("nonexistent")).toHaveLength(0);
+  });
+});
+
 function makeChangeset(sessionId: string, ticketId: string, projectId: string): Changeset {
   return {
     sessionId,

@@ -299,7 +299,7 @@ export {
   getChildTicketIds,
   isParentComplete,
 } from "./orchestrator/decomposition.js";
-export { Executor, updateTicketStatus } from "./orchestrator/executor.js";
+export { Executor, updateTicketStatus, stampTicketFiles } from "./orchestrator/executor.js";
 export { WorktreeManager } from "./orchestrator/worktree.js";
 export type { WorktreeInfo, MergeResult, ExecResult } from "./orchestrator/worktree.js";
 export { commitStepChanges, captureChangeset, getTicketDiff, parseNumstat } from "./orchestrator/git-ops.js";

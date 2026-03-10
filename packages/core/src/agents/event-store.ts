@@ -77,6 +77,9 @@ export class EventStore {
   private stmtInsertChangeset!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtLoadChangesetsByTicket!: ReturnType<BetterSqlite3Database["prepare"]>;
   private stmtLoadChangesetsBySession!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtInsertFileTicket!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtQueryFileTickets!: ReturnType<BetterSqlite3Database["prepare"]>;
+  private stmtQueryTicketFiles!: ReturnType<BetterSqlite3Database["prepare"]>;
 
   constructor(dbPath?: string) {
     const Database = require("better-sqlite3");
@@ -155,6 +158,18 @@ export class EventStore {
 
       CREATE INDEX IF NOT EXISTS idx_changesets_ticket_id ON changesets(ticket_id);
       CREATE INDEX IF NOT EXISTS idx_changesets_session_id ON changesets(session_id);
+
+      CREATE TABLE IF NOT EXISTS file_ticket_map (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_path TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        change_status TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ftm_file_path ON file_ticket_map(file_path);
+      CREATE INDEX IF NOT EXISTS idx_ftm_ticket_id ON file_ticket_map(ticket_id);
     `);
   }
 
@@ -221,6 +236,27 @@ export class EventStore {
 
     this.stmtLoadChangesetsBySession = this.db.prepare(`
       SELECT * FROM changesets WHERE session_id = ? ORDER BY id ASC
+    `);
+
+    this.stmtInsertFileTicket = this.db.prepare(`
+      INSERT INTO file_ticket_map (file_path, ticket_id, project_id, change_status, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+
+    this.stmtQueryFileTickets = this.db.prepare(`
+      SELECT DISTINCT ticket_id, project_id, change_status, MAX(timestamp) as latest
+      FROM file_ticket_map
+      WHERE file_path = ?
+      GROUP BY ticket_id
+      ORDER BY latest DESC
+    `);
+
+    this.stmtQueryTicketFiles = this.db.prepare(`
+      SELECT file_path, change_status, MAX(timestamp) as latest
+      FROM file_ticket_map
+      WHERE ticket_id = ?
+      GROUP BY file_path
+      ORDER BY file_path ASC
     `);
   }
 
@@ -581,6 +617,17 @@ export class EventStore {
         changeset.totalDeletions,
         changeset.timestamp,
       );
+
+      // Populate file_ticket_map for reverse lookups
+      for (const file of changeset.files) {
+        this.stmtInsertFileTicket.run(
+          file.path,
+          changeset.ticketId,
+          changeset.projectId,
+          file.status,
+          changeset.timestamp,
+        );
+      }
     } catch (err) {
       log.warn("failed to insert changeset", { ticketId: changeset.ticketId, error: String(err) });
     }
@@ -622,6 +669,36 @@ export class EventStore {
       totalInsertions: row.total_insertions,
       totalDeletions: row.total_deletions,
       timestamp: row.timestamp,
+    }));
+  }
+
+  // --- File-ticket reverse index ---
+
+  queryFileTickets(filePath: string): Array<{ ticketId: string; projectId: string; changeStatus: string; latest: string }> {
+    const rows = this.stmtQueryFileTickets.all(filePath) as Array<{
+      ticket_id: string;
+      project_id: string;
+      change_status: string;
+      latest: string;
+    }>;
+    return rows.map((row) => ({
+      ticketId: row.ticket_id,
+      projectId: row.project_id,
+      changeStatus: row.change_status,
+      latest: row.latest,
+    }));
+  }
+
+  queryTicketFiles(ticketId: string): Array<{ filePath: string; changeStatus: string; latest: string }> {
+    const rows = this.stmtQueryTicketFiles.all(ticketId) as Array<{
+      file_path: string;
+      change_status: string;
+      latest: string;
+    }>;
+    return rows.map((row) => ({
+      filePath: row.file_path,
+      changeStatus: row.change_status,
+      latest: row.latest,
     }));
   }
 

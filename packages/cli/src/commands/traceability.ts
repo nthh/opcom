@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename, relative, resolve } from "node:path";
-import { scanTickets, parseFrontmatter } from "@opcom/core";
+import { scanTickets, parseFrontmatter, EventStore } from "@opcom/core";
 
 // --- Shared helpers ---
 
@@ -359,10 +359,28 @@ export async function runTrace(targetPath: string): Promise<void> {
     }
   }
 
-  if (coveringSpecs.length === 0 && coveringTickets.length === 0 && coveringTests.length === 0) {
+  // Query changeset data for tickets that changed this file
+  let changingTickets: Array<{ ticketId: string; changeStatus: string; latest: string }> = [];
+  try {
+    const eventStore = new EventStore();
+    changingTickets = eventStore.queryFileTickets(relTarget);
+    eventStore.close();
+  } catch {
+    // EventStore may not be available (no better-sqlite3) — skip silently
+  }
+
+  if (changingTickets.length > 0) {
+    console.log(`\n  Tickets (changed this file):`);
+    for (const ct of changingTickets) {
+      console.log(`    ${ct.ticketId.padEnd(30)} ${ct.changeStatus.padEnd(10)} ${ct.latest.slice(0, 10)}`);
+    }
+  }
+
+  const totalCoverage = coveringSpecs.length + coveringTickets.length + coveringTests.length + changingTickets.length;
+  if (totalCoverage === 0) {
     console.log(`\n  No coverage found. This file is not linked from any spec or ticket.`);
   } else {
-    console.log(`\n  Total: ${coveringSpecs.length} spec(s), ${coveringTickets.length} ticket(s), ${coveringTests.length} test file(s)`);
+    console.log(`\n  Total: ${coveringSpecs.length} spec(s), ${coveringTickets.length} ticket(s) linked, ${changingTickets.length} ticket(s) changed, ${coveringTests.length} test file(s)`);
   }
   console.log("");
 }
