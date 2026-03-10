@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, extname } from "node:path";
 import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence, VerificationMode } from "@opcom/types";
 
 export interface TicketDetectionResult {
@@ -40,7 +40,8 @@ export async function scanTickets(projectPath: string): Promise<WorkItem[]> {
 
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const readmePath = join(implDir, entry.name, "README.md");
+    const dirPath = join(implDir, entry.name);
+    const readmePath = join(dirPath, "README.md");
     if (!existsSync(readmePath)) continue;
 
     try {
@@ -49,6 +50,36 @@ export async function scanTickets(projectPath: string): Promise<WorkItem[]> {
       if (item) items.push(item);
     } catch {
       // Skip unreadable tickets
+    }
+
+    // Scan sibling .md files as sub-tickets
+    try {
+      const dirEntries = await readdir(dirPath, { withFileTypes: true });
+      for (const fileEntry of dirEntries) {
+        if (!fileEntry.isFile()) continue;
+        if (fileEntry.name === "README.md") continue;
+        if (extname(fileEntry.name) !== ".md") continue;
+
+        const filePath = join(dirPath, fileEntry.name);
+        try {
+          const content = await readFile(filePath, "utf-8");
+          // Skip sibling .md files without frontmatter (not tickets)
+          if (!parseFrontmatter(content)) continue;
+          const fileBaseName = basename(fileEntry.name, ".md");
+          const item = parseTicketFile(content, filePath, fileBaseName);
+          if (item) {
+            // Infer parent from directory name if not set by frontmatter
+            if (!item.parent) {
+              item.parent = entry.name;
+            }
+            items.push(item);
+          }
+        } catch {
+          // Skip unreadable sub-ticket files
+        }
+      }
+    } catch {
+      // Skip unreadable directories
     }
   }
 
@@ -78,7 +109,9 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     priority: typeof frontmatter.priority === "number" ? frontmatter.priority : 2,
     type: String(frontmatter.type ?? "feature"),
     filePath,
-    parent: typeof frontmatter.milestone === "string" ? frontmatter.milestone : undefined,
+    parent: typeof frontmatter.dir === "string" ? frontmatter.dir
+      : typeof frontmatter.milestone === "string" ? frontmatter.milestone
+      : undefined,
     created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,
     due: typeof frontmatter.due === "string" ? frontmatter.due : undefined,
     scheduled: typeof frontmatter.scheduled === "string" ? frontmatter.scheduled : undefined,
