@@ -1,3 +1,10 @@
+export interface Subtask {
+  id: string;
+  title: string;
+  parallel: boolean;
+  deps: string[];
+}
+
 export interface WorkItem {
   id: string;
   title: string;
@@ -16,6 +23,7 @@ export interface WorkItem {
   team?: string;
   verification?: import("./plan.js").VerificationMode;
   outputs?: string[];
+  subtasks?: Subtask[];
 }
 
 export interface WorkSummary {

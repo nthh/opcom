@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, basename, extname } from "node:path";
 import type { WorkSystemInfo, WorkItem, WorkSummary, DetectionEvidence, VerificationMode, FieldMapping } from "@opcom/types";
+import { extractSubtasks } from "../orchestrator/planner.js";
 
 export interface TicketDetectionResult {
   workSystem: WorkSystemInfo;
@@ -88,6 +89,9 @@ export async function scanTickets(projectPath: string): Promise<WorkItem[]> {
 
 export function parseTicketFile(content: string, filePath: string, dirName: string): WorkItem | null {
   const frontmatter = parseFrontmatter(content);
+  const body = extractBody(content);
+  const subtasks = body ? extractSubtasks(body) : [];
+
   if (!frontmatter) {
     return {
       id: dirName,
@@ -99,6 +103,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
       deps: [],
       links: [],
       tags: {},
+      ...(subtasks.length > 0 ? { subtasks } : {}),
     };
   }
 
@@ -122,7 +127,14 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     team: typeof frontmatter.team === "string" ? frontmatter.team : undefined,
     verification: parseVerificationMode(frontmatter.verification),
     outputs: Array.isArray(frontmatter.outputs) ? frontmatter.outputs.map(String) : undefined,
+    ...(subtasks.length > 0 ? { subtasks } : {}),
   };
+}
+
+function extractBody(content: string): string {
+  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
+  if (fmEnd) return content.slice(fmEnd[0].length);
+  return content;
 }
 
 const VALID_VERIFICATION_MODES: Set<string> = new Set([

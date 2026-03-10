@@ -283,6 +283,61 @@ private async startReadySteps(): Promise<void> {
 
 **Graph unavailable fallback.** If the context graph hasn't been built for a project, the executor skips overlap detection and starts all ready steps (current behavior). No graph = no file data = no overlap to detect.
 
+### Plan Strategy
+
+The `strategy` field on `OrchestratorConfig` controls how the executor distributes agents across ready steps. Three strategies are available:
+
+**spread** — Distribute agents across different tracks. Picks at most one ready step per track before doubling up. Maximizes breadth across feature areas.
+
+Algorithm: Group ready steps by track. Round-robin pick one from each track (sorted by priority). Continue rounds until available slots are filled.
+
+**swarm** — Focus all available agents on the fewest tracks possible. Picks all ready steps from the highest-priority track first, then moves to the next. Maximizes depth and throughput on one area before moving on.
+
+Algorithm: Group ready steps by track, sort tracks by priority. Pick all ready steps from the first track, then the next, until available slots are filled.
+
+**mixed** (default) — Current behavior. Pick highest-priority ready steps regardless of track distribution. No track-level scheduling.
+
+```typescript
+type PlanStrategy = "spread" | "swarm" | "mixed";
+
+interface OrchestratorConfig {
+  // ... existing fields ...
+  strategy: PlanStrategy;          // default "mixed"
+}
+```
+
+Strategy is applied after priority sorting and before file-overlap filtering. File-overlap rules still apply regardless of strategy — if two steps from the same track overlap on files, the second is held even under swarm.
+
+#### Subtask Decomposition
+
+Tickets can define subtasks in their body using markdown task lists:
+
+```markdown
+- [ ] Set up database schema (parallel)
+- [ ] Implement API endpoints (deps: set-up-database-schema)
+- [ ] Write integration tests
+```
+
+Markers:
+- `(parallel)` — subtask runs concurrently with no automatic dependencies
+- `(deps: id-a, id-b)` — explicit dependencies on other subtask IDs (slugified titles)
+- No marker — sequential default: depends on the previous subtask in the list
+
+`extractSubtasks(body)` parses these lines into structured `Subtask` objects with `{ id, title, parallel, deps }`.
+
+**Swarm decomposition:** In `swarm` and `mixed` strategies, tickets with subtasks are decomposed during `computePlan`. Each subtask becomes its own plan step (ID: `parentTicketId/subtaskId`). The parent ticket gets no step — only subtasks are executable.
+
+- Subtask `blockedBy` reflects parsed deps (mapped to `parentTicketId/depId`)
+- Parallel subtasks with no deps inherit the parent's external `blockedBy` and are all `ready`
+- Other steps depending on the parent are rewritten to depend on the leaf subtask steps
+- Parallel subtasks all launch up to `maxConcurrentAgents`
+
+**Mixed mode:** Tickets with subtasks decompose (swarm behavior); tickets without subtasks schedule normally (priority-based).
+
+**Parent lifecycle:** When all subtask steps complete (done/skipped), the executor closes the parent ticket via `ticketTransitions`.
+
+**Depth-based stages:** In swarm mode, `computeDepthStages` groups steps by dependency depth instead of track. Depth 0 (no deps) → stage 0, depth 1 → stage 1, etc. This ensures stages reflect the natural parallelism within swarmed subtasks.
+
 ### Starting a Step
 
 When the executor starts a step:

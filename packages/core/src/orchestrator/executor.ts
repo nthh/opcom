@@ -23,7 +23,7 @@ import type {
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
-import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary, baseTicketId } from "./planner.js";
+import { recomputePlan, computeStages, computeDepthStages, buildExplicitStages, computeStageSummary, baseTicketId, applyStrategy } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
@@ -1877,6 +1877,10 @@ export class Executor {
     // Refresh ticket state from disk
     const ticketSets = await this.loadCurrentTickets();
     this.plan = recomputePlan(this.plan, ticketSets);
+
+    // Close parent tickets whose subtask steps are all done
+    await this.closeCompletedSubtaskParents();
+
     await savePlan(this.plan);
 
     if (this.plan.status === "executing") {
@@ -1941,12 +1945,15 @@ export class Executor {
     }
 
     // Sort ready steps: lower priority number first, then fewer blockedBy, then array order
-    const sorted = [...ready].sort((a, b) => {
+    const prioritySorted = [...ready].sort((a, b) => {
       const pa = this.getStepPriority(a);
       const pb = this.getStepPriority(b);
       if (pa !== pb) return pa - pb;
       return a.blockedBy.length - b.blockedBy.length;
     });
+
+    // Apply strategy-based reordering (spread/swarm/mixed)
+    const sorted = applyStrategy(prioritySorted, this.plan.config.strategy);
 
     // Collect files claimed by active steps
     const claimedFiles = new Set<string>();
@@ -2164,6 +2171,8 @@ export class Executor {
   private initializeStages(): void {
     if (this.plan.config.stages && this.plan.config.stages.length > 0) {
       this.plan.stages = buildExplicitStages(this.plan.steps, this.plan.config.stages);
+    } else if (this.plan.config.strategy === "swarm") {
+      this.plan.stages = computeDepthStages(this.plan.steps);
     } else {
       this.plan.stages = computeStages(this.plan.steps, this.plan.config.maxStageSize);
     }
@@ -2499,6 +2508,41 @@ export class Executor {
       log.warn("failed to update ticket status", { ticketId: step.ticketId, error: String(err) });
     }
   }
+
+  /**
+   * Close parent tickets when all their subtask steps are done.
+   * Subtask steps use ticketId format "parent/subtask-id".
+   */
+  private async closeCompletedSubtaskParents(): Promise<void> {
+    if (!this.plan.config.ticketTransitions) return;
+
+    // Find all unique parent IDs from subtask steps
+    const parentIds = new Set<string>();
+    for (const step of this.plan.steps) {
+      const base = baseTicketId(step.ticketId);
+      if (base !== step.ticketId) parentIds.add(base);
+    }
+
+    for (const parentId of parentIds) {
+      // Check if already closed
+      if (this.closedSubtaskParents?.has(parentId)) continue;
+
+      const siblings = this.plan.steps.filter((s) => baseTicketId(s.ticketId) === parentId);
+      const allDone = siblings.every((s) => s.status === "done" || s.status === "skipped");
+      if (!allDone) continue;
+
+      // Close the parent ticket
+      const projectId = siblings[0]?.projectId;
+      if (projectId) {
+        const fakeStep = { ticketId: parentId, projectId } as PlanStep;
+        await this.updateTicketStatusSafe(fakeStep, "closed");
+        if (!this.closedSubtaskParents) this.closedSubtaskParents = new Set();
+        this.closedSubtaskParents.add(parentId);
+      }
+    }
+  }
+
+  private closedSubtaskParents?: Set<string>;
 
   /**
    * Clean up orphaned worktrees from crashed runs.

@@ -286,7 +286,7 @@ export type { ExpoEASConfig } from "./cloud/index.js";
 export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
 
 // Orchestrator
-export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds, computeStages, buildExplicitStages, validateExplicitStages, computeStageSummary, expandTeamSteps, baseTicketId } from "./orchestrator/planner.js";
+export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds, computeStages, computeDepthStages, buildExplicitStages, validateExplicitStages, computeStageSummary, expandTeamSteps, expandSubtaskSteps, extractSubtasks, baseTicketId, applyStrategy } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";
 export {
   writeSubTicket,

@@ -3,6 +3,7 @@
 export type PlanStatus = "planning" | "executing" | "paused" | "done" | "failed" | "cancelled";
 export type StepStatus = "blocked" | "ready" | "in-progress" | "verifying" | "done" | "failed" | "skipped" | "needs-rebase" | "pending-confirmation";
 export type VerificationMode = "test-gate" | "oracle" | "confirmation" | "output-exists" | "none";
+export type PlanStrategy = "spread" | "swarm" | "mixed";
 
 export interface Plan {
   id: string;
@@ -95,6 +96,7 @@ export interface OrchestratorConfig {
   autoContinue?: boolean;
   stages?: string[][];
   maxStageSize?: number;
+  strategy?: PlanStrategy;
 }
 
 export interface TestGateResult {

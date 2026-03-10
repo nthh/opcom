@@ -4,8 +4,10 @@ import type {
   PlanStep,
   PlanStage,
   PlanScope,
+  PlanStrategy,
   OrchestratorConfig,
   WorkItem,
+  Subtask,
   StepStatus,
   TeamDefinition,
 } from "@opcom/types";
@@ -143,6 +145,11 @@ export function computePlan(
   // Expand team definitions into multi-step sequences
   if (teamResolutions && teamResolutions.size > 0) {
     steps = expandTeamSteps(steps, teamResolutions);
+  }
+
+  // Expand subtask tickets for swarm/mixed strategies
+  if (mergedConfig.strategy === "swarm" || mergedConfig.strategy === "mixed") {
+    steps = expandSubtaskSteps(steps, allTickets);
   }
 
   // Sort steps by priority (P1 first) so executor picks highest priority ready steps
@@ -296,6 +303,192 @@ export function expandTeamSteps(
   }
 
   return result;
+}
+
+/**
+ * Parse markdown task-list lines into structured subtasks.
+ *
+ * Supported markers on each `- [ ] Title` line:
+ * - `(parallel)` — subtask can run concurrently, no automatic deps
+ * - `(deps: id-a, id-b)` — explicit dependencies on other subtask IDs
+ * - No marker — sequential default: depends on the previous subtask in the list
+ *
+ * IDs are slugified from titles.
+ */
+export function extractSubtasks(body: string): Subtask[] {
+  if (!body) return [];
+  const lines = body.split("\n");
+  const subtasks: Subtask[] = [];
+
+  for (const line of lines) {
+    // Match: - [ ] Title  or  - [x] Title  (with optional leading whitespace)
+    const match = line.match(/^\s*[-*]\s+\[[ x]\]\s+(.+)/);
+    if (!match) continue;
+
+    let title = match[1].trim();
+    let parallel = false;
+    let deps: string[] = [];
+
+    // Check for (parallel) marker
+    const parallelMatch = title.match(/\s*\(parallel\)\s*$/);
+    if (parallelMatch) {
+      parallel = true;
+      title = title.slice(0, parallelMatch.index).trim();
+    }
+
+    // Check for (deps: a, b) marker
+    const depsMatch = title.match(/\s*\(deps:\s*(.+?)\)\s*$/);
+    if (depsMatch) {
+      deps = depsMatch[1].split(",").map((d) => d.trim());
+      title = title.slice(0, depsMatch.index).trim();
+    }
+
+    // Sequential default: if no parallel and no explicit deps, depend on previous
+    if (!parallel && deps.length === 0 && subtasks.length > 0) {
+      deps = [subtasks[subtasks.length - 1].id];
+    }
+
+    const id = slugify(title);
+    subtasks.push({ id, title, parallel, deps });
+  }
+
+  return subtasks;
+}
+
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * Expand tickets that have subtasks into individual plan steps.
+ * Each subtask becomes its own step; the parent ticket gets no step.
+ * Subtask step IDs use format: "parentTicketId/subtaskId"
+ * blockedBy reflects parsed deps between subtasks.
+ */
+export function expandSubtaskSteps(
+  steps: PlanStep[],
+  allTickets: Map<string, { ticket: WorkItem; projectId: string }>,
+): PlanStep[] {
+  const result: PlanStep[] = [];
+
+  for (const step of steps) {
+    const entry = allTickets.get(step.ticketId);
+    const subtasks = entry?.ticket.subtasks;
+
+    if (!subtasks || subtasks.length === 0) {
+      result.push(step);
+      continue;
+    }
+
+    // Build subtask ID → step ID map
+    const subIdMap = new Map<string, string>();
+    for (const sub of subtasks) {
+      subIdMap.set(sub.id, `${step.ticketId}/${sub.id}`);
+    }
+
+    for (const sub of subtasks) {
+      const subStepId = subIdMap.get(sub.id)!;
+      const subBlockedBy: string[] = [];
+
+      // Resolve subtask-internal deps
+      for (const dep of sub.deps) {
+        const depStepId = subIdMap.get(dep);
+        if (depStepId) subBlockedBy.push(depStepId);
+      }
+
+      // Subtasks with no internal deps inherit the parent's external blockedBy
+      if (subBlockedBy.length === 0 && sub.deps.length === 0) {
+        subBlockedBy.push(...step.blockedBy);
+      }
+
+      const status: StepStatus = subBlockedBy.length > 0 ? "blocked" : "ready";
+
+      result.push({
+        ticketId: subStepId,
+        projectId: step.projectId,
+        status,
+        blockedBy: subBlockedBy,
+        role: step.role,
+        verificationMode: step.verificationMode,
+      });
+    }
+
+    // Find leaf subtasks (those with no downstream dependents)
+    const hasDependent = new Set<string>();
+    for (const sub of subtasks) {
+      for (const dep of sub.deps) hasDependent.add(dep);
+    }
+    const leafStepIds = subtasks
+      .filter((s) => !hasDependent.has(s.id))
+      .map((s) => subIdMap.get(s.id)!);
+
+    // Rewrite blockedBy references: other steps depending on the parent
+    // should instead depend on the leaf subtask steps
+    for (const s of steps) {
+      if (s === step) continue;
+      const idx = s.blockedBy.indexOf(step.ticketId);
+      if (idx >= 0) {
+        s.blockedBy.splice(idx, 1, ...leafStepIds);
+      }
+    }
+    for (const s of result) {
+      const idx = s.blockedBy.indexOf(step.ticketId);
+      if (idx >= 0) {
+        s.blockedBy.splice(idx, 1, ...leafStepIds);
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Compute stages by dependency depth — used for swarm strategy.
+ * Steps at depth 0 (no deps) form stage 0, depth 1 form stage 1, etc.
+ */
+export function computeDepthStages(steps: PlanStep[]): PlanStage[] {
+  if (steps.length === 0) return [];
+
+  const stepSet = new Set(steps.map((s) => s.ticketId));
+
+  // Compute depth for each step
+  const depthMap = new Map<string, number>();
+
+  function getDepth(ticketId: string): number {
+    if (depthMap.has(ticketId)) return depthMap.get(ticketId)!;
+    const step = steps.find((s) => s.ticketId === ticketId);
+    if (!step) return 0;
+    const inScopeDeps = step.blockedBy.filter((d) => stepSet.has(d));
+    if (inScopeDeps.length === 0) {
+      depthMap.set(ticketId, 0);
+      return 0;
+    }
+    const depth = Math.max(...inScopeDeps.map((d) => getDepth(d))) + 1;
+    depthMap.set(ticketId, depth);
+    return depth;
+  }
+
+  for (const step of steps) getDepth(step.ticketId);
+
+  // Group by depth
+  const groups = new Map<number, string[]>();
+  for (const step of steps) {
+    const d = depthMap.get(step.ticketId) ?? 0;
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d)!.push(step.ticketId);
+  }
+
+  // Sort depth keys and create stages
+  const depths = [...groups.keys()].sort((a, b) => a - b);
+  return depths.map((d, i) => ({
+    index: i,
+    name: `depth-${d}`,
+    stepTicketIds: groups.get(d)!,
+    status: "pending" as const,
+  }));
 }
 
 /**
@@ -845,4 +1038,57 @@ export function computeStageSummary(
     durationMs: completedAt - startedAt,
     ...(hasTestResults ? { testResults: { passed: totalPassed, failed: totalFailed } } : {}),
   };
+}
+
+/**
+ * Reorder priority-sorted ready steps according to the plan strategy.
+ *
+ * @param sorted - Steps already sorted by priority (lower number first)
+ * @param strategy - "spread" | "swarm" | "mixed"
+ * @returns Reordered steps
+ *
+ * - **mixed**: No change — return the priority-sorted order as-is.
+ * - **spread**: Round-robin across tracks. Pick one step per track in priority order,
+ *   then loop back for a second step per track, etc. Maximizes breadth.
+ * - **swarm**: Group by track, order tracks by highest-priority step.
+ *   Pick all steps from the first track, then the next, etc. Maximizes depth.
+ */
+export function applyStrategy(sorted: PlanStep[], strategy: PlanStrategy | undefined): PlanStep[] {
+  if (!strategy || strategy === "mixed") return sorted;
+  if (sorted.length <= 1) return sorted;
+
+  // Group steps by track, preserving priority order within each track
+  const trackGroups = new Map<string, PlanStep[]>();
+  for (const step of sorted) {
+    const track = step.track ?? step.ticketId;
+    if (!trackGroups.has(track)) trackGroups.set(track, []);
+    trackGroups.get(track)!.push(step);
+  }
+
+  if (strategy === "swarm") {
+    // Tracks are already ordered by the priority of their first step
+    // (since `sorted` is priority-ordered and we insert in order).
+    // Flatten: all steps from first track, then all from second, etc.
+    const result: PlanStep[] = [];
+    for (const steps of trackGroups.values()) {
+      result.push(...steps);
+    }
+    return result;
+  }
+
+  // strategy === "spread"
+  // Round-robin: pick one from each track, then loop
+  const trackQueues = [...trackGroups.values()];
+  const result: PlanStep[] = [];
+  let remaining = true;
+  while (remaining) {
+    remaining = false;
+    for (const queue of trackQueues) {
+      if (queue.length > 0) {
+        result.push(queue.shift()!);
+        if (queue.length > 0) remaining = true;
+      }
+    }
+  }
+  return result;
 }
