@@ -1,7 +1,7 @@
 ---
 id: tui-skills-browser
 title: "TUI: Skills browser for discovering available capabilities"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
