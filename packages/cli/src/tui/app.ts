@@ -1074,11 +1074,7 @@ export class TuiApp {
         return;
 
       case "d":
-        // Dev services - would need implementation
-        return;
-
-      case "g":
-        // Git log - would need implementation
+        // Reserved for dev services (not yet implemented)
         return;
     }
   }
@@ -1214,9 +1210,6 @@ export class TuiApp {
         this.cycleAgent(-1);
         return;
 
-      case "m":
-        // Merge - placeholder for future implementation
-        return;
     }
   }
 
@@ -2699,8 +2692,6 @@ export function buildHelpLines(): string[] {
     "  v          Focus cloud services panel",
     "  M          Run pending migrations",
     "  c          Chat: create or discuss ticket",
-    "  d          Start dev services",
-    "  g          Show git log",
     "",
     bold("Level 3: Agent Focus"),
     "  j/k        Scroll up/down",
@@ -2709,7 +2700,6 @@ export function buildHelpLines(): string[] {
     "  p          Open prompt input",
     "  S          Stop agent",
     "  n/N        Cycle to next/prev agent",
-    "  m          Merge agent changes",
     "",
     bold("Level 3: Ticket Focus"),
     "  j/k        Scroll up/down",
