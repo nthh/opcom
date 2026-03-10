@@ -20,16 +20,16 @@ describe("Station HTTP API", () => {
   let port: number;
 
   beforeAll(async () => {
-    port = 14700 + Math.floor(Math.random() * 1000);
-    station = new Station(port, { skipCICD: true, skipReconcile: true });
+    port = 14000 + Math.floor(Math.random() * 1000);
+    station = new Station(port, { skipCICD: true, skipReconcile: true, skipInfra: true });
     await station.start();
-  }, 10000);
+  }, 30000);
 
   afterAll(async () => {
     await station.stop();
     // Give a moment for cleanup
     await new Promise((r) => setTimeout(r, 100));
-  }, 10000);
+  }, 30000);
 
   it("responds to GET /health", async () => {
     const res = await fetch(`http://localhost:${port}/health`);

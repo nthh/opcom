@@ -19,6 +19,7 @@ export function defaultConfig(): OrchestratorConfig {
       maxRetries: 2,
       autoRebase: true,
     },
+    autoContinue: true,
     stall: {
       enabled: true,
       agentTimeoutMs: 20 * 60 * 1000,  // 20 minutes

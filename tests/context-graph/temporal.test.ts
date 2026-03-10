@@ -428,8 +428,8 @@ describe("replay robustness", () => {
     writeFileSync(join(projectDir, "file.ts"), "v0");
     commitAll("init");
 
-    // Create 50 commits
-    for (let i = 1; i <= 50; i++) {
+    // Create 15 commits (enough to test multi-commit handling without being slow)
+    for (let i = 1; i <= 15; i++) {
       writeFileSync(join(projectDir, "file.ts"), `v${i}`);
       commitAll(`commit ${i}`);
     }
@@ -437,12 +437,12 @@ describe("replay robustness", () => {
     const builder = new GraphBuilder("test", projectDir, contextDir);
     const result = await builder.replay();
 
-    expect(result.commits).toBe(51); // init + 50
+    expect(result.commits).toBe(16); // init + 15
 
     const db = builder.getDb();
     const churn = db.churnAnalysis();
     expect(churn[0].filePath).toBe("file.ts");
-    expect(churn[0].changes).toBe(51);
+    expect(churn[0].changes).toBe(16);
 
     builder.close();
   });

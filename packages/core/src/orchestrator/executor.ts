@@ -1399,9 +1399,15 @@ export class Executor {
       result.testGate = testResult;
       if (!testResult.passed) {
         result.passed = false;
-        result.failureReasons.push(
-          `Tests failed: ${testResult.failedTests}/${testResult.totalTests} failed`,
-        );
+        if (testResult.totalTests === 0) {
+          result.failureReasons.push(
+            "Test command failed (no test results parsed from output)",
+          );
+        } else {
+          result.failureReasons.push(
+            `Tests failed: ${testResult.failedTests}/${testResult.totalTests} failed`,
+          );
+        }
       }
       log.info("test gate result", {
         ticketId: step.ticketId,
@@ -1529,9 +1535,10 @@ export class Executor {
         durationMs: Date.now() - start,
       };
     } catch (err: unknown) {
-      const output = (err as { stdout?: string; stderr?: string }).stdout
-        ?? (err as { stderr?: string }).stderr
-        ?? String(err);
+      const errObj = err as { stdout?: string; stderr?: string };
+      const output = (errObj.stdout && errObj.stderr)
+        ? errObj.stdout + errObj.stderr
+        : errObj.stdout ?? errObj.stderr ?? String(err);
       const { total, passed, failed } = parseTestOutput(output);
       return {
         passed: false,
@@ -1922,11 +1929,15 @@ export class Executor {
 
     if (available <= 0) return;
 
-    // Filter ready steps by current stage if stages are active
+    // Filter ready steps by current stage if stages are active and autoContinue is off.
+    // When autoContinue is true, dependency-based scheduling (blockedBy + ready status)
+    // already handles ordering — the stage gate only adds value as a human review checkpoint.
     let ready = this.plan.steps.filter((s) => s.status === "ready");
-    const currentStageIds = this.getCurrentStageStepIds();
-    if (currentStageIds) {
-      ready = ready.filter((s) => currentStageIds.has(s.ticketId));
+    if (!this.plan.config.autoContinue) {
+      const currentStageIds = this.getCurrentStageStepIds();
+      if (currentStageIds) {
+        ready = ready.filter((s) => currentStageIds.has(s.ticketId));
+      }
     }
 
     // Sort ready steps: lower priority number first, then fewer blockedBy, then array order
@@ -2154,73 +2165,81 @@ export class Executor {
   /**
    * Check if the current stage is complete. If so, run smoke tests,
    * emit stage_completed, and either auto-continue or pause for approval.
-   * Returns true if a stage just completed (caller should not start new steps).
+   * When autoContinue is true, advances through all completed stages
+   * (later-stage tickets may already be done when autoContinue skips stage gating).
+   * Returns true if a stage just completed and we're pausing (caller should not start new steps).
    */
   private async checkStageCompletion(): Promise<boolean> {
     if (!this.plan.stages || this.plan.currentStage === undefined) return false;
 
-    const stage = this.plan.stages[this.plan.currentStage];
-    if (!stage || stage.status !== "executing") return false;
+    // Loop to advance through multiple completed stages (relevant when
+    // autoContinue skips stage gating and later-stage tickets finish early)
+    while (this.plan.currentStage < this.plan.stages.length) {
+      const stage = this.plan.stages[this.plan.currentStage];
+      if (!stage || stage.status !== "executing") return false;
 
-    // Check if all steps in this stage are terminal
-    const stageSteps = this.plan.steps.filter((s) =>
-      stage.stepTicketIds.includes(s.ticketId),
-    );
-    const allTerminal = stageSteps.every(
-      (s) => s.status === "done" || s.status === "failed" || s.status === "skipped" || s.status === "needs-rebase",
-    );
+      // Check if all steps in this stage are terminal
+      const stageSteps = this.plan.steps.filter((s) =>
+        stage.stepTicketIds.includes(s.ticketId),
+      );
+      const allTerminal = stageSteps.every(
+        (s) => s.status === "done" || s.status === "failed" || s.status === "skipped" || s.status === "needs-rebase",
+      );
 
-    if (!allTerminal) return false;
+      if (!allTerminal) return false;
 
-    // Stage is complete
-    this.markCurrentStageCompleted();
+      // Stage is complete
+      this.markCurrentStageCompleted();
 
-    const summary = computeStageSummary(stage, this.plan.steps);
+      const summary = computeStageSummary(stage, this.plan.steps);
 
-    // Run smoke test after batch (stage) completion
-    const smokeResult = await this.runStageSmokeTest(stage.index);
-    if (smokeResult) {
-      summary.smokeTest = smokeResult;
-    }
+      // Run smoke test after batch (stage) completion
+      const smokeResult = await this.runStageSmokeTest(stage.index);
+      if (smokeResult) {
+        summary.smokeTest = smokeResult;
+      }
 
-    stage.summary = summary;
+      stage.summary = summary;
 
-    this.emit("stage_completed", { planId: this.plan.id, stage, summary });
-    this.logPlanEvent("stage_completed", {
-      detail: { stageIndex: stage.index, summary },
-    });
+      this.emit("stage_completed", { planId: this.plan.id, stage, summary });
+      this.logPlanEvent("stage_completed", {
+        detail: { stageIndex: stage.index, summary },
+      });
 
-    // If smoke test failed, pause the plan with clear error
-    if (smokeResult && !smokeResult.passed) {
-      const reason = smokeResult.buildPassed
-        ? "Smoke test failed: tests failed after stage " + stage.index
-        : "Smoke test failed: build failed after stage " + stage.index;
+      // If smoke test failed, pause the plan with clear error
+      if (smokeResult && !smokeResult.passed) {
+        const reason = smokeResult.buildPassed
+          ? "Smoke test failed: tests failed after stage " + stage.index
+          : "Smoke test failed: build failed after stage " + stage.index;
+        this.plan.status = "paused";
+        await savePlan(this.plan);
+        this.emit("plan_paused", { plan: this.plan });
+        this.logPlanEvent("plan_paused", { detail: { reason, stageIndex: stage.index } });
+        return true;
+      }
+
+      // Check if there's a next stage
+      const nextIdx = this.plan.currentStage + 1;
+      if (nextIdx >= this.plan.stages.length) {
+        // No more stages — plan will complete naturally
+        return false;
+      }
+
+      if (this.plan.config.autoContinue) {
+        // Auto-advance to next stage and continue loop to check if it's also done
+        this.advanceToNextStage();
+        continue;
+      }
+
+      // Pause for user approval
       this.plan.status = "paused";
-      await savePlan(this.plan);
+      savePlan(this.plan).catch(() => {});
       this.emit("plan_paused", { plan: this.plan });
-      this.logPlanEvent("plan_paused", { detail: { reason, stageIndex: stage.index } });
+      this.logPlanEvent("plan_paused", { detail: { reason: "stage_gate", stageIndex: stage.index } });
       return true;
     }
 
-    // Check if there's a next stage
-    const nextIdx = this.plan.currentStage + 1;
-    if (nextIdx >= this.plan.stages.length) {
-      // No more stages — plan will complete naturally
-      return false;
-    }
-
-    if (this.plan.config.autoContinue) {
-      // Auto-advance to next stage
-      this.advanceToNextStage();
-      return false; // caller should continue starting steps
-    }
-
-    // Pause for user approval
-    this.plan.status = "paused";
-    savePlan(this.plan).catch(() => {});
-    this.emit("plan_paused", { plan: this.plan });
-    this.logPlanEvent("plan_paused", { detail: { reason: "stage_gate", stageIndex: stage.index } });
-    return true;
+    return false;
   }
 
   /**
@@ -2484,12 +2503,21 @@ function truncateTestOutput(output: string, maxSize = 8000): string {
 
 export function parseTestOutput(output: string): { total: number; passed: number; failed: number } {
   // Vitest: "Tests  857 passed (857)" or "Tests  3 failed | 854 passed (857)"
-  const vitestMatch = output.match(/Tests\s+(?:(\d+)\s+failed\s+\|\s+)?(\d+)\s+passed\s+\((\d+)\)/);
+  // Also handles skipped: "Tests  1 failed | 2 skipped | 854 passed (857)"
+  const vitestMatch = output.match(/Tests\s+(?:(\d+)\s+failed\s+\|\s+)?(?:\d+\s+skipped\s+\|\s+)?(\d+)\s+passed\s+\((\d+)\)/);
   if (vitestMatch) {
     const failed = parseInt(vitestMatch[1] ?? "0", 10);
     const passed = parseInt(vitestMatch[2], 10);
     const total = parseInt(vitestMatch[3], 10);
     return { total, passed, failed };
+  }
+
+  // Vitest failures-only: "Tests  3 failed (3)" (no passing tests)
+  const vitestFailOnly = output.match(/Tests\s+(\d+)\s+failed\s+\((\d+)\)/);
+  if (vitestFailOnly) {
+    const failed = parseInt(vitestFailOnly[1], 10);
+    const total = parseInt(vitestFailOnly[2], 10);
+    return { total, passed: total - failed, failed };
   }
 
   // Jest: "Tests:  3 failed, 854 passed, 857 total"
@@ -2508,6 +2536,17 @@ export function parseTestOutput(output: string): { total: number; passed: number
     const passed = parseInt(mochaPass[1], 10);
     const failed = mochaFail ? parseInt(mochaFail[1], 10) : 0;
     return { total: passed + failed, passed, failed };
+  }
+
+  // TAP: "# tests 10" / "# pass 8" / "# fail 2"
+  const tapTests = output.match(/# tests\s+(\d+)/);
+  const tapPass = output.match(/# pass\s+(\d+)/);
+  const tapFail = output.match(/# fail\s+(\d+)/);
+  if (tapTests || tapPass) {
+    const total = tapTests ? parseInt(tapTests[1], 10) : 0;
+    const passed = tapPass ? parseInt(tapPass[1], 10) : 0;
+    const failed = tapFail ? parseInt(tapFail[1], 10) : 0;
+    return { total: total || passed + failed, passed, failed };
   }
 
   return { total: 0, passed: 0, failed: 0 };

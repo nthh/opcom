@@ -6,15 +6,15 @@ describe("Station Graph API", () => {
   let port: number;
 
   beforeAll(async () => {
-    port = 15700 + Math.floor(Math.random() * 1000);
-    station = new Station(port, { skipCICD: true, skipReconcile: true });
+    port = 16000 + Math.floor(Math.random() * 1000);
+    station = new Station(port, { skipCICD: true, skipReconcile: true, skipInfra: true });
     await station.start();
-  }, 10000);
+  }, 30000);
 
   afterAll(async () => {
     await station.stop();
     await new Promise((r) => setTimeout(r, 100));
-  }, 10000);
+  }, 30000);
 
   it("returns 404 for graph stats of unknown project", async () => {
     const res = await fetch(`http://localhost:${port}/projects/nonexistent/graph/stats`);

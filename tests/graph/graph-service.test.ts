@@ -14,10 +14,10 @@ import {
   getGraphStats,
 } from "@opcom/core";
 
-// Use a unique temp context dir for each test run to avoid collisions
+// Use unique temp dirs and project names to avoid cross-file collisions
 let contextDir: string;
 let projectDir: string;
-const projectName = "test-graph-svc";
+let projectName: string;
 
 function createTestProject(): string {
   projectDir = mkdtempSync(join(tmpdir(), "opcom-graph-test-"));
@@ -55,12 +55,16 @@ function createTestProject(): string {
 
 beforeEach(() => {
   contextDir = mkdtempSync(join(tmpdir(), "opcom-ctx-"));
+  projectName = `test-graph-svc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   createTestProject();
 });
 
 afterEach(() => {
   rmSync(contextDir, { recursive: true, force: true });
   rmSync(projectDir, { recursive: true, force: true });
+  // Clean up global graph DB created by buildGraph
+  const { homedir } = require("node:os");
+  rmSync(join(homedir(), ".context", projectName), { recursive: true, force: true });
 });
 
 describe("buildGraph", () => {

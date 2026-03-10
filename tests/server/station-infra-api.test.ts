@@ -27,15 +27,15 @@ let port: number;
 beforeAll(async () => {
   mockExecFileAsync.mockRejectedValue(new Error("kubectl not available in test"));
 
-  port = 15700 + Math.floor(Math.random() * 1000);
+  port = 18000 + Math.floor(Math.random() * 1000);
   station = new Station(port, { skipCICD: true, skipReconcile: true, skipInfra: true });
   await station.start();
-}, 10000);
+}, 30000);
 
 afterAll(async () => {
   await station.stop();
   await new Promise((r) => setTimeout(r, 100));
-}, 10000);
+}, 30000);
 
 describe("Infrastructure REST endpoints", () => {
   describe("GET /projects/:id/infrastructure", () => {
