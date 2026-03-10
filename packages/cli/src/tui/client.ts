@@ -21,6 +21,8 @@ import type {
   InfraResource,
   PodDetail,
   InfraHealthSummary,
+  Disposable,
+  InfraEvent,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -41,6 +43,7 @@ import {
   deletePlan,
   CICDPoller,
   GitHubActionsAdapter,
+  detectInfrastructure,
 } from "@opcom/core";
 import type { TicketSet } from "@opcom/core";
 
@@ -90,6 +93,9 @@ export class TuiClient {
 
   // CI/CD poller for direct mode (real-time deployment tracking)
   private cicdPoller: CICDPoller | null = null;
+
+  // Infrastructure watchers for direct mode (K8s resource monitoring)
+  private infraWatchers = new Map<string, Disposable>();
 
   // File watchers for .tickets/ directories
   private ticketWatchers: FSWatcher[] = [];
@@ -287,6 +293,11 @@ export class TuiClient {
       this.initCICDPoller().catch((err) => {
         log.warn("CI/CD poller init failed", { error: String(err) });
       });
+
+      // Start infrastructure watchers (K8s resource monitoring)
+      this.initInfraWatchers().catch((err) => {
+        log.warn("infra watcher init failed", { error: String(err) });
+      });
     } catch (err) {
       log.error("loadDirect failed", { error: String(err) });
     }
@@ -321,6 +332,48 @@ export class TuiClient {
         }
       } catch (err) {
         log.warn("CI/CD tracking failed for project", { projectId: project.id, error: String(err) });
+      }
+    }
+  }
+
+  private async initInfraWatchers(): Promise<void> {
+    for (const [, project] of this.projectConfigs) {
+      try {
+        const { adapters } = await detectInfrastructure(project);
+        if (adapters.length === 0) continue;
+
+        const adapter = adapters[0];
+        const watcher = adapter.watch(project, (event: InfraEvent) => {
+          switch (event.type) {
+            case "resource_updated":
+              this.handleServerEvent({
+                type: "infra_resource_updated",
+                projectId: project.id,
+                resource: event.resource,
+              });
+              break;
+            case "resource_deleted":
+              this.handleServerEvent({
+                type: "infra_resource_deleted",
+                projectId: project.id,
+                resourceId: event.resourceId,
+              });
+              break;
+            case "pod_crash":
+              this.handleServerEvent({
+                type: "pod_crash",
+                projectId: project.id,
+                pod: event.pod,
+                container: event.container,
+                reason: event.reason,
+              });
+              break;
+          }
+        });
+
+        this.infraWatchers.set(project.id, watcher);
+      } catch {
+        // Skip projects where infra detection/watch fails (no kubectl, etc.)
       }
     }
   }
@@ -1140,6 +1193,10 @@ export class TuiClient {
       this.cicdPoller.dispose();
       this.cicdPoller = null;
     }
+    for (const watcher of this.infraWatchers.values()) {
+      try { watcher.dispose(); } catch { /* ignore */ }
+    }
+    this.infraWatchers.clear();
     if (this.localSessionManager) {
       this.localSessionManager.shutdown().catch(() => {});
       this.localSessionManager = null;
