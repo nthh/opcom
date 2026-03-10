@@ -136,7 +136,7 @@ import {
   toggleSetting as settingsToggle,
   type SettingsViewState,
 } from "./views/settings-view.js";
-import { loadGlobalConfig, saveGlobalConfig, defaultSettings } from "@opcom/core";
+import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES } from "@opcom/core";
 import {
   getPipelineAtIndex,
   getDeploymentAtIndex,
@@ -1297,6 +1297,12 @@ export class TuiApp {
         this.cycleAgent(-1);
         return;
 
+      case "R":
+        if (state.role) {
+          state.showRoleDetail = !state.showRoleDetail;
+        }
+        return;
+
     }
   }
 
@@ -2046,7 +2052,21 @@ export class TuiApp {
       }
     }
 
-    this.agentFocusState = createAgentFocusState(agent, events);
+    // Resolve role from the agent's work item
+    const roleId = this.resolveAgentRoleId(agent);
+    const roleDef = roleId ? (BUILTIN_ROLES[roleId] ?? { id: roleId }) : null;
+    this.agentFocusState = createAgentFocusState(agent, events, roleDef);
+
+    // Async load for user-defined roles (overrides built-in if found)
+    if (roleId) {
+      loadRole(roleId).then((loaded) => {
+        if (this.agentFocusState && this.agentFocusState.agent.id === agent.id) {
+          this.agentFocusState.role = loaded;
+          this.scheduleRender();
+        }
+      }).catch(() => { /* use synchronous fallback */ });
+    }
+
     this.ticketFocusState = null;
     this.planStepFocusState = null;
     this.planOverviewState = null;
@@ -2056,6 +2076,28 @@ export class TuiApp {
     this.pipelineDetailState = null;
     this.deploymentDetailState = null;
     this.podDetailState = null;
+  }
+
+  /** Look up the role ID for an agent from its work item or plan step */
+  private resolveAgentRoleId(agent: AgentSession): string | null {
+    // Check plan steps first (role cached at plan creation)
+    if (this.client.activePlan) {
+      const step = this.client.activePlan.steps.find(
+        (s) => s.agentSessionId === agent.id || s.ticketId === agent.workItemId,
+      );
+      if (step?.role) return step.role;
+    }
+
+    // Fall back to ticket role
+    if (agent.workItemId) {
+      for (const [, tickets] of this.client.projectTickets) {
+        const ticket = tickets.find((t) => t.id === agent.workItemId);
+        if (ticket?.role) return ticket.role;
+      }
+    }
+
+    // Default role
+    return "engineer";
   }
 
   private navigateToTicket(ticket: WorkItem, projectId?: string): void {

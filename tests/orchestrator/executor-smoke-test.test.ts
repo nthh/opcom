@@ -578,10 +578,12 @@ describe("Executor smoke tests — non-staged plans", () => {
       mockSM.simulateWrite(sid);
       mockSM.simulateCompletion(sid);
     }
-    await waitFor(() => executor.getPlan().status === "done");
+    // Wait for the async completion chain (worktree verification, merge, smoke test)
+    await vi.waitFor(() => {
+      expect(executor.getPlan().status).toBe("done");
+    }, { timeout: 5000, interval: 10 });
 
     const currentPlan = executor.getPlan();
-    expect(currentPlan.status).toBe("done");
     expect(mockRunSmoke).toHaveBeenCalled();
     expect(currentPlan.smokeTestResult).toBeDefined();
     expect(currentPlan.smokeTestResult!.passed).toBe(true);

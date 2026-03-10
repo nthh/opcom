@@ -1,7 +1,7 @@
 // TUI Agent Focus View (Level 3)
 // Full-screen scrollable agent output with prompt bar
 
-import type { AgentSession, NormalizedEvent } from "@opcom/types";
+import type { AgentSession, NormalizedEvent, RoleDefinition } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -25,6 +25,8 @@ export interface AgentFocusState {
   displayLines: DisplayLine[]; // pre-rendered lines
   renderedEventCount: number; // tracks last rendered count (avoids shared-reference staleness)
   wrapWidth: number;
+  role: RoleDefinition | null;
+  showRoleDetail: boolean;
 }
 
 interface DisplayLine {
@@ -32,7 +34,11 @@ interface DisplayLine {
   style: "normal" | "tool" | "error" | "system" | "dim";
 }
 
-export function createAgentFocusState(agent: AgentSession, events: NormalizedEvent[]): AgentFocusState {
+export function createAgentFocusState(
+  agent: AgentSession,
+  events: NormalizedEvent[],
+  role?: RoleDefinition | null,
+): AgentFocusState {
   const state: AgentFocusState = {
     agent,
     events,
@@ -43,6 +49,8 @@ export function createAgentFocusState(agent: AgentSession, events: NormalizedEve
     displayLines: [],
     renderedEventCount: 0,
     wrapWidth: 0,
+    role: role ?? null,
+    showRoleDetail: false,
   };
   rebuildDisplayLines(state);
   state.renderedEventCount = events.length;
@@ -232,22 +240,71 @@ export function rebuildDisplayLines(state: AgentFocusState, width = 80): void {
   state.wrapWidth = width;
 }
 
+/** Build the role detail lines shown when R is pressed */
+export function buildRoleDetailLines(role: RoleDefinition): string[] {
+  const lines: string[] = [];
+  lines.push(`Role: ${role.name ?? role.id}`);
+  lines.push("─".repeat(40));
+  lines.push(`  Permission mode: ${role.permissionMode ?? "acceptEdits"}`);
+  if (role.disallowedTools && role.disallowedTools.length > 0) {
+    lines.push(`  Disallowed tools: ${role.disallowedTools.join(", ")}`);
+  }
+  if (role.allowedTools && role.allowedTools.length > 0) {
+    lines.push(`  Allowed tools: ${role.allowedTools.join(", ")}`);
+  }
+  if (role.allowedBashPatterns && role.allowedBashPatterns.length > 0) {
+    lines.push(`  Bash patterns: ${role.allowedBashPatterns.join(", ")}`);
+  }
+  if (role.doneCriteria) {
+    lines.push(`  Done criteria: ${role.doneCriteria}`);
+  }
+  if (role.instructions) {
+    lines.push(`  Instructions:`);
+    for (const line of role.instructions.split("\n")) {
+      lines.push(`    ${line}`);
+    }
+  }
+  lines.push(`  Run tests: ${role.runTests ?? true}`);
+  lines.push(`  Run oracle: ${role.runOracle ?? "inherit"}`);
+  if (role.skills && role.skills.length > 0) {
+    lines.push(`  Skills: ${role.skills.join(", ")}`);
+  }
+  lines.push("");
+  return lines;
+}
+
+/** Build a compact role summary for the header */
+export function buildRoleSummary(role: RoleDefinition): string {
+  const parts: string[] = [];
+  parts.push(role.permissionMode ?? "acceptEdits");
+  if (role.doneCriteria) {
+    const short = role.doneCriteria.length > 50
+      ? role.doneCriteria.slice(0, 47) + "..."
+      : role.doneCriteria;
+    parts.push(short);
+  }
+  return parts.join(" · ");
+}
+
 export function renderAgentFocus(
   buf: ScreenBuffer,
   panel: Panel,
   state: AgentFocusState,
 ): void {
-  const { agent } = state;
+  const { agent, role } = state;
 
-  // Header: agent info (2 rows)
-  const headerHeight = 2;
+  // Header: agent info (2-3 rows depending on role)
+  const roleDetailLines = (state.showRoleDetail && role) ? buildRoleDetailLines(role) : [];
+  const baseHeaderHeight = role ? 3 : 2;
+  const headerHeight = baseHeaderHeight + roleDetailLines.length;
   const footerHeight = state.promptMode ? 2 : 1;
   const contentHeight = panel.height - headerHeight - footerHeight;
   const contentWidth = panel.width - 2;
 
   // --- Header ---
   const sColor = stateColor(agent.state);
-  const headerLine1 = `${bold(agent.id.slice(0, 12))} ${color(sColor, agent.state)} ${dim(agent.backend)} ${dim("project:" + agent.projectId)}`;
+  const roleSuffix = role ? ` ${dim("(" + (role.name ?? role.id) + ")")}` : "";
+  const headerLine1 = `${bold(agent.id.slice(0, 12))} ${color(sColor, agent.state)} ${dim(agent.backend)} ${dim("project:" + agent.projectId)}${roleSuffix}`;
   buf.writeLine(panel.y, panel.x + 1, headerLine1, contentWidth);
 
   let headerLine2Parts: string[] = [];
@@ -264,6 +321,18 @@ export function renderAgentFocus(
   headerLine2Parts.push(`Duration: ${duration}`);
   headerLine2Parts.push(`Events: ${state.events.length}`);
   buf.writeLine(panel.y + 1, panel.x + 1, headerLine2Parts.join("  "), contentWidth);
+
+  // Role summary line
+  if (role) {
+    const summary = buildRoleSummary(role);
+    const toggleHint = state.showRoleDetail ? dim(" [R: collapse]") : dim(" [R: expand]");
+    buf.writeLine(panel.y + 2, panel.x + 1, dim("Role: ") + (role.name ?? role.id) + dim(" — " + summary) + toggleHint, contentWidth);
+  }
+
+  // Expanded role detail lines
+  for (let i = 0; i < roleDetailLines.length; i++) {
+    buf.writeLine(panel.y + baseHeaderHeight + i, panel.x + 1, dim(roleDetailLines[i]), contentWidth);
+  }
 
   // --- Content (scrollable agent output) ---
   // Re-wrap if panel width changed
@@ -319,7 +388,8 @@ export function renderAgentFocus(
     buf.writeLine(footerY, panel.x + 1, replyHint, contentWidth);
   } else {
     // Status line with keybindings
-    const keys = dim("j/k:scroll  G:bottom  g:top  p:prompt  S:stop  n/N:cycle  Esc:back");
+    const roleKey = role ? "  R:role" : "";
+    const keys = dim(`j/k:scroll  G:bottom  g:top  p:prompt  S:stop  n/N:cycle${roleKey}  Esc:back`);
     buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
   }
 }
