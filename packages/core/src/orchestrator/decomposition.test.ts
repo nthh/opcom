@@ -146,7 +146,7 @@ describe("writeSubTicket", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("creates ticket directory and README.md", async () => {
+  it("writes sub-ticket as sibling file in parent directory", async () => {
     const ticket = makeProposedTicket({
       id: "cloud-r2-adapter",
       title: "R2 Storage Adapter",
@@ -157,7 +157,8 @@ describe("writeSubTicket", () => {
 
     const filePath = await writeSubTicket(tempDir, ticket);
 
-    expect(filePath).toBe(join(tempDir, ".tickets", "impl", "cloud-r2-adapter", "README.md"));
+    // Should be a sibling .md file in parent's directory
+    expect(filePath).toBe(join(tempDir, ".tickets", "impl", "cloud-storage", "cloud-r2-adapter.md"));
 
     const content = await readFile(filePath, "utf-8");
     expect(content).toContain("id: cloud-r2-adapter");
@@ -166,12 +167,16 @@ describe("writeSubTicket", () => {
     expect(content).toContain("  - cloud-types");
   });
 
-  it("creates nested directories", async () => {
-    const ticket = makeProposedTicket({ id: "nested-ticket" });
+  it("creates own directory for top-level ticket (no parent)", async () => {
+    const ticket = makeProposedTicket({ id: "top-level-ticket" });
     await writeSubTicket(tempDir, ticket);
 
-    const dirStat = await stat(join(tempDir, ".tickets", "impl", "nested-ticket"));
+    const dirStat = await stat(join(tempDir, ".tickets", "impl", "top-level-ticket"));
     expect(dirStat.isDirectory()).toBe(true);
+
+    const filePath = join(tempDir, ".tickets", "impl", "top-level-ticket", "README.md");
+    const content = await readFile(filePath, "utf-8");
+    expect(content).toContain("id: top-level-ticket");
   });
 });
 
@@ -186,7 +191,7 @@ describe("writeSubTickets", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
-  it("writes multiple sub-tickets from a decomposition", async () => {
+  it("writes multiple sub-tickets as sibling files in parent directory", async () => {
     const decomposition: TicketDecomposition = {
       parentTicketId: "cloud-serverless",
       reason: "Multiple providers",
@@ -216,6 +221,12 @@ describe("writeSubTickets", () => {
 
     expect(paths).toHaveLength(3);
 
+    // All files should be in the parent's directory
+    const parentDir = join(tempDir, ".tickets", "impl", "cloud-serverless");
+    expect(paths[0]).toBe(join(parentDir, "cloud-serverless-types.md"));
+    expect(paths[1]).toBe(join(parentDir, "cloud-serverless-cf.md"));
+    expect(paths[2]).toBe(join(parentDir, "cloud-serverless-firebase.md"));
+
     // Verify each file exists and has correct content
     for (const path of paths) {
       const content = await readFile(path, "utf-8");
@@ -232,7 +243,7 @@ describe("writeSubTickets", () => {
     expect(cfContent).toContain("  - cloud-serverless-types");
   });
 
-  it("sets parent on sub-tickets that are missing it", async () => {
+  it("sets parent on sub-tickets that are missing it and writes as siblings", async () => {
     const decomposition: TicketDecomposition = {
       parentTicketId: "big-ticket",
       reason: "Too large",
@@ -243,6 +254,11 @@ describe("writeSubTickets", () => {
     };
 
     const paths = await writeSubTickets(tempDir, decomposition);
+
+    // Parent was set by writeSubTickets, so files go in parent's directory
+    const parentDir = join(tempDir, ".tickets", "impl", "big-ticket");
+    expect(paths[0]).toBe(join(parentDir, "sub-a.md"));
+    expect(paths[1]).toBe(join(parentDir, "sub-b.md"));
 
     const contentA = await readFile(paths[0], "utf-8");
     expect(contentA).toContain("milestone: big-ticket");

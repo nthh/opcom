@@ -20,14 +20,23 @@ export async function writeSubTicket(
   ticket: ProposedTicket,
 ): Promise<string> {
   const implDir = join(projectPath, ".tickets", "impl");
-  const ticketDir = join(implDir, ticket.id);
-
-  await mkdir(ticketDir, { recursive: true });
-
   const content = formatTicketFile(ticket);
+
+  if (ticket.parent) {
+    // Write as sibling .md file in parent's directory (Folia convention)
+    // .tickets/impl/<parent>/<sub-ticket-id>.md
+    const parentDir = join(implDir, ticket.parent);
+    await mkdir(parentDir, { recursive: true });
+    const filePath = join(parentDir, `${ticket.id}.md`);
+    await writeFile(filePath, content, "utf-8");
+    return filePath;
+  }
+
+  // No parent — create its own directory (top-level ticket)
+  const ticketDir = join(implDir, ticket.id);
+  await mkdir(ticketDir, { recursive: true });
   const filePath = join(ticketDir, "README.md");
   await writeFile(filePath, content, "utf-8");
-
   return filePath;
 }
 
