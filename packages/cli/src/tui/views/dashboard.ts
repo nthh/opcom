@@ -673,13 +673,34 @@ export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
 
 /**
  * Compute the next plan ID when cycling through plans.
- * Returns the plan ID to switch to, or null if there's nothing to switch to.
+ * Prioritizes non-terminal plans (executing, paused, planning) so running plans
+ * are always immediately discoverable — never hidden behind cancelled/done plans.
+ * When all plans are terminal, cycles through them normally.
  * @param offset +1 for next, -1 for previous
  */
 export function getNextPlanId(state: DashboardState, offset: number): string | null {
   const { allPlans, planPanel } = state;
   if (allPlans.length <= 1) return null;
+
   const currentId = planPanel?.plan.id;
+  const terminalStatuses = new Set(["cancelled", "done"]);
+  const nonTerminal = allPlans.filter((p) => !terminalStatuses.has(p.status));
+
+  // Multiple non-terminal plans: cycle only through those
+  if (nonTerminal.length > 1) {
+    const curIdx = currentId ? nonTerminal.findIndex((p) => p.id === currentId) : -1;
+    const nextIdx = curIdx === -1
+      ? 0
+      : ((curIdx + offset) % nonTerminal.length + nonTerminal.length) % nonTerminal.length;
+    return nonTerminal[nextIdx].id;
+  }
+
+  // Exactly 1 non-terminal plan: jump to it if we're not on it, otherwise nothing to cycle to
+  if (nonTerminal.length === 1) {
+    return currentId === nonTerminal[0].id ? null : nonTerminal[0].id;
+  }
+
+  // All plans are terminal — cycle through all normally
   const currentIdx = currentId ? allPlans.findIndex((p) => p.id === currentId) : -1;
   const nextIdx = currentIdx === -1
     ? 0

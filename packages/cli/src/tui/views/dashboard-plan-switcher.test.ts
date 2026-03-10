@@ -118,6 +118,75 @@ describe("plan switcher", () => {
 
       expect(getNextPlanId(state, 1)).toBe("plan-a");
     });
+
+    it("skips cancelled/done plans when cycling forward", () => {
+      const state = createDashboardState();
+      state.allPlans = [
+        makeSummary("plan-a", "alpha", "executing"),
+        makeSummary("plan-b", "beta", "cancelled"),
+        makeSummary("plan-c", "gamma", "cancelled"),
+        makeSummary("plan-d", "delta", "paused"),
+      ];
+      state.planPanel = { plan: makePlan({ id: "plan-a", name: "alpha" }) };
+
+      // Should skip cancelled plans and land on paused
+      expect(getNextPlanId(state, 1)).toBe("plan-d");
+    });
+
+    it("skips cancelled/done plans when cycling backward", () => {
+      const state = createDashboardState();
+      state.allPlans = [
+        makeSummary("plan-a", "alpha", "executing"),
+        makeSummary("plan-b", "beta", "cancelled"),
+        makeSummary("plan-c", "gamma", "done"),
+        makeSummary("plan-d", "delta", "paused"),
+      ];
+      state.planPanel = { plan: makePlan({ id: "plan-a", name: "alpha" }) };
+
+      // Backward from first non-terminal → last non-terminal (plan-d)
+      expect(getNextPlanId(state, -1)).toBe("plan-d");
+    });
+
+    it("jumps to executing plan from a cancelled plan", () => {
+      const state = createDashboardState();
+      state.allPlans = [
+        makeSummary("plan-a", "alpha", "cancelled"),
+        makeSummary("plan-b", "beta", "executing"),
+        makeSummary("plan-c", "gamma", "cancelled"),
+      ];
+      state.planPanel = { plan: makePlan({ id: "plan-a", name: "alpha", status: "cancelled" }) };
+
+      // Only one non-terminal plan — jump directly to it
+      expect(getNextPlanId(state, 1)).toBe("plan-b");
+    });
+
+    it("returns null when on the only non-terminal plan", () => {
+      const state = createDashboardState();
+      state.allPlans = [
+        makeSummary("plan-a", "alpha", "cancelled"),
+        makeSummary("plan-b", "beta", "executing"),
+        makeSummary("plan-c", "gamma", "done"),
+      ];
+      state.planPanel = { plan: makePlan({ id: "plan-b", name: "beta" }) };
+
+      // Only one non-terminal plan and we're on it — nothing to cycle to
+      expect(getNextPlanId(state, 1)).toBeNull();
+    });
+
+    it("cycles through all plans when all are terminal", () => {
+      const state = createDashboardState();
+      state.allPlans = [
+        makeSummary("plan-a", "alpha", "cancelled"),
+        makeSummary("plan-b", "beta", "done"),
+        makeSummary("plan-c", "gamma", "cancelled"),
+      ];
+      state.planPanel = { plan: makePlan({ id: "plan-a", name: "alpha", status: "cancelled" }) };
+
+      // All terminal — normal cycling
+      expect(getNextPlanId(state, 1)).toBe("plan-b");
+      state.planPanel = { plan: makePlan({ id: "plan-b", name: "beta", status: "done" }) };
+      expect(getNextPlanId(state, 1)).toBe("plan-c");
+    });
   });
 
   describe("plan panel header", () => {
