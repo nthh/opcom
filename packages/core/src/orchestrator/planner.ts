@@ -311,13 +311,16 @@ export function expandTeamSteps(
  * Supported markers on each `- [ ] Title` line:
  * - `(sequential)` — depends on the previous subtask in the list
  * - `(deps: id-a, id-b)` — explicit dependencies on other subtask IDs
+ * - `(parallel)` or `[P]` — explicit parallel (same as default, documents intent)
  * - No marker — parallel by default: no automatic deps, can run concurrently
+ *
+ * Also handles Folia-style task ID prefixes like `T001`, `T002 [P]`, etc.
+ * The ID prefix is stripped from the title and used as the subtask ID
+ * instead of slugifying the description.
  *
  * Parallel is the default because agents with file-overlap scheduling and
  * shared worktrees handle concurrency safely. Explicit deps should be stated
  * when ordering actually matters, not assumed from list position.
- *
- * IDs are slugified from titles.
  */
 export function extractSubtasks(body: string): Subtask[] {
   if (!body) return [];
@@ -332,6 +335,21 @@ export function extractSubtasks(body: string): Subtask[] {
     let title = match[1].trim();
     let parallel = true;
     let deps: string[] = [];
+    let explicitId: string | undefined;
+
+    // Check for Folia-style task ID prefix: T001, T002, etc.
+    const idPrefixMatch = title.match(/^(T\d{3,})\s+/);
+    if (idPrefixMatch) {
+      explicitId = idPrefixMatch[1].toLowerCase();
+      title = title.slice(idPrefixMatch[0].length).trim();
+    }
+
+    // Check for [P] marker (Folia convention) — explicit parallel
+    const bracketPMatch = title.match(/^\[P\]\s*/);
+    if (bracketPMatch) {
+      parallel = true;
+      title = title.slice(bracketPMatch[0].length).trim();
+    }
 
     // Check for (parallel) marker — explicit, same as default but documents intent
     const parallelMatch = title.match(/\s*\(parallel\)\s*$/);
@@ -358,7 +376,7 @@ export function extractSubtasks(body: string): Subtask[] {
       title = title.slice(0, depsMatch.index).trim();
     }
 
-    const id = slugify(title);
+    const id = explicitId ?? slugify(title);
     subtasks.push({ id, title, parallel, deps });
   }
 

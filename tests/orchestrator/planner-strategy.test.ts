@@ -219,6 +219,40 @@ describe("extractSubtasks", () => {
     const subtasks = extractSubtasks(body);
     expect(subtasks[0].id).toBe("set-up-the-database-schema");
   });
+
+  it("parses Folia-style [P] marker as parallel", () => {
+    const body = [
+      "- [ ] T001 [P] Create project scaffold",
+      "- [ ] T002 [P] Add dependencies",
+      "- [ ] T003 Build API (deps: t001, t002)",
+    ].join("\n");
+    const subtasks = extractSubtasks(body);
+    expect(subtasks).toHaveLength(3);
+    expect(subtasks[0]).toMatchObject({ id: "t001", title: "Create project scaffold", parallel: true, deps: [] });
+    expect(subtasks[1]).toMatchObject({ id: "t002", title: "Add dependencies", parallel: true, deps: [] });
+    expect(subtasks[2]).toMatchObject({ id: "t003", title: "Build API", parallel: false, deps: ["t001", "t002"] });
+  });
+
+  it("uses T-prefix ID instead of slugified title", () => {
+    const body = "- [ ] T010 [P] Test atomic task claim";
+    const subtasks = extractSubtasks(body);
+    expect(subtasks[0].id).toBe("t010");
+    expect(subtasks[0].title).toBe("Test atomic task claim");
+  });
+
+  it("handles T-prefix without [P] marker", () => {
+    const body = "- [ ] T001 Create models (sequential)\n- [ ] T002 Create services (sequential)";
+    const subtasks = extractSubtasks(body);
+    expect(subtasks[0]).toMatchObject({ id: "t001", title: "Create models", parallel: false, deps: [] });
+    expect(subtasks[1]).toMatchObject({ id: "t002", title: "Create services", parallel: false, deps: ["t001"] });
+  });
+
+  it("handles [P] without T-prefix (bare marker)", () => {
+    const body = "- [ ] [P] Setup database\n- [ ] [P] Setup cache";
+    const subtasks = extractSubtasks(body);
+    expect(subtasks[0]).toMatchObject({ id: "setup-database", parallel: true, deps: [] });
+    expect(subtasks[1]).toMatchObject({ id: "setup-cache", parallel: true, deps: [] });
+  });
 });
 
 describe("expandSubtaskSteps (swarm decomposition)", () => {
