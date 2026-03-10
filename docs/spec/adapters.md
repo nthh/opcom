@@ -23,32 +23,44 @@ interface AgentStartConfig {
 }
 ```
 
+### Project Profile
+
+A `ProjectProfile` is the operational view of a project — the subset of `ProjectConfig` that agents need to understand how the project works. It captures what the project is, how to build/test/run it, and where it deploys.
+
+```typescript
+interface ProjectProfile {
+  name: string
+  path: string
+  description?: string           // what the project is about
+  stack: StackInfo               // languages, frameworks, infra
+  testing: TestingConfig | null  // how to run tests
+  linting: LintConfig[]          // how to lint
+  services: ServiceDefinition[]  // runnable services
+  environments?: EnvironmentConfig[] // dev, staging, prod
+}
+```
+
+Built by `buildProjectProfile(config: ProjectConfig)` — a pure projection, no I/O. Used as the `project` field in `ContextPacket`.
+
 ### Context Packets
 
 The Context Builder assembles everything an agent needs to start working, eliminating manual onboarding:
 
 ```typescript
 interface ContextPacket {
-  project: {
-    name: string
-    path: string
-    stack: StackInfo           // languages, frameworks, infra
-    testing: TestingConfig     // how to run tests
-    linting: LintConfig[]      // how to lint
-    services: ServiceDefinition[]
-  }
+  project: ProjectProfile        // operational view of the project
   workItem?: {
-    ticket: WorkItem           // the ticket to work on
-    spec?: string              // contents of linked spec file
-    relatedTickets?: WorkItem[] // deps, parent, siblings
+    ticket: WorkItem             // the ticket to work on
+    spec?: string                // contents of linked spec file
+    relatedTickets?: WorkItem[]  // deps, parent, siblings
   }
   git: {
     branch: string
     remote: string
     clean: boolean
   }
-  agentConfig?: string         // AGENTS.md, CLAUDE.md, .cursorrules, etc.
-  memory?: string              // persistent agent memory file contents
+  agentConfig?: string           // AGENTS.md, CLAUDE.md, .cursorrules, etc.
+  memory?: string                // persistent agent memory file contents
 }
 ```
 

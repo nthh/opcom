@@ -101,14 +101,7 @@ export interface AgentAdapter {
 // --- Context Packets ---
 
 export interface ContextPacket {
-  project: {
-    name: string;
-    path: string;
-    stack: import("./project.js").StackInfo;
-    testing: import("./project.js").TestingConfig | null;
-    linting: import("./project.js").LintConfig[];
-    services: import("./project.js").ServiceDefinition[];
-  };
+  project: import("./project.js").ProjectProfile;
   workItem?: {
     ticket: import("./work-items.js").WorkItem;
     spec?: string;

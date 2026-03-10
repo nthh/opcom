@@ -124,3 +124,20 @@ export interface ProjectConfigOverrides {
   integrations: import("./integrations.js").IntegrationsConfig;
   infrastructure: import("./infrastructure.js").InfraConfig;
 }
+
+/**
+ * Operational view of a project for agent context.
+ * Extracted from ProjectConfig, contains everything an agent needs to know
+ * about how the project works: what it is, how to build/test/run it, and
+ * where it deploys.
+ */
+export interface ProjectProfile {
+  name: string;
+  path: string;
+  description?: string;
+  stack: StackInfo;
+  testing: TestingConfig | null;
+  linting: LintConfig[];
+  services: ServiceDefinition[];
+  environments?: EnvironmentConfig[];
+}
