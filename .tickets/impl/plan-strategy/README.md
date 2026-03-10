@@ -1,7 +1,7 @@
 ---
 id: plan-strategy
 title: "Add spread/swarm/mixed strategy to plans"
-status: in-progress
+status: closed
 type: feature
 priority: 2
 created: 2026-03-10
