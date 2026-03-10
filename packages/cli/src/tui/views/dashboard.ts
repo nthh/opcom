@@ -25,6 +25,7 @@ import {
   ChatComponent,
   type ChatState,
 } from "../components/chat.js";
+import { formatTeamBadge } from "./plan-step-focus.js";
 
 // Re-export agent helpers for backward compatibility
 export { sortAgents, getPlanStepForAgent, getAgentSortTier, formatStallBadge };
@@ -566,7 +567,9 @@ function renderPlanPanel(
         }
       }
 
-      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}${stallBadge}${gatedBadge}`;
+      const teamBadge = formatTeamBadge(step, plan);
+      const teamStr = teamBadge ? dim(` ${teamBadge}`) : "";
+      const text = `  ${statusStr} ${step.ticketId}${teamStr}${verifyBadge}${stallBadge}${gatedBadge}`;
       const isSelected = line.index === selected && focused;
 
       if (isSelected) {

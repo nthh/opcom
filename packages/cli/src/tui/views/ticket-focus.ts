@@ -4,7 +4,7 @@
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { WorkItem, ProjectConfig, Changeset } from "@opcom/types";
+import type { WorkItem, ProjectConfig, Changeset, TeamDefinition } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -24,6 +24,8 @@ export interface TicketFocusState {
   ticketContent: string | null;
   changesets: Changeset[] | null;
   traceability: TicketTraceability | null;
+  resolvedTeam: TeamDefinition | null;
+  teamResolutionMethod: "explicit" | "trigger" | null;
   scrollOffset: number;
   displayLines: string[];
   wrapWidth: number;
@@ -38,6 +40,8 @@ export function createTicketFocusState(ticket: WorkItem, projectConfig: ProjectC
     ticketContent: null,
     changesets: null,
     traceability: null,
+    resolvedTeam: null,
+    teamResolutionMethod: null,
     scrollOffset: 0,
     displayLines: [],
     wrapWidth: 0,
@@ -112,6 +116,18 @@ export async function loadTicketContent(state: TicketFocusState): Promise<void> 
     state.traceability = null;
   }
 
+  // Resolve team formation
+  try {
+    const { resolveTeam } = await import("@opcom/core");
+    const team = await resolveTeam(ticket);
+    if (team) {
+      state.resolvedTeam = team;
+      state.teamResolutionMethod = ticket.team ? "explicit" : "trigger";
+    }
+  } catch {
+    // Team resolution is optional
+  }
+
   state.loaded = true;
   rebuildDisplayLines(state);
 }
@@ -175,6 +191,20 @@ export function rebuildDisplayLines(state: TicketFocusState, width = 80): void {
 
     if (testFiles.length > 0) {
       lines.push(`${dim("Tests:")}    ${testFiles.join(", ")}`);
+    }
+  }
+
+  // Team formation
+  if (state.resolvedTeam) {
+    const team = state.resolvedTeam;
+    const method = state.teamResolutionMethod === "explicit"
+      ? `explicit: team=${ticket.team}`
+      : `auto: type=${ticket.type}`;
+    lines.push(`${dim("Team:")}     ${team.name} ${dim(`(${method})`)}`);
+
+    if (team.steps.length > 1) {
+      const pipeline = team.steps.map((s) => s.role).join(dim(" \u2192 "));
+      lines.push(`${dim("Pipeline:")} ${pipeline}`);
     }
   }
 
