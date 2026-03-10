@@ -247,6 +247,49 @@ describe("computeTracks", () => {
     // No common prefix, should use track-N
     expect(names[0]).toMatch(/^track-\d+$/);
   });
+
+  it("groups parallel subtask steps by parent ticket into one track", () => {
+    // Subtask steps use parent/subtask ticketId format
+    // All parallel (no deps) but should still be one track
+    const steps = [
+      { ticketId: "big-feature/add-types", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "big-feature/add-api", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "big-feature/add-ui", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "big-feature/add-tests", projectId: "p", status: "ready" as const, blockedBy: [] },
+    ];
+
+    const tracks = computeTracks(steps);
+    expect(tracks.size).toBe(1);
+    const members = [...tracks.values()][0];
+    expect(members).toHaveLength(4);
+  });
+
+  it("groups subtask steps with mixed deps into one track", () => {
+    // Some subtasks have deps, some don't — all same parent
+    const steps = [
+      { ticketId: "auth/define-types", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "auth/build-api", projectId: "p", status: "blocked" as const, blockedBy: ["auth/define-types"] },
+      { ticketId: "auth/build-ui", projectId: "p", status: "blocked" as const, blockedBy: ["auth/define-types"] },
+      { ticketId: "auth/write-tests", projectId: "p", status: "blocked" as const, blockedBy: ["auth/build-api", "auth/build-ui"] },
+    ];
+
+    const tracks = computeTracks(steps);
+    expect(tracks.size).toBe(1);
+    const members = [...tracks.values()][0];
+    expect(members).toHaveLength(4);
+  });
+
+  it("keeps subtasks from different parents in separate tracks", () => {
+    const steps = [
+      { ticketId: "auth/add-types", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "auth/add-api", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "deploy/setup-ci", projectId: "p", status: "ready" as const, blockedBy: [] },
+      { ticketId: "deploy/add-tests", projectId: "p", status: "ready" as const, blockedBy: [] },
+    ];
+
+    const tracks = computeTracks(steps);
+    expect(tracks.size).toBe(2);
+  });
 });
 
 describe("recomputePlan", () => {
