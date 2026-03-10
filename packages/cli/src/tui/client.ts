@@ -84,7 +84,7 @@ export class TuiClient {
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
   private activeExecutorPlanId: string | null = null;
-  private activeExecutor: { pause(): void; resume(): void; confirmStep?(ticketId: string): void; rejectStep?(ticketId: string, reason?: string): void } | null = null;
+  private activeExecutor: { pause(): void; resume(): void; continueToNextStage?(): void; confirmStep?(ticketId: string): void; rejectStep?(ticketId: string, reason?: string): void } | null = null;
 
   // CI/CD poller for direct mode (real-time deployment tracking)
   private cicdPoller: CICDPoller | null = null;
