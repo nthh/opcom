@@ -175,10 +175,11 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
   }
 
   // --- Kubernetes manifests ---
-  if (existsSync(join(projectPath, "k8s")) || existsSync(join(projectPath, "kubernetes"))) {
-    const dir = existsSync(join(projectPath, "k8s")) ? "k8s" : "kubernetes";
-    partialStacks.push({ infrastructure: [{ name: "kubernetes", sourceFile: `${dir}/` }] });
-    evidence.push({ file: `${dir}/`, detectedAs: "infrastructure:kubernetes" });
+  // Check top-level k8s/ dirs, nested k8s/ dirs, and CI workflows using kubectl
+  const k8sDetected = await detectKubernetes(projectPath);
+  if (k8sDetected) {
+    partialStacks.push({ infrastructure: [{ name: "kubernetes", sourceFile: k8sDetected }] });
+    evidence.push({ file: k8sDetected, detectedAs: "infrastructure:kubernetes" });
   }
 
   // --- firebase.json ---
@@ -449,4 +450,35 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     cloudServices: cloudResult.configs,
     evidence,
   };
+}
+
+/**
+ * Detect Kubernetes usage by checking:
+ * 1. Top-level k8s/ or kubernetes/ directories
+ * 2. Nested k8s/ directories (e.g. experiments/remote-dev/k8s/)
+ * 3. CI workflows that use kubectl
+ */
+async function detectKubernetes(projectPath: string): Promise<string | null> {
+  // Top-level directories
+  if (existsSync(join(projectPath, "k8s"))) return "k8s/";
+  if (existsSync(join(projectPath, "kubernetes"))) return "kubernetes/";
+
+  // CI workflows using kubectl
+  const workflowDir = join(projectPath, ".github", "workflows");
+  if (existsSync(workflowDir)) {
+    try {
+      const files = await readdir(workflowDir);
+      for (const f of files) {
+        if (!f.endsWith(".yml") && !f.endsWith(".yaml")) continue;
+        const content = await readFile(join(workflowDir, f), "utf-8");
+        if (content.includes("kubectl") || content.includes("setup-kubectl")) {
+          return `.github/workflows/${f}`;
+        }
+      }
+    } catch {
+      // Skip on read errors
+    }
+  }
+
+  return null;
 }

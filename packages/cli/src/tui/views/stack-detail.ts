@@ -396,7 +396,7 @@ function buildServiceDetails(
   }
   if (svc.healthCheck) {
     const hc = svc.healthCheck;
-    lines.push(`${bold("Health check:")} ${hc.type}${hc.path ? ` ${hc.path}` : ""}`);
+    lines.push(`${bold("Health check:")} ${hc.strategy}${hc.httpPath ? ` ${hc.httpPath}` : ""}`);
   }
   if (svc.env && Object.keys(svc.env).length > 0) {
     lines.push("");

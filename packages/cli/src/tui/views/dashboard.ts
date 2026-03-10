@@ -391,7 +391,10 @@ function formatWorkItemLine(
   const hasAgent = agents.some((a) => a.workItemId === item.id && a.state !== "stopped");
   const agentIcon = hasAgent ? " \ud83e\udd16" : "";
 
-  const line = `${priority} ${statusIcon} ${projectLabel}${item.title}${agentIcon}`;
+  // Show scheduled date for items that have one (e.g. conferences)
+  const dateBadge = item.scheduled ? dim(` [${item.scheduled}]`) : "";
+
+  const line = `${priority} ${statusIcon} ${projectLabel}${item.title}${dateBadge}${agentIcon}`;
   return truncate(line, maxWidth);
 }
 
@@ -641,7 +644,15 @@ export function getFilteredWorkItems(state: DashboardState): DashboardWorkItem[]
     );
   }
 
-  return [...items].sort((a, b) => a.item.priority - b.item.priority);
+  return [...items].sort((a, b) => {
+    // Primary: priority (lower = higher priority)
+    const pDiff = a.item.priority - b.item.priority;
+    if (pDiff !== 0) return pDiff;
+    // Secondary: scheduled date (earlier first, unscheduled last)
+    const aDate = a.item.scheduled ?? "\uffff";
+    const bDate = b.item.scheduled ?? "\uffff";
+    return aDate.localeCompare(bDate);
+  });
 }
 
 export function getPanelItemCount(state: DashboardState, panelIndex: number): number {
