@@ -31,7 +31,8 @@ import type { ProjectCICDState } from "../integrations/cicd-poller.js";
 import { buildGraph, queryProjectDrift, getGraphStats, graphExists } from "../graph/graph-service.js";
 import { KubernetesAdapter, computeInfraHealthSummary } from "../infra/kubernetes.js";
 import { detectInfrastructure } from "../infra/detect.js";
-import type { Disposable, InfraEvent } from "@opcom/types";
+import type { Disposable, InfraEvent, EnvironmentStatus } from "@opcom/types";
+import { EnvironmentManager } from "./environment-manager.js";
 
 interface WebSocketLike {
   send(data: string): void;
@@ -64,10 +65,12 @@ export class Station {
   private executors = new Map<string, Executor>(); // planId → running Executor
   private cicdPoller: CICDPoller | null = null;
   private infraWatchers = new Map<string, Disposable>(); // projectId → watcher disposable
+  readonly environmentManager = new EnvironmentManager();
+  private environmentStatuses = new Map<string, EnvironmentStatus>(); // projectId → env status
   private port: number;
-  private options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean };
+  private options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean; skipEnv?: boolean };
 
-  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean }) {
+  constructor(port = 4700, options?: { skipCICD?: boolean; skipReconcile?: boolean; skipInfra?: boolean; skipEnv?: boolean }) {
     this.port = port;
     this.options = options;
   }
@@ -101,6 +104,17 @@ export class Station {
     // Initialize infrastructure watchers for K8s projects (skip in test)
     if (!this.options?.skipInfra) {
       await this.initInfraWatchers();
+    }
+
+    // Wire environment manager events to broadcast
+    if (!this.options?.skipEnv) {
+      this.environmentManager.onEvent((event) => {
+        this.broadcast(event as ServerEvent);
+        // Cache environment status for snapshots
+        if (event.type === "environment_status") {
+          this.environmentStatuses.set(event.projectId, event.status);
+        }
+      });
     }
 
     // Wire up session events to broadcast
@@ -175,6 +189,9 @@ export class Station {
       executor.stop();
     }
     this.executors.clear();
+
+    // Stop environment manager
+    await this.environmentManager.shutdown();
 
     await this.sessionManager.shutdown();
 
@@ -674,6 +691,62 @@ export class Station {
       }
     }
 
+    // --- Dev Environment endpoints ---
+
+    // GET /projects/:id/environment
+    const envStatusMatch = path.match(/^\/projects\/([^/]+)\/environment$/);
+    if (method === "GET" && envStatusMatch) {
+      const status = this.environmentManager.getEnvironmentStatus(envStatusMatch[1]);
+      return { status: 200, data: status };
+    }
+
+    // GET /projects/:id/services
+    const servicesListMatch = path.match(/^\/projects\/([^/]+)\/services$/);
+    if (method === "GET" && servicesListMatch) {
+      const instances = this.environmentManager.listInstances(servicesListMatch[1]);
+      return { status: 200, data: instances };
+    }
+
+    // POST /projects/:id/services/start-all
+    const startAllMatch = path.match(/^\/projects\/([^/]+)\/services\/start-all$/);
+    if (method === "POST" && startAllMatch) {
+      const project = await loadProject(startAllMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const instances = await this.environmentManager.startAllServices(project);
+      return { status: 200, data: instances };
+    }
+
+    // POST /projects/:id/services/stop-all
+    const stopAllMatch = path.match(/^\/projects\/([^/]+)\/services\/stop-all$/);
+    if (method === "POST" && stopAllMatch) {
+      await this.environmentManager.stopAllServices(stopAllMatch[1]);
+      return { status: 200, data: { stopped: true } };
+    }
+
+    // POST /projects/:id/services/:name/start
+    const startServiceMatch = path.match(/^\/projects\/([^/]+)\/services\/([^/]+)\/start$/);
+    if (method === "POST" && startServiceMatch) {
+      const project = await loadProject(startServiceMatch[1]);
+      if (!project) return { status: 404, data: { error: "Project not found" } };
+      const service = project.services.find((s) => s.name === startServiceMatch[2]);
+      if (!service) return { status: 404, data: { error: "Service not found" } };
+      const instance = await this.environmentManager.startService(project, service);
+      return { status: 200, data: instance };
+    }
+
+    // POST /projects/:id/services/:name/stop
+    const stopServiceMatch = path.match(/^\/projects\/([^/]+)\/services\/([^/]+)\/stop$/);
+    if (method === "POST" && stopServiceMatch) {
+      await this.environmentManager.stopService(stopServiceMatch[1], stopServiceMatch[2]);
+      return { status: 200, data: { stopped: true } };
+    }
+
+    // GET /ports
+    if (method === "GET" && path === "/ports") {
+      const registry = await this.environmentManager.getPortRegistry();
+      return { status: 200, data: registry };
+    }
+
     // GET /changesets?ticketId=X&sessionId=Y&projectId=Z
     if (method === "GET" && path === "/changesets") {
       if (!this.eventStore) {
@@ -715,6 +788,7 @@ export class Station {
         path: status.project.path,
         git: status.gitFresh,
         workSummary: status.workSummary,
+        environmentStatus: this.environmentStatuses.get(id),
       });
     }
     this.sendToClient(ws, {
@@ -983,6 +1057,50 @@ export class Station {
         } else {
           this.sendToClient(ws, { type: "changesets", changesets: [] });
         }
+        break;
+      }
+
+      case "start_services": {
+        const project = await loadProject(command.projectId);
+        if (!project) {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Project not found" });
+          return;
+        }
+        if (command.serviceName) {
+          const service = project.services.find((s) => s.name === command.serviceName);
+          if (!service) {
+            this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Service not found" });
+            return;
+          }
+          await this.environmentManager.startService(project, service);
+        } else {
+          await this.environmentManager.startAllServices(project);
+        }
+        break;
+      }
+
+      case "stop_services": {
+        if (command.serviceName) {
+          await this.environmentManager.stopService(command.projectId, command.serviceName);
+        } else {
+          await this.environmentManager.stopAllServices(command.projectId);
+        }
+        break;
+      }
+
+      case "restart_service": {
+        const project = await loadProject(command.projectId);
+        if (!project) {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Project not found" });
+          return;
+        }
+        const service = project.services.find((s) => s.name === command.serviceName);
+        if (!service) {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "Service not found" });
+          return;
+        }
+        await this.environmentManager.stopService(command.projectId, command.serviceName);
+        await this.environmentManager.startService(project, service);
         break;
       }
     }

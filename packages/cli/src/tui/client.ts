@@ -23,6 +23,8 @@ import type {
   InfraHealthSummary,
   Disposable,
   InfraEvent,
+  EnvironmentStatus,
+  ServiceInstance,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -44,6 +46,7 @@ import {
   CICDPoller,
   GitHubActionsAdapter,
   detectInfrastructure,
+  EnvironmentManager,
 } from "@opcom/core";
 import type { TicketSet } from "@opcom/core";
 
@@ -85,6 +88,9 @@ export class TuiClient {
   // Pod crash events per project (most recent)
   projectInfraCrashes = new Map<string, Array<{ pod: PodDetail; container: string; reason: string; timestamp: string }>>();
 
+  // Dev environment status per project
+  projectEnvironmentStatus = new Map<string, EnvironmentStatus>();
+
   // Local session manager for offline mode
   private localSessionManager: SessionManager | null = null;
   private eventStore: EventStore | null = null;
@@ -96,6 +102,9 @@ export class TuiClient {
 
   // Infrastructure watchers for direct mode (K8s resource monitoring)
   private infraWatchers = new Map<string, Disposable>();
+
+  // Local environment manager for offline mode
+  private localEnvironmentManager: EnvironmentManager | null = null;
 
   // File watchers for .tickets/ directories
   private ticketWatchers: FSWatcher[] = [];
@@ -288,6 +297,13 @@ export class TuiClient {
 
       // Watch .tickets/ dirs for changes so new tickets appear automatically
       this.watchTicketDirs();
+
+      // Initialize local environment manager for dev services
+      this.localEnvironmentManager = new EnvironmentManager();
+      this.localEnvironmentManager.onEvent((event) => {
+        // Forward environment events into the same handler pipeline
+        this.handleServerEvent(event as ServerEvent);
+      });
 
       // Start CI/CD polling for real-time deployment status updates
       this.initCICDPoller().catch((err) => {
@@ -569,6 +585,20 @@ export class TuiClient {
         this.projectInfraCrashes.set(event.projectId, crashes);
         break;
       }
+
+      case "environment_status": {
+        this.projectEnvironmentStatus.set(event.projectId, event.status);
+        // Update project snapshot with environment status
+        this.projects = this.projects.map((p) =>
+          p.id === event.projectId ? { ...p, environmentStatus: event.status } : p,
+        );
+        break;
+      }
+
+      case "service_status":
+      case "port_conflict":
+        // These are informational — environment_status handles the aggregate
+        break;
     }
 
     // Notify handlers
@@ -811,6 +841,45 @@ export class TuiClient {
       case "list_plans": {
         await this.loadActivePlan();
         this.handleServerEvent({ type: "plans_list", plans: this.allPlans } as ServerEvent);
+        break;
+      }
+
+      case "start_services": {
+        if (!this.localEnvironmentManager) break;
+        const envProject = this.projectConfigs.get(command.projectId);
+        if (!envProject) {
+          log.error("start_services: project not found", { projectId: command.projectId });
+          break;
+        }
+        if (command.serviceName) {
+          const service = envProject.services.find((s) => s.name === command.serviceName);
+          if (service) {
+            await this.localEnvironmentManager.startService(envProject, service);
+          }
+        } else {
+          await this.localEnvironmentManager.startAllServices(envProject);
+        }
+        break;
+      }
+
+      case "stop_services": {
+        if (!this.localEnvironmentManager) break;
+        if (command.serviceName) {
+          await this.localEnvironmentManager.stopService(command.projectId, command.serviceName);
+        } else {
+          await this.localEnvironmentManager.stopAllServices(command.projectId);
+        }
+        break;
+      }
+
+      case "restart_service": {
+        if (!this.localEnvironmentManager) break;
+        const restartProject = this.projectConfigs.get(command.projectId);
+        if (!restartProject) break;
+        const svc = restartProject.services.find((s) => s.name === command.serviceName);
+        if (!svc) break;
+        await this.localEnvironmentManager.stopService(command.projectId, command.serviceName);
+        await this.localEnvironmentManager.startService(restartProject, svc);
         break;
       }
 
@@ -1197,6 +1266,10 @@ export class TuiClient {
       try { watcher.dispose(); } catch { /* ignore */ }
     }
     this.infraWatchers.clear();
+    if (this.localEnvironmentManager) {
+      this.localEnvironmentManager.shutdown().catch(() => {});
+      this.localEnvironmentManager = null;
+    }
     if (this.localSessionManager) {
       this.localSessionManager.shutdown().catch(() => {});
       this.localSessionManager = null;

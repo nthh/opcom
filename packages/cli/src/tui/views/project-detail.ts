@@ -13,6 +13,8 @@ import type {
   InfraResource,
   PodDetail,
   ResourceStatus,
+  EnvironmentStatus,
+  ServiceInstance,
 } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import type { SpecCoverageItem } from "../health-data.js";
@@ -57,6 +59,7 @@ export interface ProjectDetailState {
   deployments: DeploymentStatus[];
   infraResources: InfraResource[];
   infraCrashEvents: InfraCrashEvent[];
+  environmentStatus: EnvironmentStatus | null;
   focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd, 6=infra, 7=chat
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
@@ -79,6 +82,7 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     deployments: [],
     infraResources: [],
     infraCrashEvents: [],
+    environmentStatus: null,
     focusedPanel: 0,
     selectedIndex: [0, 0, 0, 0, 0, 0, 0, 0],
     scrollOffset: [0, 0, 0, 0, 0, 0, 0, 0],
@@ -400,6 +404,29 @@ function categoryHeader(category: StackItem["category"]): string {
   }
 }
 
+function formatServiceIcon(state: string): string {
+  switch (state) {
+    case "running": return color(ANSI.green, "\u25cf");      // ●
+    case "starting":
+    case "restarting": return color(ANSI.cyan, "\u25d0");     // ◐
+    case "unhealthy": return color(ANSI.yellow, "\u25d0");    // ◐
+    case "crashed": return color(ANSI.red, "\u25cb");         // ○
+    default: return dim("\u25cb");                             // ○
+  }
+}
+
+function formatServiceUptime(startedAt: string): string {
+  try {
+    const diff = Date.now() - new Date(startedAt).getTime();
+    if (diff < 60_000) return `${Math.floor(diff / 1000)}s`;
+    if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m`;
+    if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h`;
+    return `${Math.floor(diff / 86400_000)}d`;
+  } catch {
+    return "";
+  }
+}
+
 // --- Cloud Panel ---
 
 /** Sections shown in cloud panel, organized by kind. Only shown if services exist. */
@@ -627,6 +654,16 @@ function infraStatusColor(status: ResourceStatus): string {
     case "suspended": return ANSI.dim;
     case "unknown": return ANSI.dim;
   }
+}
+
+/** Flat list of services for navigation. Returns live instances or static definitions. */
+export function getServicesList(state: ProjectDetailState): Array<{ name: string; instance?: ServiceInstance }> {
+  const config = state.projectConfig;
+  if (!config) return [];
+  return config.services.map((svc) => {
+    const instance = state.environmentStatus?.services.find((s) => s.serviceName === svc.name);
+    return { name: svc.name, instance };
+  });
 }
 
 /** Flat list of infra resources for navigation. */

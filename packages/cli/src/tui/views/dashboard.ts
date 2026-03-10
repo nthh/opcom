@@ -1,7 +1,7 @@
 // TUI Dashboard View (Level 1)
 // Projects panel | Work queue panel | Agents panel
 
-import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, PlanSummary, StallSignal, DeploymentStatus, InfraHealthSummary } from "@opcom/types";
+import type { ProjectStatusSnapshot, AgentSession, WorkItem, Plan, PlanStep, PlanSummary, StallSignal, DeploymentStatus, InfraHealthSummary, EnvironmentStatus } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import {
   ScreenBuffer,
@@ -289,7 +289,14 @@ export function formatProjectLine(
     infraStr = ` ${formatInfraDots(project.infraHealthSummary)} K8s`;
   }
 
-  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}${infraStr}`;
+  let envStr = "";
+  if (project.environmentStatus && project.environmentStatus.services.length > 0) {
+    const es = project.environmentStatus;
+    const running = es.services.filter((s) => s.state === "running").length;
+    envStr = ` ${formatServiceDots(es)} ${dim(`${running}/${es.services.length} svc`)}`;
+  }
+
+  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}${infraStr}${envStr}`;
   return truncate(line, maxWidth);
 }
 
@@ -312,6 +319,32 @@ function formatCloudDots(summary: import("@opcom/types").CloudHealthSummary): st
   for (let i = 0; i < summary.degraded; i++) dots.push(color(ANSI.yellow, "\u25d0"));
   for (let i = 0; i < summary.unreachable; i++) dots.push(color(ANSI.red, "\u25cb"));
   for (let i = 0; i < summary.unknown; i++) dots.push(dim("\u25cc"));
+  return dots.join("");
+}
+
+export function formatServiceDots(envStatus: EnvironmentStatus): string {
+  const dots: string[] = [];
+  for (const svc of envStatus.services) {
+    switch (svc.state) {
+      case "running":
+        dots.push(color(ANSI.green, "\u25cf"));      // ●
+        break;
+      case "starting":
+      case "restarting":
+        dots.push(color(ANSI.cyan, "\u25d0"));        // ◐
+        break;
+      case "unhealthy":
+        dots.push(color(ANSI.yellow, "\u25d0"));       // ◐
+        break;
+      case "crashed":
+        dots.push(color(ANSI.red, "\u25cb"));          // ○
+        break;
+      case "stopped":
+      default:
+        dots.push(dim("\u25cb"));                       // ○
+        break;
+    }
+  }
   return dots.join("");
 }
 

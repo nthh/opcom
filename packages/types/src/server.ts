@@ -34,7 +34,11 @@ export type ClientCommand =
   | { type: "list_plans"; statusFilter?: import("./plan.js").PlanStatus }
   | { type: "run_hygiene" }
   // Changeset queries
-  | { type: "get_changesets"; ticketId?: string; sessionId?: string; projectId?: string };
+  | { type: "get_changesets"; ticketId?: string; sessionId?: string; projectId?: string }
+  // Dev environment commands
+  | { type: "start_services"; projectId: string; serviceName?: string }
+  | { type: "stop_services"; projectId: string; serviceName?: string }
+  | { type: "restart_service"; projectId: string; serviceName: string };
 
 // --- WebSocket: Server → Client ---
 
@@ -107,6 +111,7 @@ export interface ProjectStatusSnapshot {
   workSummary: WorkSummary | null;
   cloudHealthSummary?: CloudHealthSummary;
   infraHealthSummary?: InfraHealthSummary;
+  environmentStatus?: EnvironmentStatus;
 }
 
 export interface CloudHealthSummary {
