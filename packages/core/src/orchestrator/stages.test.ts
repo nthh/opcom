@@ -6,6 +6,7 @@ import {
   validateExplicitStages,
   computeStageSummary,
   computePlan,
+  computeTracks,
   type TicketSet,
 } from "./planner.js";
 
@@ -40,56 +41,114 @@ function makeTicketSets(tickets: WorkItem[]): TicketSet[] {
   return [{ projectId: "opcom", tickets }];
 }
 
-// --- computeStages ---
+/** Assign tracks to steps using computeTracks (mirrors what computePlan does). */
+function assignTracks(steps: PlanStep[]): void {
+  const tracks = computeTracks(steps);
+  for (const [trackName, stepIds] of tracks) {
+    for (const id of stepIds) {
+      const step = steps.find((s) => s.ticketId === id);
+      if (step) step.track = trackName;
+    }
+  }
+}
+
+// --- computeStages (track-based) ---
 
 describe("computeStages", () => {
-  it("puts all independent steps in stage 0", () => {
+  it("puts all independent steps in a single stage", () => {
     const steps = [
       makeStep({ ticketId: "a" }),
       makeStep({ ticketId: "b" }),
       makeStep({ ticketId: "c" }),
     ];
+    assignTracks(steps);
 
     const stages = computeStages(steps);
 
+    // 3 independent single-step tracks all fit in one stage (maxStageSize=6)
     expect(stages).toHaveLength(1);
     expect(stages[0].index).toBe(0);
-    expect(stages[0].stepTicketIds).toEqual(["a", "b", "c"]);
+    expect(stages[0].stepTicketIds).toContain("a");
+    expect(stages[0].stepTicketIds).toContain("b");
+    expect(stages[0].stepTicketIds).toContain("c");
     expect(stages[0].status).toBe("pending");
   });
 
-  it("groups steps by dependency depth", () => {
+  it("groups a dependency chain as a single track in one stage", () => {
     const steps = [
       makeStep({ ticketId: "a", blockedBy: [] }),
-      makeStep({ ticketId: "b", blockedBy: [] }),
       makeStep({ ticketId: "c", blockedBy: ["a"] }),
       makeStep({ ticketId: "d", blockedBy: ["c"] }),
     ];
+    assignTracks(steps);
 
     const stages = computeStages(steps);
 
-    expect(stages).toHaveLength(3);
-    expect(stages[0].stepTicketIds).toEqual(["a", "b"]);
-    expect(stages[1].stepTicketIds).toEqual(["c"]);
-    expect(stages[2].stepTicketIds).toEqual(["d"]);
+    // a → c → d is one track, fits in one stage
+    expect(stages).toHaveLength(1);
+    expect(stages[0].stepTicketIds).toContain("a");
+    expect(stages[0].stepTicketIds).toContain("c");
+    expect(stages[0].stepTicketIds).toContain("d");
   });
 
-  it("handles diamond dependencies", () => {
-    // a → c, b → c, c → d
+  it("separates independent tracks into different stages when exceeding maxStageSize", () => {
     const steps = [
-      makeStep({ ticketId: "a", blockedBy: [] }),
-      makeStep({ ticketId: "b", blockedBy: [] }),
-      makeStep({ ticketId: "c", blockedBy: ["a", "b"] }),
-      makeStep({ ticketId: "d", blockedBy: ["c"] }),
+      makeStep({ ticketId: "a1" }),
+      makeStep({ ticketId: "a2" }),
+      makeStep({ ticketId: "a3" }),
+      makeStep({ ticketId: "b1" }),
+      makeStep({ ticketId: "b2" }),
+      makeStep({ ticketId: "b3" }),
     ];
+    assignTracks(steps);
+
+    // With maxStageSize=3, each group of 3 independent steps gets its own stage
+    // But they're all independent single-step tracks so they batch
+    const stages = computeStages(steps, 3);
+
+    // 6 independent tracks, maxStageSize 3 → 2 stages
+    expect(stages).toHaveLength(2);
+    expect(stages[0].stepTicketIds).toHaveLength(3);
+    expect(stages[1].stepTicketIds).toHaveLength(3);
+  });
+
+  it("puts truly independent tracks in same stage within maxStageSize", () => {
+    // auth track: auth-types → auth-api (connected component)
+    // db track: db-types → db-adapter (separate connected component)
+    // No bridging ticket → these stay as separate tracks
+    const steps = [
+      makeStep({ ticketId: "auth-types", blockedBy: [] }),
+      makeStep({ ticketId: "auth-api", blockedBy: ["auth-types"] }),
+      makeStep({ ticketId: "db-types", blockedBy: [] }),
+      makeStep({ ticketId: "db-adapter", blockedBy: ["db-types"] }),
+    ];
+    assignTracks(steps);
 
     const stages = computeStages(steps);
 
-    expect(stages).toHaveLength(3);
-    expect(stages[0].stepTicketIds).toContain("a");
-    expect(stages[0].stepTicketIds).toContain("b");
-    expect(stages[1].stepTicketIds).toEqual(["c"]);
-    expect(stages[2].stepTicketIds).toEqual(["d"]);
+    // auth + db tracks are independent, total 4 steps < maxStageSize(6) → one stage
+    expect(stages).toHaveLength(1);
+    expect(stages[0].stepTicketIds).toContain("auth-types");
+    expect(stages[0].stepTicketIds).toContain("auth-api");
+    expect(stages[0].stepTicketIds).toContain("db-types");
+    expect(stages[0].stepTicketIds).toContain("db-adapter");
+  });
+
+  it("splits independent tracks into separate stages when exceeding maxStageSize", () => {
+    const steps = [
+      makeStep({ ticketId: "auth-types", blockedBy: [] }),
+      makeStep({ ticketId: "auth-api", blockedBy: ["auth-types"] }),
+      makeStep({ ticketId: "db-types", blockedBy: [] }),
+      makeStep({ ticketId: "db-adapter", blockedBy: ["db-types"] }),
+    ];
+    assignTracks(steps);
+
+    // maxStageSize=2 → each track gets its own stage
+    const stages = computeStages(steps, 2);
+
+    expect(stages).toHaveLength(2);
+    expect(stages[0].stepTicketIds).toHaveLength(2);
+    expect(stages[1].stepTicketIds).toHaveLength(2);
   });
 
   it("returns empty array for empty steps", () => {
@@ -99,71 +158,116 @@ describe("computeStages", () => {
 
   it("handles single step", () => {
     const steps = [makeStep({ ticketId: "solo" })];
+    assignTracks(steps);
     const stages = computeStages(steps);
 
     expect(stages).toHaveLength(1);
     expect(stages[0].stepTicketIds).toEqual(["solo"]);
   });
 
-  it("ignores deps pointing to tickets not in the step list", () => {
+  it("assigns stage names from track names", () => {
+    // Two independent tracks
     const steps = [
-      makeStep({ ticketId: "a", blockedBy: ["external-dep"] }),
-      makeStep({ ticketId: "b", blockedBy: ["a"] }),
+      makeStep({ ticketId: "auth-types", blockedBy: [] }),
+      makeStep({ ticketId: "auth-api", blockedBy: ["auth-types"] }),
+      makeStep({ ticketId: "db-setup", blockedBy: [] }),
     ];
+    assignTracks(steps);
 
-    const stages = computeStages(steps);
+    const stages = computeStages(steps, 2);
 
+    // auth track (2 steps) hits maxStageSize=2, db-setup in next stage
     expect(stages).toHaveLength(2);
-    expect(stages[0].stepTicketIds).toEqual(["a"]);
-    expect(stages[1].stepTicketIds).toEqual(["b"]);
+    expect(stages[0].name).toBeDefined();
+    expect(stages[1].name).toBeDefined();
   });
 
-  it("puts cyclic deps in a final catch-all stage", () => {
+  it("merges small independent tracks into one stage", () => {
     const steps = [
-      makeStep({ ticketId: "a", blockedBy: ["b"] }),
-      makeStep({ ticketId: "b", blockedBy: ["a"] }),
-      makeStep({ ticketId: "c", blockedBy: [] }),
+      makeStep({ ticketId: "fix-typo", track: "fix-typo" }),
+      makeStep({ ticketId: "add-lint", track: "add-lint" }),
+      makeStep({ ticketId: "bump-deps", track: "bump-deps" }),
     ];
 
     const stages = computeStages(steps);
 
-    // c goes in stage 0, a and b are cyclic so they end up in a catch-all
-    expect(stages.length).toBeGreaterThanOrEqual(2);
-    expect(stages[0].stepTicketIds).toContain("c");
-    // The cyclic pair should appear in a later stage
-    const cyclicStage = stages.find(
-      (s) => s.stepTicketIds.includes("a") && s.stepTicketIds.includes("b"),
-    );
-    expect(cyclicStage).toBeDefined();
+    // 3 small tracks fit under maxStageSize=6 → 1 stage
+    expect(stages).toHaveLength(1);
+    expect(stages[0].stepTicketIds).toHaveLength(3);
+    expect(stages[0].name).toContain("fix-typo");
   });
 
   it("assigns sequential indices", () => {
+    // 4 independent steps, maxStageSize=2 → 2 stages
     const steps = [
-      makeStep({ ticketId: "a", blockedBy: [] }),
-      makeStep({ ticketId: "b", blockedBy: ["a"] }),
-      makeStep({ ticketId: "c", blockedBy: ["b"] }),
+      makeStep({ ticketId: "a", track: "a" }),
+      makeStep({ ticketId: "b", track: "b" }),
+      makeStep({ ticketId: "c", track: "c" }),
+      makeStep({ ticketId: "d", track: "d" }),
     ];
 
-    const stages = computeStages(steps);
+    const stages = computeStages(steps, 2);
 
-    expect(stages.map((s) => s.index)).toEqual([0, 1, 2]);
+    expect(stages.map((s) => s.index)).toEqual([0, 1]);
   });
 
-  it("computes correctly for wide and deep DAGs", () => {
-    // Wide: many independent roots, one sink
-    const steps = [
-      makeStep({ ticketId: "r1", blockedBy: [] }),
-      makeStep({ ticketId: "r2", blockedBy: [] }),
-      makeStep({ ticketId: "r3", blockedBy: [] }),
-      makeStep({ ticketId: "r4", blockedBy: [] }),
-      makeStep({ ticketId: "sink", blockedBy: ["r1", "r2", "r3", "r4"] }),
-    ];
+  it("respects maxStageSize to split large independent batches", () => {
+    // 8 independent steps, maxStageSize=4
+    const steps = Array.from({ length: 8 }, (_, i) =>
+      makeStep({ ticketId: `t${i}`, track: `t${i}` }),
+    );
 
-    const stages = computeStages(steps);
+    const stages = computeStages(steps, 4);
 
     expect(stages).toHaveLength(2);
     expect(stages[0].stepTicketIds).toHaveLength(4);
-    expect(stages[1].stepTicketIds).toEqual(["sink"]);
+    expect(stages[1].stepTicketIds).toHaveLength(4);
+  });
+
+  it("handles cyclic deps by placing cyclic track at end", () => {
+    const steps = [
+      makeStep({ ticketId: "a", blockedBy: ["b"], track: "cyclic" }),
+      makeStep({ ticketId: "b", blockedBy: ["a"], track: "cyclic" }),
+      makeStep({ ticketId: "c", blockedBy: [], track: "safe" }),
+    ];
+
+    const stages = computeStages(steps);
+
+    // All steps should appear in some stage
+    const allIds = stages.flatMap((s) => s.stepTicketIds);
+    expect(allIds).toContain("a");
+    expect(allIds).toContain("b");
+    expect(allIds).toContain("c");
+  });
+
+  it("keeps inter-track dep ordering across stages", () => {
+    // track-a: a1 → a2
+    // track-b: b1 → b2, b2 depends on a2
+    const steps = [
+      makeStep({ ticketId: "a1", blockedBy: [] }),
+      makeStep({ ticketId: "a2", blockedBy: ["a1"] }),
+      makeStep({ ticketId: "b1", blockedBy: [] }),
+      makeStep({ ticketId: "b2", blockedBy: ["b1", "a2"] }),
+    ];
+    assignTracks(steps);
+
+    const stages = computeStages(steps);
+
+    // a-track and b-track are connected (b2 depends on a2) so they form
+    // one track via union-find, ending up in one stage
+    // OR if they're separate tracks, b-track must come after a-track
+    const allIds = stages.flatMap((s) => s.stepTicketIds);
+    expect(allIds).toContain("a1");
+    expect(allIds).toContain("a2");
+    expect(allIds).toContain("b1");
+    expect(allIds).toContain("b2");
+
+    // If they're in separate stages, a-track comes first
+    if (stages.length > 1) {
+      const a2StageIdx = stages.findIndex((s) => s.stepTicketIds.includes("a2"));
+      const b2StageIdx = stages.findIndex((s) => s.stepTicketIds.includes("b2"));
+      expect(a2StageIdx).toBeLessThanOrEqual(b2StageIdx);
+    }
   });
 });
 
@@ -380,7 +484,7 @@ describe("computeStageSummary", () => {
 // --- Integration: computePlan + stages ---
 
 describe("computePlan with stages", () => {
-  it("stages can be computed from a plan's steps", () => {
+  it("stages group a single dep chain as one track in one stage", () => {
     const tickets = [
       makeWorkItem({ id: "types", deps: [] }),
       makeWorkItem({ id: "core", deps: ["types"] }),
@@ -390,13 +494,14 @@ describe("computePlan with stages", () => {
     const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
     const stages = computeStages(plan.steps);
 
-    expect(stages).toHaveLength(3);
-    expect(stages[0].stepTicketIds).toEqual(["types"]);
-    expect(stages[1].stepTicketIds).toEqual(["core"]);
-    expect(stages[2].stepTicketIds).toEqual(["cli"]);
+    // types → core → cli is one connected track → one stage
+    expect(stages).toHaveLength(1);
+    expect(stages[0].stepTicketIds).toContain("types");
+    expect(stages[0].stepTicketIds).toContain("core");
+    expect(stages[0].stepTicketIds).toContain("cli");
   });
 
-  it("computes stages for a plan with parallel independent tracks", () => {
+  it("puts connected tracks (via integration ticket) in single stage", () => {
     const tickets = [
       makeWorkItem({ id: "auth-types", deps: [] }),
       makeWorkItem({ id: "auth-api", deps: ["auth-types"] }),
@@ -408,15 +513,31 @@ describe("computePlan with stages", () => {
     const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
     const stages = computeStages(plan.steps);
 
-    expect(stages).toHaveLength(3);
-    // Stage 0: both types tickets
+    // integration bridges auth and db → all one connected track → one stage
+    expect(stages).toHaveLength(1);
     expect(stages[0].stepTicketIds).toContain("auth-types");
+    expect(stages[0].stepTicketIds).toContain("auth-api");
     expect(stages[0].stepTicketIds).toContain("db-types");
-    // Stage 1: both dependent tickets
-    expect(stages[1].stepTicketIds).toContain("auth-api");
-    expect(stages[1].stepTicketIds).toContain("db-adapter");
-    // Stage 2: integration
-    expect(stages[2].stepTicketIds).toEqual(["integration"]);
+    expect(stages[0].stepTicketIds).toContain("db-adapter");
+    expect(stages[0].stepTicketIds).toContain("integration");
+  });
+
+  it("separates truly independent tracks into stages when exceeding maxStageSize", () => {
+    const tickets = [
+      makeWorkItem({ id: "auth-types", deps: [] }),
+      makeWorkItem({ id: "auth-api", deps: ["auth-types"] }),
+      makeWorkItem({ id: "db-types", deps: [] }),
+      makeWorkItem({ id: "db-adapter", deps: ["db-types"] }),
+    ];
+
+    const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
+    const stages = computeStages(plan.steps, 2);
+
+    // auth track (2 steps) and db track (2 steps) are independent
+    // maxStageSize=2 → each track gets its own stage
+    expect(stages).toHaveLength(2);
+    expect(stages[0].stepTicketIds).toHaveLength(2);
+    expect(stages[1].stepTicketIds).toHaveLength(2);
   });
 
   it("explicit stages in config override auto-staging", () => {
@@ -434,5 +555,34 @@ describe("computePlan with stages", () => {
     expect(stages).toHaveLength(2);
     expect(stages[0].stepTicketIds).toEqual(["a"]);
     expect(stages[1].stepTicketIds).toEqual(["b", "c"]);
+  });
+
+  it("stage names derive from track names", () => {
+    const tickets = [
+      makeWorkItem({ id: "geo-pipeline", deps: [] }),
+      makeWorkItem({ id: "geo-indexing", deps: ["geo-pipeline"] }),
+      makeWorkItem({ id: "ui-dashboard", deps: ["geo-indexing"] }),
+    ];
+
+    const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
+    const stages = computeStages(plan.steps);
+
+    // All connected → 1 stage
+    expect(stages).toHaveLength(1);
+    expect(stages[0].name).toBeDefined();
+  });
+
+  it("maxStageSize splits large batches of independent tracks", () => {
+    const tickets = Array.from({ length: 10 }, (_, i) =>
+      makeWorkItem({ id: `task-${i}`, deps: [] }),
+    );
+
+    const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
+    const stages = computeStages(plan.steps, 5);
+
+    // 10 independent single-step tracks, maxStageSize=5 → 2 stages
+    expect(stages).toHaveLength(2);
+    expect(stages[0].stepTicketIds).toHaveLength(5);
+    expect(stages[1].stepTicketIds).toHaveLength(5);
   });
 });

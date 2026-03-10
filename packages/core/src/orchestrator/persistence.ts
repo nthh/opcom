@@ -20,6 +20,7 @@ export function defaultConfig(): OrchestratorConfig {
       autoRebase: true,
     },
     autoContinue: true,
+    maxStageSize: 6,
     stall: {
       enabled: true,
       agentTimeoutMs: 20 * 60 * 1000,  // 20 minutes

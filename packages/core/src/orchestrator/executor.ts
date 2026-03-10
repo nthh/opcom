@@ -2137,7 +2137,7 @@ export class Executor {
     if (this.plan.config.stages && this.plan.config.stages.length > 0) {
       this.plan.stages = buildExplicitStages(this.plan.steps, this.plan.config.stages);
     } else {
-      this.plan.stages = computeStages(this.plan.steps);
+      this.plan.stages = computeStages(this.plan.steps, this.plan.config.maxStageSize);
     }
 
     // Only use stages if there are 2+ (single stage adds no value)

@@ -28,6 +28,7 @@ export type ClientCommand =
   | { type: "inject_context"; planId: string; text: string }
   | { type: "confirm_step"; planId: string; ticketId: string }
   | { type: "reject_step"; planId: string; ticketId: string; reason?: string }
+  | { type: "advance_stage"; planId: string }
   | { type: "cancel_plan"; planId: string }
   | { type: "delete_plan"; planId: string }
   | { type: "run_hygiene" }
