@@ -429,49 +429,190 @@ export function detectCycles(steps: PlanStep[]): string[][] {
 }
 
 /**
- * Compute stages from the DAG — each "wave" of steps that can run in parallel
- * at the same dependency depth forms a stage.
+ * Compute stages by grouping steps by track (feature area), not dependency depth.
  *
- * Stage 1: all steps with no deps (leaf nodes)
- * Stage 2: steps whose deps were all in stage 1
- * Stage 3: steps whose deps were all in stages 1 or 2
- * ...
+ * 1. Group steps by their assigned track (connected components in dep graph)
+ * 2. Order tracks: if track B depends on track A, A comes first; among peers, higher priority first
+ * 3. Batch tracks into stages based on maxStageSize (default 6)
+ * 4. Name each stage from its constituent track names
+ *
+ * This produces reviewable batches: "geo pipeline", "serving layer", "UI + demos"
+ * instead of "all root tickets" vs "everything else".
  */
-export function computeStages(steps: PlanStep[]): PlanStage[] {
+export function computeStages(steps: PlanStep[], maxStageSize = 6): PlanStage[] {
+  if (steps.length === 0) return [];
+
+  // Group steps by track
+  const trackMap = new Map<string, PlanStep[]>();
+  for (const step of steps) {
+    const track = step.track ?? "unassigned";
+    if (!trackMap.has(track)) trackMap.set(track, []);
+    trackMap.get(track)!.push(step);
+  }
+
+  // Build inter-track dependency graph: track B depends on track A if any
+  // step in B has a blockedBy pointing to a step in A
+  const stepToTrack = new Map<string, string>();
+  for (const [trackName, trackSteps] of trackMap) {
+    for (const s of trackSteps) {
+      stepToTrack.set(s.ticketId, trackName);
+    }
+  }
+
+  const trackDeps = new Map<string, Set<string>>();
+  for (const trackName of trackMap.keys()) {
+    trackDeps.set(trackName, new Set());
+  }
+  for (const step of steps) {
+    const myTrack = stepToTrack.get(step.ticketId)!;
+    for (const dep of step.blockedBy) {
+      const depTrack = stepToTrack.get(dep);
+      if (depTrack && depTrack !== myTrack) {
+        trackDeps.get(myTrack)!.add(depTrack);
+      }
+    }
+  }
+
+  // Topological sort tracks with priority as tiebreaker
+  const orderedTracks = topoSortTracks(trackMap, trackDeps);
+
+  // Batch tracks into stages respecting maxStageSize and inter-track deps
   const stages: PlanStage[] = [];
-  const assigned = new Set<string>();
-  const allIds = new Set(steps.map((s) => s.ticketId));
+  const assignedTracks = new Set<string>();
 
-  while (assigned.size < steps.length) {
-    const wave = steps.filter(
-      (s) =>
-        !assigned.has(s.ticketId) &&
-        s.blockedBy
-          .filter((dep) => allIds.has(dep))
-          .every((dep) => assigned.has(dep)),
-    );
+  for (const trackName of orderedTracks) {
+    const trackSteps = trackMap.get(trackName)!;
 
-    if (wave.length === 0) {
-      // Remaining steps have unresolvable deps (cycles or external deps) —
-      // put them all in a final stage to avoid infinite loop
-      const remaining = steps.filter((s) => !assigned.has(s.ticketId));
+    // Check if this track can fit in the current (last) stage
+    const lastStage = stages.length > 0 ? stages[stages.length - 1] : null;
+    const canMerge = lastStage &&
+      lastStage.stepTicketIds.length + trackSteps.length <= maxStageSize &&
+      // All of this track's dep tracks must be in earlier stages (not the same stage)
+      allDepsInEarlierStages(trackName, trackDeps, assignedTracks, lastStage, stepToTrack);
+
+    if (canMerge && lastStage) {
+      lastStage.stepTicketIds.push(...trackSteps.map((s) => s.ticketId));
+      if (lastStage.name) {
+        lastStage.name += ` + ${trackName}`;
+      }
+    } else {
       stages.push({
         index: stages.length,
-        stepTicketIds: remaining.map((s) => s.ticketId),
+        name: trackName,
+        stepTicketIds: trackSteps.map((s) => s.ticketId),
         status: "pending",
       });
-      break;
     }
 
-    stages.push({
-      index: stages.length,
-      stepTicketIds: wave.map((s) => s.ticketId),
-      status: "pending",
-    });
-    wave.forEach((s) => assigned.add(s.ticketId));
+    assignedTracks.add(trackName);
   }
 
   return stages;
+}
+
+/**
+ * Check if all dep-tracks for a given track have been assigned to stages
+ * earlier than the candidate stage (i.e., not in the candidate stage itself).
+ */
+function allDepsInEarlierStages(
+  trackName: string,
+  trackDeps: Map<string, Set<string>>,
+  assignedTracks: Set<string>,
+  candidateStage: PlanStage,
+  stepToTrack: Map<string, string>,
+): boolean {
+  const deps = trackDeps.get(trackName);
+  if (!deps || deps.size === 0) return true;
+
+  // Get which tracks are in the candidate stage
+  const tracksInCandidate = new Set<string>();
+  for (const id of candidateStage.stepTicketIds) {
+    const t = stepToTrack.get(id);
+    if (t) tracksInCandidate.add(t);
+  }
+
+  for (const depTrack of deps) {
+    if (!assignedTracks.has(depTrack)) return false; // dep not yet assigned
+    if (tracksInCandidate.has(depTrack)) return false; // dep is in same stage
+  }
+  return true;
+}
+
+/**
+ * Topological sort of tracks, using priority as tiebreaker.
+ * Higher priority (lower number) tracks come first among peers.
+ */
+function topoSortTracks(
+  trackMap: Map<string, PlanStep[]>,
+  trackDeps: Map<string, Set<string>>,
+): string[] {
+  const inDegree = new Map<string, number>();
+  for (const name of trackMap.keys()) {
+    inDegree.set(name, 0);
+  }
+  for (const [, deps] of trackDeps) {
+    for (const dep of deps) {
+      if (inDegree.has(dep)) {
+        // dep has a dependent — but inDegree counts how many deps point INTO a node
+      }
+    }
+  }
+  // inDegree[X] = how many tracks X depends on (that are in the graph)
+  for (const [trackName, deps] of trackDeps) {
+    let count = 0;
+    for (const dep of deps) {
+      if (trackMap.has(dep)) count++;
+    }
+    inDegree.set(trackName, count);
+  }
+
+  // Track priority = min priority among its steps (lower = higher priority)
+  const trackPriority = new Map<string, number>();
+  for (const [name, steps] of trackMap) {
+    const minP = Math.min(...steps.map((s) => {
+      // Steps don't have priority directly; use position in the sorted array as proxy
+      // Steps are already sorted by priority in computePlan
+      return steps.indexOf(s);
+    }));
+    trackPriority.set(name, minP);
+  }
+
+  // Kahn's algorithm with priority queue (sorted by priority)
+  const queue: string[] = [];
+  for (const [name, deg] of inDegree) {
+    if (deg === 0) queue.push(name);
+  }
+  queue.sort((a, b) => (trackPriority.get(a) ?? 99) - (trackPriority.get(b) ?? 99));
+
+  const result: string[] = [];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    result.push(current);
+
+    // Find tracks that depend on current and decrement their in-degree
+    for (const [trackName, deps] of trackDeps) {
+      if (deps.has(current) && !visited.has(trackName)) {
+        inDegree.set(trackName, (inDegree.get(trackName) ?? 1) - 1);
+        if (inDegree.get(trackName) === 0) {
+          queue.push(trackName);
+          queue.sort((a, b) => (trackPriority.get(a) ?? 99) - (trackPriority.get(b) ?? 99));
+        }
+      }
+    }
+  }
+
+  // Catch any remaining tracks (cycles) — append them at the end
+  for (const name of trackMap.keys()) {
+    if (!visited.has(name)) {
+      result.push(name);
+    }
+  }
+
+  return result;
 }
 
 /**

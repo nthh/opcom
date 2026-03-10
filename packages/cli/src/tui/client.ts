@@ -691,6 +691,10 @@ export class TuiClient {
         }
         break;
 
+      case "advance_stage":
+        this.activeExecutor?.continueToNextStage?.();
+        break;
+
       case "confirm_step":
         this.activeExecutor?.confirmStep?.(command.ticketId);
         break;

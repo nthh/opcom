@@ -278,6 +278,40 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
   lines.push(`  ${bold(String(summary.totalSteps))} total: ${parts.join(", ")}`);
   lines.push("");
 
+  // --- Stages (if computed) ---
+  if (plan.stages && plan.stages.length > 1) {
+    lines.push(bold("Stages"));
+    for (const stage of plan.stages) {
+      const stageName = stage.name ?? `Stage ${stage.index + 1}`;
+      const stageIcon = stage.status === "executing" ? color(ANSI.yellow, "\u25cf")
+        : stage.status === "completed" ? color(ANSI.green, "\u2713")
+        : stage.status === "failed" ? color(ANSI.red, "\u2717")
+        : dim("\u25cb");
+      const isCurrent = plan.currentStage === stage.index;
+      const currentMarker = isCurrent ? color(ANSI.yellow, " \u25c0 current") : "";
+      lines.push(`  ${stageIcon} ${bold(stageName)} (${stage.stepTicketIds.length} steps)${currentMarker}`);
+
+      for (const ticketId of stage.stepTicketIds) {
+        const step = plan.steps.find((s) => s.ticketId === ticketId);
+        if (step) {
+          const ds = step.rebaseConflict ? "rebasing" : step.status;
+          const icon = stepStatusIcon(ds);
+          const sColor = stepStatusColor(ds);
+          const reVerify = ds === "verifying" && (step.attempt ?? 1) > 1 ? "re-" : "";
+          const elapsed = step.verifyingPhaseStartedAt ? ` ${formatElapsed(step.verifyingPhaseStartedAt)}` : "";
+          const phaseLabel = ds === "verifying" && step.verifyingPhase
+            ? ` ${reVerify}${step.verifyingPhase}...${elapsed}`
+            : "";
+          const deps = step.blockedBy.length > 0
+            ? dim(` \u2190 ${step.blockedBy.join(", ")}`)
+            : "";
+          lines.push(`    ${color(sColor, icon)} ${ticketId}${color(sColor, phaseLabel)}${deps}`);
+        }
+      }
+    }
+    lines.push("");
+  }
+
   // --- Tracks ---
   lines.push(bold("Tracks"));
   if (summary.tracks.length === 0) {

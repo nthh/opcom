@@ -816,6 +816,15 @@ export class TuiApp {
         }
         return;
 
+      case "A": // Advance to next stage
+        if (state.planPanel) {
+          const plan = state.planPanel.plan;
+          if (plan.stages && plan.stages.length > 1 && plan.currentStage !== undefined) {
+            this.client.send({ type: "advance_stage", planId: plan.id } as import("@opcom/types").ClientCommand);
+          }
+        }
+        return;
+
       case "/":
         this.searchMode = true;
         this.searchQuery = "";
@@ -1069,6 +1078,15 @@ export class TuiApp {
             this.client.send({ type: "pause_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
           } else if (plan.status === "paused") {
             this.client.send({ type: "resume_plan", planId: plan.id } as import("@opcom/types").ClientCommand);
+          }
+        }
+        return;
+
+      case "A": // Advance to next stage
+        if (this.dashboardState.planPanel) {
+          const plan = this.dashboardState.planPanel.plan;
+          if (plan.stages && plan.stages.length > 1 && plan.currentStage !== undefined) {
+            this.client.send({ type: "advance_stage", planId: plan.id } as import("@opcom/types").ClientCommand);
           }
         }
         return;

@@ -83,6 +83,7 @@ export interface OrchestratorConfig {
   allowedBashPatterns?: string[];
   autoContinue?: boolean;
   stages?: string[][];
+  maxStageSize?: number;
 }
 
 export interface TestGateResult {
@@ -182,6 +183,7 @@ export type StageStatus = "pending" | "executing" | "completed" | "failed";
 
 export interface PlanStage {
   index: number;
+  name?: string;
   stepTicketIds: string[];
   status: StageStatus;
   startedAt?: string;

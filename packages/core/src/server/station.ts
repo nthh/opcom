@@ -855,6 +855,17 @@ export class Station {
         break;
       }
 
+      case "advance_stage": {
+        const executor = this.executors.get(command.planId);
+        if (executor) {
+          executor.continueToNextStage();
+          this.broadcast({ type: "plan_updated", plan: executor.getPlan() });
+        } else {
+          this.sendToClient(ws, { type: "error", code: "NOT_FOUND", message: "No running executor for plan" });
+        }
+        break;
+      }
+
       case "skip_step": {
         const executor = this.executors.get(command.planId);
         if (executor) {

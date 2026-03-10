@@ -450,7 +450,15 @@ function renderPlanPanel(
   const planStallStr = plan.steps.some((s) => s.stallSignal?.type === "plan-stall")
     ? color(ANSI.orange, " \u26a0 stalled")
     : "";
-  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${planStallStr}`;
+
+  let stageStr = "";
+  if (plan.stages && plan.stages.length > 1 && plan.currentStage !== undefined) {
+    const currentStage = plan.stages[plan.currentStage];
+    const stageName = currentStage?.name ? ` ${currentStage.name}` : "";
+    stageStr = dim(` [stage ${plan.currentStage + 1}/${plan.stages.length}${stageName}]`);
+  }
+
+  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${stageStr}${planStallStr}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -464,21 +472,56 @@ function renderPlanPanel(
     return;
   }
 
-  // Group by track
-  const tracks = new Map<string, typeof plan.steps>();
-  for (const step of plan.steps) {
-    const track = step.track ?? "unassigned";
-    if (!tracks.has(track)) tracks.set(track, []);
-    tracks.get(track)!.push(step);
+  // Build stage-aware step ID set for current stage (for stage-gated indicator)
+  const currentStageStepIds = new Set<string>();
+  if (plan.stages && plan.stages.length > 1 && plan.currentStage !== undefined) {
+    const stage = plan.stages[plan.currentStage];
+    if (stage) {
+      for (const id of stage.stepTicketIds) currentStageStepIds.add(id);
+    }
   }
+  const hasStages = plan.stages && plan.stages.length > 1;
 
-  // Build flat list of display lines: track headers + steps
-  const lines: Array<{ type: "track"; name: string } | { type: "step"; step: typeof plan.steps[0]; index: number }> = [];
+  // Build flat list of display lines: stage headers + steps (grouped by stage if available)
+  type DisplayLine =
+    | { type: "stage-header"; name: string; stageIndex: number; stageStatus: string }
+    | { type: "step"; step: typeof plan.steps[0]; index: number };
+  const lines: DisplayLine[] = [];
   let stepIdx = 0;
-  for (const [trackName, steps] of tracks) {
-    lines.push({ type: "track", name: trackName });
-    for (const step of steps) {
-      lines.push({ type: "step", step, index: stepIdx++ });
+
+  if (hasStages) {
+    // Group by stage
+    const steppedIds = new Set<string>();
+    for (const stage of plan.stages!) {
+      const stageName = stage.name ?? `Stage ${stage.index + 1}`;
+      lines.push({ type: "stage-header", name: stageName, stageIndex: stage.index, stageStatus: stage.status });
+      for (const id of stage.stepTicketIds) {
+        const step = plan.steps.find((s) => s.ticketId === id);
+        if (step) {
+          lines.push({ type: "step", step, index: stepIdx++ });
+          steppedIds.add(id);
+        }
+      }
+    }
+    // Any steps not in a stage (shouldn't happen, but safety)
+    for (const step of plan.steps) {
+      if (!steppedIds.has(step.ticketId)) {
+        lines.push({ type: "step", step, index: stepIdx++ });
+      }
+    }
+  } else {
+    // No stages — group by track as before
+    const tracks = new Map<string, typeof plan.steps>();
+    for (const step of plan.steps) {
+      const track = step.track ?? "unassigned";
+      if (!tracks.has(track)) tracks.set(track, []);
+      tracks.get(track)!.push(step);
+    }
+    for (const [trackName, steps] of tracks) {
+      lines.push({ type: "stage-header", name: trackName, stageIndex: -1, stageStatus: "" });
+      for (const step of steps) {
+        lines.push({ type: "step", step, index: stepIdx++ });
+      }
     }
   }
 
@@ -487,8 +530,12 @@ function renderPlanPanel(
     const line = lines[idx];
     const row = panel.y + 1 + i;
 
-    if (line.type === "track") {
-      buf.writeLine(row, panel.x + 2, bold(dim(`[${line.name}]`)), contentWidth);
+    if (line.type === "stage-header") {
+      const stageStatusIcon = line.stageStatus === "executing" ? color(ANSI.yellow, "\u25cf ")
+        : line.stageStatus === "completed" ? color(ANSI.green, "\u2713 ")
+        : line.stageStatus === "failed" ? color(ANSI.red, "\u2717 ")
+        : "";
+      buf.writeLine(row, panel.x + 2, bold(dim(`${stageStatusIcon}[${line.name}]`)), contentWidth);
     } else {
       const step = line.step;
       const displayStatus = step.rebaseConflict ? "rebasing" : step.status;
@@ -506,7 +553,20 @@ function renderPlanPanel(
       const stallBadge = step.stallSignal
         ? color(ANSI.orange, ` \u26a0 ${formatStallBadge(step.stallSignal)}`)
         : "";
-      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}${stallBadge}`;
+
+      // Stage-gated indicator: step is blocked because it's in a future stage, not deps
+      let gatedBadge = "";
+      if (hasStages && step.status === "blocked" && !currentStageStepIds.has(step.ticketId)) {
+        const depsSatisfied = step.blockedBy.every((dep) => {
+          const depStep = plan.steps.find((s) => s.ticketId === dep);
+          return !depStep || depStep.status === "done" || depStep.status === "skipped";
+        });
+        if (depsSatisfied) {
+          gatedBadge = dim(" (stage-gated)");
+        }
+      }
+
+      const text = `  ${statusStr} ${step.ticketId}${verifyBadge}${stallBadge}${gatedBadge}`;
       const isSelected = line.index === selected && focused;
 
       if (isSelected) {
