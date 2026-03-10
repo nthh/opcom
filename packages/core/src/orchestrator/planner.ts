@@ -630,6 +630,20 @@ export function computeTracks(steps: PlanStep[]): Map<string, string[]> {
     }
   }
 
+  // Union subtask steps that share the same parent ticket
+  // (they're parts of one feature, should be one track even without dep edges)
+  const byParent = new Map<string, string>();
+  for (const step of steps) {
+    const parentId = step.ticketId.includes("/") ? step.ticketId.split("/")[0] : null;
+    if (parentId) {
+      if (byParent.has(parentId)) {
+        union(step.ticketId, byParent.get(parentId)!);
+      } else {
+        byParent.set(parentId, step.ticketId);
+      }
+    }
+  }
+
   // Group by root
   const groups = new Map<string, string[]>();
   for (const id of ids) {
