@@ -160,6 +160,13 @@ vi.mock("../../packages/core/src/orchestrator/smoke-test.js", () => ({
   runSmoke: vi.fn(async () => ({ passed: true, buildPassed: true, testsPassed: true, buildOutput: "", testOutput: "", durationMs: 0 })),
 }));
 
+vi.mock("../../packages/core/src/config/summary.js", () => ({
+  readProjectSummary: vi.fn(async () => null),
+  writeProjectSummary: vi.fn(async () => {}),
+  updateProjectSummary: vi.fn(async () => {}),
+  createInitialSummaryFromDescription: vi.fn(() => ""),
+}));
+
 vi.mock("../../packages/core/src/orchestrator/worktree.js", () => {
   return {
     WorktreeManager: vi.fn().mockImplementation(() => ({
