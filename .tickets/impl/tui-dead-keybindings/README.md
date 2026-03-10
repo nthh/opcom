@@ -1,7 +1,7 @@
 ---
 id: tui-dead-keybindings
 title: "TUI: Remove dead keybindings (g, m) and reserve d for dev services"
-status: open
+status: closed
 type: bug
 priority: 2
 deps: []
