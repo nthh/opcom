@@ -21,6 +21,7 @@ export interface AgentSession {
   lastActivity?: string;
   pid?: number;
   backendSessionId?: string; // Claude Code's internal session ID for --resume
+  skills?: import("./skills.js").SkillEntry[];
 }
 
 export interface ContextUsage {

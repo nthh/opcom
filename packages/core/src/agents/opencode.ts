@@ -372,6 +372,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       startedAt: new Date().toISOString(),
       workItemId: config.workItemId,
       pid: proc.pid,
+      skills: config.contextPacket.skills,
     };
 
     const abortController = new AbortController();
