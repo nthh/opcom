@@ -1116,17 +1116,18 @@ The executor treats swarm subtasks as first-class `PlanStep` entries:
 
 1. Each subtask gets a `PlanStep` with `parentTicketId` set
 2. `blockedBy` references other subtask step IDs (within the same parent)
-3. All parallel subtasks launch simultaneously up to `maxConcurrentAgents`
-4. Each subtask gets its **own worktree** (parallel execution would conflict in a shared worktree). This is the same isolation model as regular spread steps — separate branch per subtask, merge/rebase on completion.
-5. Parent ticket status = `done` when all subtasks complete
-6. Stages within a swarm = natural dependency layers of subtasks
+3. All subtasks of one parent share a **single worktree** (one branch: `work/<parent-ticket-id>`). They are building one coherent feature and need to see each other's changes. File-overlap scheduling serializes subtasks that touch the same files; subtasks that don't overlap can run concurrently.
+4. **Per-subtask verification: oracle only, no test gate.** The feature isn't testable until all subtasks complete. Running the test suite on partial implementations produces noise. The oracle validates each subtask's scope and quality without requiring green tests.
+5. **After final subtask: full test gate + oracle** on the complete diff. This is the real verification gate — does the whole feature work? Only then does the branch merge to main.
+6. Parent ticket status = `done` when all subtasks complete and final verification passes
+7. Stages within a swarm = natural dependency layers of subtasks
 
 The executor's ready-step logic doesn't change — it already checks `blockedBy` and concurrency limits. The planner just produces more steps from a single ticket.
 
 **Context continuity:** Each subtask agent receives:
 - The full parent ticket body (for overall context)
 - Its specific subtask description
-- Results/diffs from completed sibling subtasks (via plan context injection)
+- Completed sibling work is already visible on the shared branch — the agent sees it naturally in the codebase
 
 ### Interaction with Team Formation {#strategy-team-interaction}
 
@@ -1136,7 +1137,7 @@ A ticket can have both `team: feature-dev` and `strategy: swarm`. These compose:
 2. Each subtask is then expanded through the team pipeline (team formation)
 3. Result: subtask T001 becomes T001/engineer → T001/qa → T001/reviewer
 
-Within a team sequence, steps are sequential and share a worktree (existing team formation behavior). Across subtasks, execution is parallel with separate worktrees (swarm behavior). This means for a ticket with 3 subtasks and the `feature-dev` team, the plan produces up to 9 steps (3 subtasks x 3 roles), with 3 parallel tracks of 3 sequential steps each.
+All subtasks share the same worktree (swarm behavior). Within each subtask, team steps are sequential (existing team formation behavior). Across subtasks, file-overlap scheduling controls concurrency. This means for a ticket with 3 subtasks and the `feature-dev` team, the plan produces up to 9 steps (3 subtasks x 3 roles), all on one shared branch.
 
 If this complexity is not desired, set only one of `team` or `strategy: swarm` on a ticket — they are independently useful.
 

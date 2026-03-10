@@ -118,16 +118,18 @@ In `mixed` mode:
 Minimal — the executor already handles:
 - `blockedBy` between steps → subtask deps work automatically
 - `maxConcurrentAgents` → limits parallel subtask execution
-- Worktree isolation → each subtask gets its own worktree (parallel execution would conflict in shared worktree; merge/rebase on completion, same as regular spread steps)
-- Verification → each subtask runs through the verification pipeline independently
+- File-overlap scheduling → serializes subtasks that touch same files
+- Worktree → all subtasks of one parent share a single worktree (one branch: `work/<parent-id>`). They're building one feature, need to see each other's work.
 
 New behavior:
-- When all subtask steps for a parent complete → mark parent ticket as `closed` (if `ticketTransitions` enabled)
-- Context packet for subtask agents includes: parent ticket body + specific subtask description + diffs from completed siblings
+- **Per-subtask verification: oracle only, no test gate.** The feature isn't testable until all subtasks are done. Oracle validates scope/quality per subtask without needing green tests.
+- **After final subtask: full test gate + oracle** on the complete diff. This is the real gate.
+- When all subtask steps pass final verification → mark parent ticket as `closed` (if `ticketTransitions` enabled)
+- Subtask agents see sibling work naturally (shared branch) — no explicit diff injection needed
 
 ### Team Formation Interaction
 
-A ticket can have both `team: feature-dev` and `strategy: swarm`. These compose — subtasks are extracted first, then each subtask is expanded through the team pipeline. Subtask T001 becomes T001/engineer → T001/qa → T001/reviewer. Across subtasks, parallel with separate worktrees. Within a team sequence, sequential with shared worktree. If not desired, use one or the other — they're independently useful.
+A ticket can have both `team: feature-dev` and `strategy: swarm`. These compose — subtasks are extracted first, then each subtask is expanded through the team pipeline. Subtask T001 becomes T001/engineer → T001/qa → T001/reviewer. All on the shared worktree. If not desired, use one or the other — they're independently useful.
 
 ### Stage Interaction
 
