@@ -1,7 +1,7 @@
 ---
 id: plan-switcher
 title: "TUI: Plan switcher for multi-plan support"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
