@@ -312,7 +312,7 @@ export function renderTicketFocus(
 
   // Footer
   const footerY = panel.y + panel.height - 1;
-  const keys = dim("j/k:scroll  w:start agent  c:chat  e:open in $EDITOR  Esc:back");
+  const keys = dim("j/k:scroll  G:bottom  g:top  w:start agent  e:open in $EDITOR  Esc:back");
   buf.writeLine(footerY, panel.x + 1, keys, contentWidth);
 }
 

@@ -198,7 +198,6 @@ function buildFooterKeys(service: CloudService): string {
   const keys: string[] = ["esc:back"];
   if (service.capabilities.includes("migrate")) keys.push("M:migrate");
   if (service.capabilities.includes("deploy")) keys.push("D:deploy");
-  if (service.capabilities.includes("logs")) keys.push("f:logs");
   keys.push("o:open console");
   keys.push("?:help");
   return keys.join("  ");
