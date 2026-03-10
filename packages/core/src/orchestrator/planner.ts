@@ -7,6 +7,7 @@ import type {
   OrchestratorConfig,
   WorkItem,
   StepStatus,
+  TeamDefinition,
 } from "@opcom/types";
 import { defaultConfig } from "./persistence.js";
 
@@ -97,6 +98,7 @@ export function computePlan(
   name: string,
   existingPlan?: Plan,
   config?: Partial<OrchestratorConfig>,
+  teamResolutions?: Map<string, TeamDefinition>,
 ): Plan {
   const scoped = resolveScope(ticketSets, scope);
   const mergedConfig = { ...defaultConfig(), ...config };
@@ -116,7 +118,7 @@ export function computePlan(
   const parentIds = findParentTicketIds(allTickets);
 
   // Build steps
-  const steps: PlanStep[] = [];
+  let steps: PlanStep[] = [];
   for (const [ticketId, { ticket, projectId }] of allTickets) {
     // Skip parent tickets — children are the executable steps
     if (parentIds.has(ticketId)) continue;
@@ -138,10 +140,19 @@ export function computePlan(
     });
   }
 
+  // Expand team definitions into multi-step sequences
+  if (teamResolutions && teamResolutions.size > 0) {
+    steps = expandTeamSteps(steps, teamResolutions);
+  }
+
   // Sort steps by priority (P1 first) so executor picks highest priority ready steps
   steps.sort((a, b) => {
-    const pa = allTickets.get(a.ticketId)?.ticket.priority ?? 99;
-    const pb = allTickets.get(b.ticketId)?.ticket.priority ?? 99;
+    const pa = allTickets.get(a.ticketId)?.ticket.priority
+      ?? allTickets.get(baseTicketId(a.ticketId))?.ticket.priority
+      ?? 99;
+    const pb = allTickets.get(b.ticketId)?.ticket.priority
+      ?? allTickets.get(baseTicketId(b.ticketId))?.ticket.priority
+      ?? 99;
     return pa - pb;
   });
 
@@ -183,6 +194,108 @@ export function computePlan(
     createdAt: existingPlan?.createdAt ?? now,
     updatedAt: now,
   };
+}
+
+/**
+ * Extract the base ticket ID from a team-expanded step ID.
+ * "implement-auth/engineer" → "implement-auth"
+ * "implement-auth" → "implement-auth"
+ */
+export function baseTicketId(stepTicketId: string): string {
+  const slashIdx = stepTicketId.lastIndexOf("/");
+  return slashIdx >= 0 ? stepTicketId.slice(0, slashIdx) : stepTicketId;
+}
+
+/**
+ * Expand team definitions into multi-step sequences.
+ * For each step whose ticket has a resolved team with >1 step,
+ * replace the single step with multiple sub-steps chained by depends_on.
+ *
+ * Sub-step ticketIds use the format: "ticketId/role"
+ * Sub-steps share the same base ticketId for worktree reuse.
+ */
+export function expandTeamSteps(
+  steps: PlanStep[],
+  teamResolutions: Map<string, TeamDefinition>,
+): PlanStep[] {
+  const result: PlanStep[] = [];
+
+  for (const step of steps) {
+    const team = teamResolutions.get(step.ticketId);
+    if (!team || team.steps.length <= 1) {
+      // No team or single-step team — keep the original step
+      // For single-step teams, apply the team's verification and role
+      if (team && team.steps.length === 1) {
+        const ts = team.steps[0];
+        step.role = ts.role;
+        step.teamId = team.id;
+        step.teamStepRole = ts.role;
+        if (ts.verification) step.verificationMode = ts.verification;
+      }
+      result.push(step);
+      continue;
+    }
+
+    // Multi-step team: expand into sub-steps
+    // Build a map of role → synthesized ticketId for dependency resolution
+    const roleToStepId = new Map<string, string>();
+    for (const ts of team.steps) {
+      roleToStepId.set(ts.role, `${step.ticketId}/${ts.role}`);
+    }
+
+    for (const ts of team.steps) {
+      const subStepId = roleToStepId.get(ts.role)!;
+
+      // Build blockedBy: original ticket deps (for the first step) + team internal deps
+      const subBlockedBy: string[] = [];
+
+      if (ts.depends_on) {
+        // Blocked by the preceding team step
+        const depStepId = roleToStepId.get(ts.depends_on);
+        if (depStepId) subBlockedBy.push(depStepId);
+      } else {
+        // First step in team — inherits the original ticket's blockedBy
+        subBlockedBy.push(...step.blockedBy);
+      }
+
+      const subStatus: StepStatus = subBlockedBy.length > 0 ? "blocked" : "ready";
+
+      result.push({
+        ticketId: subStepId,
+        projectId: step.projectId,
+        status: subStatus,
+        blockedBy: subBlockedBy,
+        role: ts.role,
+        verificationMode: ts.verification,
+        teamId: team.id,
+        teamStepRole: ts.role,
+      });
+    }
+
+    // Update any other steps that were blocked by the original ticketId
+    // to instead be blocked by the LAST sub-step of the team sequence
+    const lastRole = team.steps[team.steps.length - 1].role;
+    const lastSubStepId = roleToStepId.get(lastRole)!;
+
+    // We need to fix blockedBy references in steps that haven't been expanded yet
+    // and also in the already-expanded result
+    for (const s of steps) {
+      if (s === step) continue;
+      const idx = s.blockedBy.indexOf(step.ticketId);
+      if (idx >= 0) {
+        s.blockedBy[idx] = lastSubStepId;
+      }
+    }
+    // Also fix in already-expanded result
+    for (const s of result) {
+      const idx = s.blockedBy.indexOf(step.ticketId);
+      if (idx >= 0) {
+        s.blockedBy[idx] = lastSubStepId;
+      }
+    }
+  }
+
+  return result;
 }
 
 /**

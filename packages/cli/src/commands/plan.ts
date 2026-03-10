@@ -5,6 +5,7 @@ import {
   scanTickets,
   computePlan,
   resolveScope,
+  resolveTeam,
   listPlans,
   loadPlan,
   savePlan,
@@ -15,7 +16,7 @@ import {
   EventStore,
   defaultOrchestratorConfig,
 } from "@opcom/core";
-import type { Plan, PlanScope, OrchestratorConfig } from "@opcom/types";
+import type { Plan, PlanScope, OrchestratorConfig, TeamDefinition } from "@opcom/types";
 import type { TicketSet } from "@opcom/core";
 import { computePlanSummary } from "../tui/views/plan-overview.js";
 
@@ -112,8 +113,19 @@ export async function runPlanCreate(options: {
     scope.query = options.scope;
   }
 
+  // Resolve teams for all tickets so the planner can expand multi-step teams
+  const teamResolutions = new Map<string, TeamDefinition>();
+  for (const ts of ticketSets) {
+    for (const ticket of ts.tickets) {
+      const team = await resolveTeam(ticket);
+      if (team) {
+        teamResolutions.set(ticket.id, team);
+      }
+    }
+  }
+
   const name = options.name ?? `plan-${new Date().toISOString().slice(0, 10)}`;
-  const plan = computePlan(ticketSets, scope, name, undefined, options.config);
+  const plan = computePlan(ticketSets, scope, name, undefined, options.config, teamResolutions);
 
   if (plan.steps.length === 0) {
     console.error("  No tickets match the scope. Nothing to plan.");

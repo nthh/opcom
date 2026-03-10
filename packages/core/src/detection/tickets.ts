@@ -125,6 +125,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
       ...(Array.isArray(frontmatter.category) ? { category: frontmatter.category.map(String) } : {}),
     },
     role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
+    team: typeof frontmatter.team === "string" ? frontmatter.team : undefined,
     verification: parseVerificationMode(frontmatter.verification),
     outputs: Array.isArray(frontmatter.outputs) ? frontmatter.outputs.map(String) : undefined,
   };

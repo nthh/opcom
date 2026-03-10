@@ -48,9 +48,12 @@ export {
   summaryPath,
   templatesDir,
   templateDir,
+  teamsDir,
+  teamPath,
 } from "./config/paths.js";
 export { loadRole, resolveRoleConfig, writeBuiltinRoles, BUILTIN_ROLES, parseRoleYaml } from "./config/roles.js";
 export { loadSkill, listSkills, matchSkills, writeBuiltinSkills, createSkill, BUILTIN_SKILLS, parseSkillMd } from "./config/skills.js";
+export { loadTeam, listTeams, resolveTeam, matchesTriggers, writeBuiltinTeams, BUILTIN_TEAMS, parseTeamYaml } from "./config/teams.js";
 export {
   readProjectSummary,
   writeProjectSummary,
@@ -283,7 +286,7 @@ export type { ExpoEASConfig } from "./cloud/index.js";
 export { buildGraph, openGraphDb, graphExists, queryGraphContext, queryProjectDrift, ingestTestResults, getGraphStats } from "./graph/graph-service.js";
 
 // Orchestrator
-export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds, computeStages, buildExplicitStages, validateExplicitStages, computeStageSummary } from "./orchestrator/planner.js";
+export { computePlan, recomputePlan, computeTracks, resolveScope, detectCycles, applyQuery, findParentTicketIds, computeStages, buildExplicitStages, validateExplicitStages, computeStageSummary, expandTeamSteps, baseTicketId } from "./orchestrator/planner.js";
 export type { TicketSet } from "./orchestrator/planner.js";
 export {
   writeSubTicket,

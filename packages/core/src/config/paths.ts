@@ -82,3 +82,11 @@ export function stateDir(): string {
 export function stateFilePath(concern: "decisions" | "metrics" | "artifacts"): string {
   return join(stateDir(), `${concern}.jsonl`);
 }
+
+export function teamsDir(): string {
+  return join(opcomRoot(), "teams");
+}
+
+export function teamPath(id: string): string {
+  return join(teamsDir(), `${id}.yaml`);
+}

@@ -23,7 +23,7 @@ import type {
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
 import type { TicketSet } from "./planner.js";
-import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary } from "./planner.js";
+import { recomputePlan, computeStages, buildExplicitStages, computeStageSummary, baseTicketId } from "./planner.js";
 import { savePlan, savePlanContext } from "./persistence.js";
 import { buildContextPacket, contextPacketToMarkdown } from "../agents/context-builder.js";
 import { deriveAllowedBashTools } from "../agents/allowed-bash.js";
@@ -1998,7 +1998,8 @@ export class Executor {
   /** Get priority for a step from cached ticket data. */
   private getStepPriority(step: PlanStep): number {
     const tickets = this.ticketCache.get(step.projectId);
-    const workItem = tickets?.find((t) => t.id === step.ticketId);
+    const lookupId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
+    const workItem = tickets?.find((t) => t.id === lookupId);
     return workItem?.priority ?? 4;
   }
 
@@ -2009,7 +2010,9 @@ export class Executor {
     }
 
     const tickets = await scanTickets(project.path);
-    const workItem = tickets.find((t) => t.id === step.ticketId);
+    // For team sub-steps (ticketId = "base/role"), look up the base ticket
+    const lookupId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
+    const workItem = tickets.find((t) => t.id === lookupId);
 
     // Sync verification mode from work item (may have been added after plan creation)
     if (workItem?.verification && !step.verificationMode) {
@@ -2024,12 +2027,21 @@ export class Executor {
 
     // Create worktree if enabled — agent runs in isolation
     // Skip creation if rebaseConflict is set (worktree already exists from the original step)
+    // Team sub-steps share the worktree from earlier steps in the same team sequence
     let agentCwd: string | undefined;
-    if (this.plan.config.worktree && !step.rebaseConflict) {
+    const teamWorktree = step.teamId ? this.findTeamWorktree(step) : null;
+    if (teamWorktree) {
+      // Reuse worktree from a prior team step on the same ticket
+      step.worktreePath = teamWorktree.worktreePath;
+      step.worktreeBranch = teamWorktree.worktreeBranch;
+      agentCwd = teamWorktree.worktreePath;
+      contextPacket.project.path = teamWorktree.worktreePath;
+    } else if (this.plan.config.worktree && !step.rebaseConflict) {
+      const worktreeId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
       const wtInfo = await this.worktreeManager.create(
         project.path,
-        step.ticketId,
-        step.ticketId,
+        worktreeId,
+        worktreeId,
       );
       step.worktreePath = wtInfo.worktreePath;
       step.worktreeBranch = wtInfo.branch;
@@ -2117,6 +2129,22 @@ export class Executor {
       stepTicketId: step.ticketId,
       agentSessionId: session.id,
     });
+  }
+
+  /**
+   * Find an existing worktree from a prior team step on the same ticket.
+   * Team sub-steps share a single worktree so each agent picks up where the last left off.
+   */
+  private findTeamWorktree(step: PlanStep): { worktreePath: string; worktreeBranch?: string } | null {
+    if (!step.teamId) return null;
+    const base = baseTicketId(step.ticketId);
+    for (const s of this.plan.steps) {
+      if (s === step) continue;
+      if (s.teamId === step.teamId && baseTicketId(s.ticketId) === base && s.worktreePath) {
+        return { worktreePath: s.worktreePath, worktreeBranch: s.worktreeBranch };
+      }
+    }
+    return null;
   }
 
   private async getCommitHash(cwd: string): Promise<string> {

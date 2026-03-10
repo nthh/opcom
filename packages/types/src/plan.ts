@@ -48,6 +48,8 @@ export interface PlanStep {
   verifyingPhaseStartedAt?: string;      // ISO timestamp when current sub-phase started
   stallSignal?: StallSignal;             // active stall warning (cleared when step progresses)
   verificationMode?: VerificationMode;   // per-step override from work item frontmatter
+  teamId?: string;                       // team definition that expanded this step
+  teamStepRole?: string;                 // role within the team sequence (e.g. "engineer", "qa")
 }
 
 export interface RebaseConflict {
