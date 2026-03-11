@@ -433,6 +433,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
                   timestamp: ts,
                   data: { text: block.text as string },
                 });
+              } else if (block.type === "thinking" && block.thinking) {
+                // Emit thinking content so oracle and other consumers can
+                // capture the model's reasoning when no text block is produced.
+                events.push({
+                  type: "message_delta",
+                  sessionId,
+                  timestamp: ts,
+                  data: { text: block.thinking as string, thinking: true },
+                });
               } else if (block.type === "tool_use") {
                 const toolName = block.name as string;
                 const proc = this.processes.get(sessionId);
