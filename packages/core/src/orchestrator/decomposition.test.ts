@@ -465,19 +465,19 @@ describe("applyDecomposition", () => {
     }
 
     // Plan was recomputed with sub-tickets as steps
-    // Parent should be excluded (has children), children use plain IDs
+    // Parent should be excluded (has children), sub-tickets use parent/id format
     const stepIds = result.plan.steps.map((s) => s.ticketId);
-    expect(stepIds).toContain("serverless-types");
-    expect(stepIds).toContain("serverless-cf");
+    expect(stepIds).toContain("cloud-serverless/serverless-types");
+    expect(stepIds).toContain("cloud-serverless/serverless-cf");
     expect(stepIds).not.toContain("cloud-serverless");
 
-    // serverless-cf should be blocked by serverless-types
-    const cfStep = result.plan.steps.find((s) => s.ticketId === "serverless-cf");
-    expect(cfStep?.blockedBy).toContain("serverless-types");
+    // serverless-cf should be blocked by serverless-types (both in parent/id format)
+    const cfStep = result.plan.steps.find((s) => s.ticketId === "cloud-serverless/serverless-cf");
+    expect(cfStep?.blockedBy).toContain("cloud-serverless/serverless-types");
     expect(cfStep?.status).toBe("blocked");
 
     // serverless-types should be ready
-    const typesStep = result.plan.steps.find((s) => s.ticketId === "serverless-types");
+    const typesStep = result.plan.steps.find((s) => s.ticketId === "cloud-serverless/serverless-types");
     expect(typesStep?.status).toBe("ready");
   });
 

@@ -941,7 +941,7 @@ export class TuiClient {
     this.send({ type: "delete_plan", planId });
   }
 
-  async createPlan(projectId: string): Promise<{ plan: Plan; assessments: DecompositionAssessment[] } | null> {
+  async createPlan(projectId: string, selectedTicketIds?: string[]): Promise<{ plan: Plan; assessments: DecompositionAssessment[] } | null> {
     try {
       const tickets = this.projectTickets.get(projectId);
       if (!tickets || tickets.length === 0) {
@@ -954,7 +954,10 @@ export class TuiClient {
       const flagged = assessments.filter((a) => a.needsDecomposition);
 
       const ticketSets: TicketSet[] = [{ projectId, tickets }];
-      const scope = { projectIds: [projectId], query: "status:open" };
+      const scope: import("@opcom/types").PlanScope = { projectIds: [projectId], query: "status:open" };
+      if (selectedTicketIds && selectedTicketIds.length > 0) {
+        scope.ticketIds = selectedTicketIds;
+      }
       const project = this.projectConfigs.get(projectId);
       const name = project?.name ?? projectId;
       const plan = computePlan(ticketSets, scope, name);

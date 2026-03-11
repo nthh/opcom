@@ -110,6 +110,19 @@ import {
   type HealthData,
 } from "./health-data.js";
 import {
+  renderTicketScopePicker,
+  createTicketScopePickerState,
+  moveUp as pickerMoveUp,
+  moveDown as pickerMoveDown,
+  toggleItem as pickerToggleItem,
+  selectAll as pickerSelectAll,
+  selectNone as pickerSelectNone,
+  scrollToTop as pickerScrollToTop,
+  scrollToBottom as pickerScrollToBottom,
+  getSelectedTicketIds,
+  type TicketScopePickerState,
+} from "./views/ticket-scope-picker.js";
+import {
   renderPlanOverview,
   createPlanOverviewState,
   rebuildDisplayLines as rebuildPlanOverviewLines,
@@ -214,6 +227,7 @@ export class TuiApp {
   private ticketFocusState: TicketFocusState | null = null;
   private planStepFocusState: PlanStepFocusState | null = null;
   private planOverviewState: PlanOverviewState | null = null;
+  private ticketScopePickerState: TicketScopePickerState | null = null;
   private cloudServiceDetailState: CloudServiceDetailState | null = null;
   private stackDetailState: StackDetailState | null = null;
   private settingsViewState: SettingsViewState | null = null;
@@ -573,6 +587,8 @@ export class TuiApp {
             renderTicketFocus(this.buf, layout.panels[0], this.ticketFocusState);
           } else if (this.planStepFocusState) {
             renderPlanStepFocus(this.buf, layout.panels[0], this.planStepFocusState);
+          } else if (this.ticketScopePickerState) {
+            renderTicketScopePicker(this.buf, layout.panels[0], this.ticketScopePickerState);
           } else if (this.planOverviewState) {
             renderPlanOverview(this.buf, layout.panels[0], this.planOverviewState);
           } else if (this.stackDetailState) {
@@ -766,6 +782,8 @@ export class TuiApp {
           this.handleTicketFocusInput(data);
         } else if (this.planStepFocusState) {
           this.handlePlanStepFocusInput(data);
+        } else if (this.ticketScopePickerState) {
+          this.handleTicketScopePickerInput(data);
         } else if (this.planOverviewState) {
           this.handlePlanOverviewInput(data);
         } else if (this.stackDetailState) {
@@ -884,16 +902,13 @@ export class TuiApp {
         this.drillDownToDeployments();
         return;
 
-      case "P": { // Create plan for selected project
+      case "P": { // Create plan for selected project — open ticket scope picker
         const project = state.projects[state.selectedIndex[0]];
         if (project) {
-          this.client.createPlan(project.id).then((result) => {
-            this.syncData();
-            if (result) {
-              this.navigateToPlanOverview(result.plan, result.assessments);
-            }
-            this.scheduleRender();
-          }).catch(() => {});
+          const tickets = this.client.projectTickets.get(project.id);
+          if (tickets && tickets.length > 0) {
+            this.navigateToTicketScopePicker(project.id, tickets);
+          }
         }
         return;
       }
@@ -1178,15 +1193,12 @@ export class TuiApp {
         this.triggerMigration();
         return;
 
-      case "P": // Create plan for this project
+      case "P": // Create plan for this project — open ticket scope picker
         if (this.focusedProjectId) {
-          this.client.createPlan(this.focusedProjectId).then((result) => {
-            this.syncData();
-            if (result) {
-              this.navigateToPlanOverview(result.plan, result.assessments);
-            }
-            this.scheduleRender();
-          }).catch(() => {});
+          const tickets = this.client.projectTickets.get(this.focusedProjectId);
+          if (tickets && tickets.length > 0) {
+            this.navigateToTicketScopePicker(this.focusedProjectId, tickets);
+          }
         }
         return;
 
@@ -2284,6 +2296,92 @@ export class TuiApp {
     }).catch(() => {});
   }
 
+  private navigateToTicketScopePicker(projectId: string, tickets: WorkItem[]): void {
+    this.navStack.push({
+      level: this.level,
+      projectId: this.focusedProjectId ?? undefined,
+    });
+
+    this.level = 3;
+    this.ticketScopePickerState = createTicketScopePickerState(projectId, tickets);
+    this.agentFocusState = null;
+    this.ticketFocusState = null;
+    this.planStepFocusState = null;
+    this.planOverviewState = null;
+    this.cloudServiceDetailState = null;
+    this.stackDetailState = null;
+    this.settingsViewState = null;
+    this.skillsBrowserState = null;
+    this.pipelineDetailState = null;
+    this.deploymentDetailState = null;
+    this.podDetailState = null;
+    this.serviceDetailState = null;
+  }
+
+  private handleTicketScopePickerInput(data: string): void {
+    if (!this.ticketScopePickerState) return;
+    const state = this.ticketScopePickerState;
+
+    switch (data) {
+      case "\x1b": // Escape
+      case "q":
+        this.ticketScopePickerState = null;
+        this.navigateBack();
+        return;
+
+      case "\r": // Enter — confirm selection
+      case "\n": {
+        const ticketIds = getSelectedTicketIds(state);
+        if (ticketIds.length === 0) return;
+        const projectId = state.projectId;
+        this.ticketScopePickerState = null;
+        this.client.createPlan(projectId, ticketIds).then((result) => {
+          this.syncData();
+          if (result) {
+            this.navigateToPlanOverview(result.plan, result.assessments);
+          } else {
+            this.navigateBack();
+          }
+          this.scheduleRender();
+        }).catch(() => {
+          this.navigateBack();
+          this.scheduleRender();
+        });
+        return;
+      }
+
+      case " ": // Space — toggle current item
+        pickerToggleItem(state);
+        return;
+
+      case "a": // Select all
+        pickerSelectAll(state);
+        return;
+
+      case "n": // Select none
+        pickerSelectNone(state);
+        return;
+
+      case "j":
+      case "\x1b[B": // Down arrow
+        pickerMoveDown(state);
+        return;
+
+      case "k":
+      case "\x1b[A": // Up arrow
+        pickerMoveUp(state);
+        return;
+
+      case "G":
+        pickerScrollToBottom(state);
+        return;
+
+      case "g":
+        pickerScrollToTop(state);
+        return;
+    }
+  }
+
   private navigateToPlanOverview(
     plan: import("@opcom/types").Plan,
     decompositionAssessments?: import("@opcom/types").DecompositionAssessment[],
@@ -2305,6 +2403,7 @@ export class TuiApp {
     this.agentFocusState = null;
     this.ticketFocusState = null;
     this.planStepFocusState = null;
+    this.ticketScopePickerState = null;
     this.cloudServiceDetailState = null;
     this.stackDetailState = null;
     this.settingsViewState = null;
@@ -3146,6 +3245,7 @@ export class TuiApp {
         this.ticketFocusState = null;
         this.planStepFocusState = null;
         this.planOverviewState = null;
+        this.ticketScopePickerState = null;
         this.cloudServiceDetailState = null;
         this.stackDetailState = null;
         this.settingsViewState = null;
@@ -3167,6 +3267,7 @@ export class TuiApp {
       this.ticketFocusState = null;
       this.planStepFocusState = null;
       this.planOverviewState = null;
+      this.ticketScopePickerState = null;
       this.cloudServiceDetailState = null;
       this.stackDetailState = null;
       this.settingsViewState = null;

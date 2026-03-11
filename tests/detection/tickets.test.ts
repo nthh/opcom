@@ -413,8 +413,8 @@ deps:
 
     const stepIds = plan.steps.map((s) => s.ticketId);
     expect(stepIds).not.toContain("pipeline-v2");
-    expect(stepIds).toContain("argo-executor");
-    expect(stepIds).toContain("cost-estimation");
+    expect(stepIds).toContain("pipeline-v2/argo-executor");
+    expect(stepIds).toContain("pipeline-v2/cost-estimation");
     expect(plan.steps).toHaveLength(2);
   });
 
@@ -477,25 +477,25 @@ deps:
       "pipeline-v2-plan",
     );
 
-    // Parent excluded, 3 children become steps (plain IDs)
+    // Parent excluded, 3 children become steps (step IDs use parent/id format)
     const stepIds = plan.steps.map((s) => s.ticketId);
     expect(stepIds).not.toContain("pipeline-v2");
     expect(plan.steps).toHaveLength(3);
-    expect(stepIds).toContain("pipeline-v2-types");
-    expect(stepIds).toContain("argo-executor");
-    expect(stepIds).toContain("cost-estimation");
+    expect(stepIds).toContain("pipeline-v2/pipeline-v2-types");
+    expect(stepIds).toContain("pipeline-v2/argo-executor");
+    expect(stepIds).toContain("pipeline-v2/cost-estimation");
 
     // Children form a multi-step track (connected via deps)
-    const typesStep = plan.steps.find((s) => s.ticketId === "pipeline-v2-types")!;
-    const argoStep = plan.steps.find((s) => s.ticketId === "argo-executor")!;
-    const costStep = plan.steps.find((s) => s.ticketId === "cost-estimation")!;
+    const typesStep = plan.steps.find((s) => s.ticketId === "pipeline-v2/pipeline-v2-types")!;
+    const argoStep = plan.steps.find((s) => s.ticketId === "pipeline-v2/argo-executor")!;
+    const costStep = plan.steps.find((s) => s.ticketId === "pipeline-v2/cost-estimation")!;
 
     // types is ready (no deps), argo and cost are blocked on types
     expect(typesStep.status).toBe("ready");
     expect(argoStep.status).toBe("blocked");
-    expect(argoStep.blockedBy).toEqual(["pipeline-v2-types"]);
+    expect(argoStep.blockedBy).toEqual(["pipeline-v2/pipeline-v2-types"]);
     expect(costStep.status).toBe("blocked");
-    expect(costStep.blockedBy).toEqual(["pipeline-v2-types"]);
+    expect(costStep.blockedBy).toEqual(["pipeline-v2/pipeline-v2-types"]);
 
     // All three should be in the same track (connected by deps)
     expect(typesStep.track).toBe(argoStep.track);

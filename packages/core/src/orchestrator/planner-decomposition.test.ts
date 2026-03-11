@@ -85,9 +85,9 @@ describe("computePlan with parent-child tickets", () => {
     // Parent should be excluded
     expect(stepIds).not.toContain("cloud-serverless");
 
-    // Children should be included
-    expect(stepIds).toContain("serverless-types");
-    expect(stepIds).toContain("serverless-cf");
+    // Children should be included (step IDs use parent/id format)
+    expect(stepIds).toContain("cloud-serverless/serverless-types");
+    expect(stepIds).toContain("cloud-serverless/serverless-cf");
   });
 
   it("children have correct deps between themselves", () => {
@@ -100,19 +100,20 @@ describe("computePlan with parent-child tickets", () => {
 
     const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
 
-    const stepA = plan.steps.find((s) => s.ticketId === "child-a")!;
-    const stepB = plan.steps.find((s) => s.ticketId === "child-b")!;
-    const stepC = plan.steps.find((s) => s.ticketId === "child-c")!;
+    // Step IDs use parent/id format for children
+    const stepA = plan.steps.find((s) => s.ticketId === "parent-ticket/child-a")!;
+    const stepB = plan.steps.find((s) => s.ticketId === "parent-ticket/child-b")!;
+    const stepC = plan.steps.find((s) => s.ticketId === "parent-ticket/child-c")!;
 
     expect(stepA.status).toBe("ready");
     expect(stepA.blockedBy).toEqual([]);
 
     expect(stepB.status).toBe("blocked");
-    expect(stepB.blockedBy).toEqual(["child-a"]);
+    expect(stepB.blockedBy).toEqual(["parent-ticket/child-a"]);
 
     expect(stepC.status).toBe("blocked");
-    expect(stepC.blockedBy).toContain("child-a");
-    expect(stepC.blockedBy).toContain("child-b");
+    expect(stepC.blockedBy).toContain("parent-ticket/child-a");
+    expect(stepC.blockedBy).toContain("parent-ticket/child-b");
   });
 
   it("filters out parent ticket deps from child steps", () => {
@@ -125,7 +126,7 @@ describe("computePlan with parent-child tickets", () => {
 
     const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
 
-    const step = plan.steps.find((s) => s.ticketId === "sub-1")!;
+    const step = plan.steps.find((s) => s.ticketId === "epic/sub-1")!;
     expect(step.blockedBy).not.toContain("epic");
     expect(step.status).toBe("ready");
   });
@@ -146,8 +147,8 @@ describe("computePlan with parent-child tickets", () => {
     const stepIds = plan.steps.map((s) => s.ticketId);
 
     expect(stepIds).not.toContain("big-feature");
-    expect(stepIds).toContain("big-feature-types");
-    expect(stepIds).toContain("big-feature-impl");
+    expect(stepIds).toContain("big-feature/big-feature-types");
+    expect(stepIds).toContain("big-feature/big-feature-impl");
     expect(stepIds).toContain("small-fix");
     expect(stepIds).toContain("after-big-feature");
 
@@ -166,9 +167,9 @@ describe("computePlan with parent-child tickets", () => {
 
     const plan = computePlan(makeTicketSets(tickets), {}, "test-plan");
 
-    // Children should be grouped in the same track
-    const typesStep = plan.steps.find((s) => s.ticketId === "parent-types")!;
-    const implStep = plan.steps.find((s) => s.ticketId === "parent-impl")!;
+    // Children should be grouped in the same track (step IDs use parent/id format)
+    const typesStep = plan.steps.find((s) => s.ticketId === "parent/parent-types")!;
+    const implStep = plan.steps.find((s) => s.ticketId === "parent/parent-impl")!;
 
     expect(typesStep.track).toBe(implStep.track);
   });
