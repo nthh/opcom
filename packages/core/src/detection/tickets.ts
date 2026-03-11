@@ -96,7 +96,6 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
   // agent guidance, not separate plan steps.
   const hasParent = frontmatter && (
     typeof frontmatter.dir === "string"
-    || typeof frontmatter.milestone === "string"
     || typeof frontmatter.parent === "string"
   );
   const subtasks = (!hasParent && body) ? extractSubtasks(body) : [];
@@ -124,7 +123,6 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     type: String(frontmatter.type ?? "feature"),
     filePath,
     parent: typeof frontmatter.dir === "string" ? frontmatter.dir
-      : typeof frontmatter.milestone === "string" ? frontmatter.milestone
       : typeof frontmatter.parent === "string" ? frontmatter.parent
       : undefined,
     created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,

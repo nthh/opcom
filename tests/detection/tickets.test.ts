@@ -164,7 +164,7 @@ deps: []
     expect(item!.parent).toBe("pipeline-v2");
   });
 
-  it("falls back to milestone: when no dir:", () => {
+  it("milestone does not set parent (milestone is scheduling, not hierarchy)", () => {
     const content = `---
 id: sub-task-3
 title: "Sub Task 3"
@@ -174,7 +174,7 @@ deps: []
 ---
 `;
     const item = parseTicketFile(content, "/path/my-epic/sub-task-3.md", "sub-task-3");
-    expect(item!.parent).toBe("my-epic");
+    expect(item!.parent).toBeUndefined();
   });
 });
 
