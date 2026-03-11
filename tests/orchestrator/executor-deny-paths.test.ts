@@ -448,4 +448,81 @@ describe("Executor denyPaths enforcement", () => {
     executor.stop();
     await runPromise;
   });
+
+  it("executor updateTicketStatusSafe writes to .tickets/ despite denyPaths (not agent-initiated)", async () => {
+    // Setup: make scanTickets return a ticket so updateTicketStatusSafe can find it.
+    // The executor writes ticket status directly via fs, bypassing the agent event pipeline.
+    const { mkdtemp, writeFile: fsWriteFile, readFile: fsReadFile, rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const tmpDir = await mkdtemp(join(tmpdir(), "opcom-executor-bypass-"));
+
+    const ticketsDir = join(tmpDir, ".tickets", "impl");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(ticketsDir, { recursive: true });
+    const ticketFilePath = join(ticketsDir, "t1.md");
+    await fsWriteFile(ticketFilePath, `---
+id: t1
+title: "Test ticket"
+status: open
+type: feature
+priority: 1
+---
+
+# Test ticket
+`);
+
+    // Override scanTickets to always return a ticket with a real file path.
+    // It's called multiple times: loadCurrentTickets(), recomputeAndContinue(), updateTicketStatusSafe().
+    const { scanTickets } = await import("../../packages/core/src/detection/tickets.js");
+    const ticketData = [{
+      id: "t1",
+      title: "Test ticket",
+      status: "open",
+      type: "feature",
+      priority: 1,
+      source: "tickets",
+      filePath: ticketFilePath,
+    }];
+    (scanTickets as ReturnType<typeof vi.fn>).mockResolvedValue(ticketData);
+
+    // Override loadProject to return the temp dir as the project path (called multiple times).
+    const { loadProject } = await import("../../packages/core/src/config/loader.js");
+    const projectData = {
+      id: "p",
+      name: "p",
+      path: tmpDir,
+      stack: { languages: [], frameworks: [], packageManagers: [{ name: "npm", sourceFile: "package-lock.json" }], infrastructure: [], versionManagers: [] },
+      testing: { framework: "vitest", command: "npm test" },
+      linting: [],
+    };
+    (loadProject as ReturnType<typeof vi.fn>).mockResolvedValue(projectData);
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { worktree: false, ticketTransitions: true });
+
+    const executor = new Executor(plan, sm as never);
+    const completed: unknown[] = [];
+    executor.on("step_completed", (ev) => completed.push(ev));
+
+    const runPromise = executor.run();
+    await waitFor(() => sm.startCalls.length === 1);
+
+    // Agent writes to a source file (not denied) and then completes
+    sm.simulateWrite("session-1");
+    sm.simulateCompletion("session-1");
+
+    await waitFor(() => completed.length === 1);
+
+    // Verify that the ticket file in .tickets/ was updated to "closed"
+    // even though denyPaths includes ".tickets/**"
+    const content = await fsReadFile(ticketFilePath, "utf-8");
+    expect(content).toContain("status: closed");
+    expect(content).not.toContain("status: open");
+
+    executor.stop();
+    await runPromise;
+    await rm(tmpDir, { recursive: true });
+  });
 });

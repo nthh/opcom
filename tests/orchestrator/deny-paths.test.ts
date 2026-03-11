@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { extractFilePath, matchesDenyPath } from "@opcom/core";
+import { describe, it, expect, afterEach } from "vitest";
+import { extractFilePath, matchesDenyPath, updateTicketStatus } from "@opcom/core";
+import { mkdtemp, rm, mkdir, writeFile, readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 describe("extractFilePath", () => {
   it("extracts file_path from JSON input", () => {
@@ -95,5 +98,89 @@ describe("matchesDenyPath", () => {
     it("returns null for empty array", () => {
       expect(matchesDenyPath("anything.ts", [])).toBeNull();
     });
+  });
+});
+
+describe("updateTicketStatus (executor bypass)", () => {
+  let tmpDir: string;
+
+  afterEach(async () => {
+    if (tmpDir) await rm(tmpDir, { recursive: true });
+  });
+
+  it("writes to .tickets/ file directly (not subject to denyPaths)", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "opcom-deny-bypass-"));
+    const ticketsDir = join(tmpDir, ".tickets", "impl", "my-ticket");
+    await mkdir(ticketsDir, { recursive: true });
+
+    const ticketPath = join(ticketsDir, "README.md");
+    await writeFile(ticketPath, `---
+id: my-ticket
+title: "Test ticket"
+status: open
+type: feature
+priority: 1
+---
+
+# Test ticket
+`);
+
+    // updateTicketStatus writes directly to the file system — it is NOT
+    // intercepted by the executor's denyPaths check because it's not an
+    // agent-initiated write (no tool_start event is emitted).
+    await updateTicketStatus(ticketPath, "in-progress");
+
+    const content = await readFile(ticketPath, "utf-8");
+    expect(content).toContain("status: in-progress");
+    expect(content).not.toContain("status: open");
+  });
+
+  it("updates ticket status to closed in .tickets/ path", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "opcom-deny-bypass-"));
+    const ticketsDir = join(tmpDir, ".tickets", "impl", "protect-ticket-files");
+    await mkdir(ticketsDir, { recursive: true });
+
+    const ticketPath = join(ticketsDir, "executor-enforcement.md");
+    await writeFile(ticketPath, `---
+id: executor-enforcement
+title: "Enforce denyPaths"
+status: in-progress
+type: feature
+priority: 1
+---
+
+# Enforce denyPaths
+`);
+
+    await updateTicketStatus(ticketPath, "closed");
+
+    const content = await readFile(ticketPath, "utf-8");
+    expect(content).toContain("status: closed");
+    expect(content).not.toContain("status: in-progress");
+  });
+
+  it("does not write when status already matches", async () => {
+    tmpDir = await mkdtemp(join(tmpdir(), "opcom-deny-bypass-"));
+    const ticketsDir = join(tmpDir, ".tickets", "impl");
+    await mkdir(ticketsDir, { recursive: true });
+
+    const ticketPath = join(ticketsDir, "already-closed.md");
+    const original = `---
+id: already-closed
+title: "Already closed"
+status: closed
+type: feature
+priority: 1
+---
+
+# Already closed
+`;
+    await writeFile(ticketPath, original);
+
+    await updateTicketStatus(ticketPath, "closed");
+
+    const content = await readFile(ticketPath, "utf-8");
+    // Content should be identical — no write occurred
+    expect(content).toBe(original);
   });
 });
