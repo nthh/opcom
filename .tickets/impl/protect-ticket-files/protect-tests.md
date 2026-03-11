@@ -1,7 +1,7 @@
 ---
 id: protect-tests
 title: "Tests for ticket file protection"
-status: open
+status: closed
 type: feature
 priority: 1
 parent: protect-ticket-files
