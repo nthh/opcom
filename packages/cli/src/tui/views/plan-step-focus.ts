@@ -381,10 +381,13 @@ export function renderPlanStepFocus(
   const contentHeight = panel.height - headerHeight - footerHeight;
   const contentWidth = panel.width - 2;
 
-  // Header
-  const stepTitle = state.ticket?.title ?? state.step.ticketId;
+  // Header — strip parent prefix for display; show title if ticket found
+  const displayId = state.step.ticketId.includes("/")
+    ? state.step.ticketId.split("/").pop()!
+    : state.step.ticketId;
+  const stepTitle = state.ticket?.title ?? displayId;
   const header = truncate(
-    `${bold("Plan Step:")} ${state.step.ticketId} — ${stepTitle}`,
+    `${bold("Plan Step:")} ${displayId} — ${stepTitle}`,
     contentWidth,
   );
   buf.writeLine(panel.y, panel.x + 1, header, contentWidth);
