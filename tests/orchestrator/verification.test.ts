@@ -68,6 +68,45 @@ Tests:       5 failed, 40 passed, 45 total
     expect(result.failed).toBe(0);
   });
 
+  it("parses pytest output with all passing", () => {
+    const output = `
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0
+collected 42 items
+
+tests/test_ops.py ....................................... [100%]
+
+============================== 42 passed in 1.23s ==============================
+`;
+    const result = parseTestOutput(output);
+    expect(result.total).toBe(42);
+    expect(result.passed).toBe(42);
+    expect(result.failed).toBe(0);
+  });
+
+  it("parses pytest output with failures", () => {
+    const output = `
+============================= test session starts ==============================
+collected 50 items
+
+============================== 3 failed, 47 passed in 2.10s ===================
+`;
+    const result = parseTestOutput(output);
+    expect(result.total).toBe(50);
+    expect(result.passed).toBe(47);
+    expect(result.failed).toBe(3);
+  });
+
+  it("parses pytest output with errors and failures", () => {
+    const output = `
+====== 1 error, 2 failed, 10 passed in 0.50s ======
+`;
+    const result = parseTestOutput(output);
+    expect(result.total).toBe(13);
+    expect(result.passed).toBe(10);
+    expect(result.failed).toBe(3);
+  });
+
   it("returns zeros for unrecognized output", () => {
     const result = parseTestOutput("some random output");
     expect(result.total).toBe(0);

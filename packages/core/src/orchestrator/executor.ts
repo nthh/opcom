@@ -2896,6 +2896,17 @@ export function parseTestOutput(output: string): { total: number; passed: number
     return { total: total || passed + failed, passed, failed };
   }
 
+  // pytest: "5 passed", "2 failed, 5 passed", "1 error, 2 failed, 5 passed in 1.23s"
+  const pytestPassed = output.match(/(\d+)\s+passed/);
+  const pytestFailed = output.match(/(\d+)\s+failed/);
+  const pytestErrors = output.match(/(\d+)\s+error/);
+  if (pytestPassed || pytestFailed) {
+    const passed = pytestPassed ? parseInt(pytestPassed[1], 10) : 0;
+    const failed = (pytestFailed ? parseInt(pytestFailed[1], 10) : 0)
+      + (pytestErrors ? parseInt(pytestErrors[1], 10) : 0);
+    return { total: passed + failed, passed, failed };
+  }
+
   return { total: 0, passed: 0, failed: 0 };
 }
 
