@@ -150,7 +150,7 @@ import {
   toggleSetting as settingsToggle,
   type SettingsViewState,
 } from "./views/settings-view.js";
-import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES, listSkills, baseTicketId, isSwarmSubtask } from "@opcom/core";
+import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES, listSkills, baseTicketId } from "@opcom/core";
 import {
   renderSkillsBrowser,
   createSkillsBrowserState,
@@ -2430,7 +2430,7 @@ export class TuiApp {
     // Resolve the WorkItem lookup ID: team sub-steps use "base/role" (look up base),
     // swarm subtasks use "parent/child" (look up child basename).
     const lookupId = step.teamId ? baseTicketId(step.ticketId)
-      : (step.ticketId.includes("/") && isSwarmSubtask(step, plan.steps))
+      : step.ticketId.includes("/")
         ? step.ticketId.slice(step.ticketId.lastIndexOf("/") + 1)
         : step.ticketId;
     const ticket = allTickets.find((t) => t.id === lookupId) ?? null;

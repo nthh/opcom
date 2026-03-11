@@ -162,11 +162,13 @@ export function parsePyprojectData(data: Record<string, unknown>, sourceFile: st
   // Detect testing
   let testing: TestingConfig | null = null;
   const tool = data.tool as Record<string, unknown> | undefined;
-  if (tool?.pytest || tool?.["pytest.ini_options"] || (tool as Record<string, unknown>)?.["pytest"]) {
-    testing = { framework: "pytest", command: "pytest" };
-    evidence.push({ file: sourceFile, detectedAs: "testing:pytest" });
-  } else if (depNames.includes("pytest")) {
-    testing = { framework: "pytest", command: "pytest" };
+  const hasPytest = tool?.pytest || tool?.["pytest.ini_options"] || depNames.includes("pytest");
+  if (hasPytest) {
+    // Use "uv run pytest" when uv is detected, so tests work in worktrees
+    // without a local virtualenv.
+    const useUv = tool?.uv || packageManagers.some((p) => p.name === "uv");
+    const cmd = useUv ? "uv run pytest" : "pytest";
+    testing = { framework: "pytest", command: cmd };
     evidence.push({ file: sourceFile, detectedAs: "testing:pytest" });
   }
 
