@@ -327,6 +327,8 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
       lines.push(`  ${bold(track.name)} (${track.stepCount} steps${counts ? `, ${counts}` : ""})`);
 
       // Show ticket chain within track
+      // Strip parent prefix from step IDs within a track (redundant with track name)
+      const stripPrefix = (id: string) => id.includes("/") ? id.split("/").pop()! : id;
       for (const ticketId of track.ticketIds) {
         const step = plan.steps.find((s) => s.ticketId === ticketId);
         if (step) {
@@ -339,11 +341,12 @@ export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void 
             ? ` ${reVerify}${step.verifyingPhase}...${elapsed}`
             : "";
           const deps = step.blockedBy.length > 0
-            ? dim(` \u2190 ${step.blockedBy.join(", ")}`)
+            ? dim(` \u2190 ${step.blockedBy.map(stripPrefix).join(", ")}`)
             : "";
           const teamBadge = formatTeamBadge(step, plan);
           const teamStr = teamBadge ? dim(` ${teamBadge}`) : "";
-          lines.push(`    ${color(sColor, icon)} ${ticketId}${teamStr}${color(sColor, phaseLabel)}${deps}`);
+          const displayId = stripPrefix(ticketId);
+          lines.push(`    ${color(sColor, icon)} ${displayId}${teamStr}${color(sColor, phaseLabel)}${deps}`);
         }
       }
     }
