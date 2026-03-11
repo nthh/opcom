@@ -226,11 +226,12 @@ describe("plan-overview team badge", () => {
     const plan = makePlan(steps);
     const state = createPlanOverviewState(plan);
 
+    // Tracks view strips parent prefix: "impl-auth/engineer" → "engineer"
     const hasEngineerBadge = state.displayLines.some(
-      (l) => l.includes("impl-auth/engineer") && l.includes("[feature-dev 1/2]"),
+      (l) => l.includes("engineer") && l.includes("[feature-dev 1/2]"),
     );
     const hasQaBadge = state.displayLines.some(
-      (l) => l.includes("impl-auth/qa") && l.includes("[feature-dev 2/2]"),
+      (l) => l.includes("qa") && l.includes("[feature-dev 2/2]"),
     );
     expect(hasEngineerBadge).toBe(true);
     expect(hasQaBadge).toBe(true);
@@ -254,14 +255,17 @@ describe("plan-overview team badge", () => {
       makeStep({ ticketId: "impl-auth/engineer", teamId: "feature-dev", teamStepRole: "engineer", track: "auth" }),
       makeStep({ ticketId: "impl-auth/qa", teamId: "feature-dev", teamStepRole: "qa", track: "auth", blockedBy: ["impl-auth/engineer"] }),
     ];
+    // Stages section only renders when plan.stages.length > 1
     const plan = makePlan(steps, {
       stages: [
         { index: 0, name: "Stage 1", stepTicketIds: ["impl-auth/engineer", "impl-auth/qa"], status: "executing" },
+        { index: 1, name: "Stage 2", stepTicketIds: [], status: "pending" },
       ],
       currentStage: 0,
     });
     const state = createPlanOverviewState(plan);
 
+    // Stages view uses full ticketId (no prefix stripping)
     const hasEngineerBadge = state.displayLines.some(
       (l) => l.includes("impl-auth/engineer") && l.includes("[feature-dev 1/2]"),
     );

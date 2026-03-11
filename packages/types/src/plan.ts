@@ -60,6 +60,7 @@ export interface PlanStep {
   verificationMode?: VerificationMode;   // per-step override from work item frontmatter
   teamId?: string;                       // team definition that expanded this step
   teamStepRole?: string;                 // role within the team sequence (e.g. "engineer", "qa")
+  deniedWriteCount?: number;             // count of write attempts blocked by denyPaths
 }
 
 export interface RebaseConflict {

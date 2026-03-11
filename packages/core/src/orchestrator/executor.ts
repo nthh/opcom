@@ -268,6 +268,11 @@ export class Executor {
                   roleId: denyConfig.roleId,
                   pattern: matched,
                 });
+                // Increment denied write count on the plan step
+                const planStep = this.plan.steps.find((s) => s.ticketId === ticketId);
+                if (planStep) {
+                  planStep.deniedWriteCount = (planStep.deniedWriteCount ?? 0) + 1;
+                }
                 this.emit("denied_write", {
                   stepTicketId: ticketId,
                   filePath,

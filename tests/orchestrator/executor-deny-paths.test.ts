@@ -229,9 +229,44 @@ describe("Executor denyPaths enforcement", () => {
     expect(denied[0].roleId).toBe("engineer");
     expect(denied[0].pattern).toBe(".tickets/**");
 
+    // Verify deniedWriteCount is incremented on the plan step
+    expect(plan.steps[0].deniedWriteCount).toBe(1);
+
     // Clean up
     sm.simulateWrite(sessionId);
     sm.simulateCompletion(sessionId);
+    executor.stop();
+    await runPromise;
+  });
+
+  it("increments deniedWriteCount for multiple denied writes", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, sm as never);
+    const runPromise = executor.run();
+    await waitFor(() => sm.startCalls.length === 1);
+
+    // Simulate multiple denied writes
+    sm.simulateToolStart("session-1", "Write", JSON.stringify({
+      file_path: ".tickets/impl/foo.md",
+      content: "attempt 1",
+    }));
+    sm.simulateToolStart("session-1", "Edit", JSON.stringify({
+      file_path: ".tickets/impl/bar.md",
+      old_string: "a",
+      new_string: "b",
+    }));
+    sm.simulateToolStart("session-1", "Write", JSON.stringify({
+      file_path: ".tickets/impl/baz.md",
+      content: "attempt 3",
+    }));
+
+    expect(plan.steps[0].deniedWriteCount).toBe(3);
+
+    sm.simulateWrite("session-1");
+    sm.simulateCompletion("session-1");
     executor.stop();
     await runPromise;
   });

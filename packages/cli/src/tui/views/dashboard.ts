@@ -616,7 +616,10 @@ function renderPlanPanel(
 
       const teamBadge = formatTeamBadge(step, plan);
       const teamStr = teamBadge ? dim(` ${teamBadge}`) : "";
-      const text = `  ${statusStr} ${step.ticketId}${teamStr}${verifyBadge}${stallBadge}${gatedBadge}`;
+      const deniedBadge = (step.deniedWriteCount ?? 0) > 0
+        ? color(ANSI.red, ` \u26d4 ${step.deniedWriteCount} denied`)
+        : "";
+      const text = `  ${statusStr} ${step.ticketId}${teamStr}${verifyBadge}${stallBadge}${gatedBadge}${deniedBadge}`;
       const isSelected = line.index === selected && focused;
 
       if (isSelected) {
