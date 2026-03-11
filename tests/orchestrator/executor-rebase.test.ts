@@ -145,6 +145,7 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
   resolveRoleConfig: vi.fn((_roleDef: unknown, _stackPatterns: string[], planConfig: Record<string, unknown>) => {
     const verification = (planConfig?.verification ?? {}) as Record<string, unknown>;
     return {
+      roleId: "engineer",
       name: "Engineer",
       permissionMode: "acceptEdits",
       allowedTools: [],
@@ -154,6 +155,7 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
       doneCriteria: "",
       runTests: verification.runTests ?? false,
       runOracle: verification.runOracle ?? false,
+      denyPaths: [],
     };
   }),
 }));

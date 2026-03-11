@@ -251,7 +251,7 @@ export class Executor {
       if (ev.type === "tool_end" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolSuccess !== false) {
         this.sessionWrites.set(sessionId, (this.sessionWrites.get(sessionId) ?? 0) + 1);
       }
-      // Deny path check — warn when agent writes to restricted paths
+      // Deny path check — reject when agent writes to restricted paths
       if (ev.type === "tool_start" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolInput) {
         const ticketId = this.sessionToStep.get(sessionId);
         if (ticketId) {
@@ -261,6 +261,7 @@ export class Executor {
             if (filePath) {
               const matched = matchesDenyPath(filePath, denyConfig.denyPaths);
               if (matched) {
+                const errorMsg = `Cannot modify ${filePath} — files matching \`${matched}\` are read-only during execution.`;
                 log.warn("denied write to protected path", {
                   ticketId,
                   filePath,
@@ -281,6 +282,9 @@ export class Executor {
                     pattern: matched,
                   },
                 });
+                // Best-effort: tell the agent the write was rejected.
+                // stdin may be closed in one-shot mode — enforcement is still logged.
+                this.sessionManager.promptSession(sessionId, errorMsg).catch(() => {});
               }
             }
           }
