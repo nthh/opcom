@@ -292,6 +292,17 @@ export function formatDecompositionPrompt(
   sections.push("Ensure sub-ticket deps form a valid DAG (no cycles).");
   sections.push("Use the parent ticket's deps as starting deps for the first sub-ticket(s).");
   sections.push("Only add deps between sub-tickets when one genuinely needs the other's output.");
+  sections.push("");
+  sections.push("# Task List Deps");
+  sections.push("Each sub-ticket should have a ## Tasks section with task lines.");
+  sections.push("Tasks default to PARALLEL — all run concurrently in a shared worktree.");
+  sections.push("Tasks that build on each other MUST have (deps: <slugified-task-id>) markers.");
+  sections.push("Example:");
+  sections.push("- [ ] Define types");
+  sections.push("- [ ] Implement logic (deps: define-types)");
+  sections.push("- [ ] Wire into CLI (deps: implement-logic)");
+  sections.push("- [ ] Tests (deps: wire-into-cli)");
+  sections.push("Without deps, agents will run all tasks simultaneously and conflict.");
 
   return sections.join("\n");
 }

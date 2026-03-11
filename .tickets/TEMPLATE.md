@@ -34,15 +34,23 @@ links: []
 
 ## Tasks
 
-Task lines are parsed by the planner. Default is parallel — only add deps when ordering matters.
+Task lines are parsed by the planner. **Default is parallel** — all tasks without explicit deps run concurrently in a shared worktree. Tasks that build on each other MUST have `(deps:)` or `(sequential)` markers, otherwise agents will conflict.
 
-- [ ] Task description
-- [ ] Task description (deps: task-description)
-- [ ] Task description (sequential)
+Common pattern: types → implementation → wiring → tests
+- [ ] Define types and interfaces
+- [ ] Implement core logic (deps: define-types-and-interfaces)
+- [ ] Wire into CLI/TUI (deps: implement-core-logic)
+- [ ] Tests (deps: wire-into-cli-tui)
 
-Folia-style IDs also supported:
-- [ ] T001 [P] Task description
-- [ ] T002 Task description (deps: t001)
+Genuinely independent tasks need no markers (they run in parallel):
+- [ ] Add R2 adapter (deps: define-types-and-interfaces)
+- [ ] Add GCS adapter (deps: define-types-and-interfaces)
+- [ ] Add S3 adapter (deps: define-types-and-interfaces)
+
+Other markers:
+- `(sequential)` — depends on the previous task in the list
+- `(parallel)` or `[P]` — explicit parallel (same as default, documents intent)
+- Folia-style: `T001 [P]` prefix sets the task ID explicitly
 
 ## Notes
 

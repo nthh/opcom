@@ -31,7 +31,7 @@ tests/                  — tests (source of truth: tests > code > docs)
 
 **Rules:**
 - **Specs before tickets.** Every implementation ticket must link to a spec section. If no spec section exists, write it first. Tickets describe *what to build*; specs describe *how it should work*.
-- **Tickets before code.** Do not write implementation code without a ticket. The flow is always: spec → ticket → code + tests. If asked to implement something, create the ticket first (in `.tickets/impl/`), then implement against it. Use the Context Packet format from `.tickets/TEMPLATE.md` — every non-trivial ticket must have Goal, Non-Goals, Constraints, Repo Anchors, and Oracle (Done When).
+- **Tickets before code.** Do not write implementation code without a ticket. The flow is always: spec → ticket → code + tests. If asked to implement something, create the ticket first (in `.tickets/impl/`), then implement against it. Use the Context Packet format from `.tickets/TEMPLATE.md` — every non-trivial ticket must have Goal, Non-Goals, Constraints, Repo Anchors, and Oracle (Done When). Task lines in `## Tasks` default to **parallel** — add `(deps: task-id)` for tasks that build on each other, otherwise agents will conflict in the shared worktree.
 - **Specs evolve with implementation.** Update specs during implementation, not just before. A spec that doesn't match the code is a bug.
 - **Use cases are cross-cutting.** They span multiple specs/features and track readiness (what's implemented vs. what's missing). Use them to answer "can a user actually do X end-to-end?"
 
