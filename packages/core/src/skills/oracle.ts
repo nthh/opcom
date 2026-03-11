@@ -125,14 +125,14 @@ export async function extractAcceptanceCriteria(
 export function extractCriteriaFromMarkdown(content: string): string[] {
   const criteria: string[] = [];
 
-  // Look for "## Acceptance Criteria" or "## Oracle (...)" section
+  // Look for dedicated criteria section:
+  //   ## Acceptance Criteria, ## Oracle (...), or bold **Oracle (...):** marker
   const acMatch = content.match(
-    /## (?:Acceptance Criteria|Oracle(?:\s*\([^)]*\))?)\s*\n([\s\S]*?)(?=\n## |\n#[^#]|$)/,
+    /(?:## (?:Acceptance Criteria|Oracle(?:\s*\([^)]*\))?)|\*\*Oracle(?:\s*\([^)]*\))?\s*:\s*\*\*)\s*\n([\s\S]*?)(?=\n## |\n#[^#]|\n---|\n\*\*[A-Z]|$)/,
   );
   if (acMatch) {
     const lines = acMatch[1].split("\n");
     for (const line of lines) {
-      // Match "- [ ] criterion" or "- [x] criterion" or "- criterion"
       const checkboxMatch = line.match(/^\s*-\s+\[[ x]\]\s+(.+)/);
       const bulletMatch = line.match(/^\s*-\s+(.+)/);
       const match = checkboxMatch ?? bulletMatch;
@@ -142,14 +142,20 @@ export function extractCriteriaFromMarkdown(content: string): string[] {
     }
   }
 
-  // Also look for standalone checkbox items if no AC section found
-  if (criteria.length === 0) {
-    const lines = content.split("\n");
-    for (const line of lines) {
-      const checkboxMatch = line.match(/^\s*-\s+\[[ x]\]\s+(.+)/);
-      if (checkboxMatch) {
-        criteria.push(checkboxMatch[1].trim());
-      }
+  // Also collect task-level checkboxes from the rest of the document.
+  // These provide granular coverage beyond the oracle section.
+  // Skip non-criteria items (gaps, questions, notes).
+  const lines = content.split("\n");
+  const oracleSet = new Set(criteria);
+  for (const line of lines) {
+    const checkboxMatch = line.match(/^\s*-\s+\[[ x]\]\s+(.+)/);
+    if (checkboxMatch) {
+      const text = checkboxMatch[1].trim();
+      // Skip items already captured from oracle section
+      if (oracleSet.has(text)) continue;
+      // Skip non-criteria items (gaps, open questions, notes)
+      if (/^\*\*(?:Gap|Question|Note|TODO)\b/i.test(text)) continue;
+      criteria.push(text);
     }
   }
 
@@ -160,6 +166,9 @@ export function formatOraclePrompt(input: OracleInput): string {
   const sections: string[] = [];
 
   sections.push("Evaluate whether the following code changes satisfy the acceptance criteria for this ticket.");
+  sections.push("Criteria describe intended outcomes. Evaluate whether the code **addresses** each criterion — i.e., implements the logic, pipeline, configuration, or tests needed to achieve it.");
+  sections.push("If a criterion requires an external action (downloading data, uploading to cloud storage, registering with a service) that cannot happen inside a code diff, mark it MET when the code provides a working implementation that handles that action (scripts, pipeline functions, CLI commands, config).");
+  sections.push("Do NOT mark a criterion unmet solely because an external operation was not literally executed in the diff.");
   sections.push("");
   sections.push("# Ticket");
   sections.push(`- ID: ${input.ticket.id}`);

@@ -82,7 +82,7 @@ Some notes here.
     expect(criteria[0]).toBe("Cache is implemented");
   });
 
-  it("extracts from Oracle (Done When) section", () => {
+  it("extracts from Oracle (Done When) heading plus task checkboxes", () => {
     const content = `# Phase 5: Commons Data Ingestion
 
 ## Overview
@@ -105,10 +105,14 @@ Some overview text.
 `;
 
     const criteria = extractCriteriaFromMarkdown(content);
-    expect(criteria).toHaveLength(3);
+    expect(criteria).toHaveLength(6);
     expect(criteria[0]).toBe("6 datasets downloaded + converted to cloud-native format");
     expect(criteria[1]).toBe("Each has a layer.yaml definition");
     expect(criteria[2]).toBe("Each validated by DeepValidator");
+    // Task checkboxes also included for granularity
+    expect(criteria[3]).toBe("T001 Download WDPA");
+    expect(criteria[4]).toBe("T002 Convert WDPA");
+    expect(criteria[5]).toBe("T003 Write layer.yaml");
   });
 
   it("extracts from bare Oracle section", () => {
@@ -123,6 +127,41 @@ Some overview text.
     const criteria = extractCriteriaFromMarkdown(content);
     expect(criteria).toHaveLength(2);
     expect(criteria[0]).toBe("API endpoint exists");
+  });
+
+  it("extracts from bold **Oracle (Done When):** and filters gaps/questions", () => {
+    const content = `# Phase 5: Commons Data
+
+## Context Packet
+
+**Goal:** 6 datasets available.
+
+**Oracle (Done When):**
+- [ ] 6 datasets downloaded
+- [ ] Each has a layer.yaml
+- [ ] Each validated by DeepValidator
+
+---
+
+## Tasks
+
+- [ ] T001 Download WDPA
+- [ ] T002 Convert WDPA
+- [ ] T003 Write layer.yaml
+
+## Gaps
+
+- [ ] **Gap**: Something needs manual work
+- [ ] **Question**: Should we use X or Y?
+`;
+
+    const criteria = extractCriteriaFromMarkdown(content);
+    expect(criteria).toHaveLength(6);
+    expect(criteria[0]).toBe("6 datasets downloaded");
+    expect(criteria[3]).toBe("T001 Download WDPA");
+    // Gaps and questions are filtered out
+    expect(criteria.every(c => !c.includes("Gap"))).toBe(true);
+    expect(criteria.every(c => !c.includes("Question"))).toBe(true);
   });
 
   it("falls back to standalone checkboxes if no AC section", () => {
