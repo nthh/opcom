@@ -457,6 +457,7 @@ export function expandSubtaskSteps(
         blockedBy: subBlockedBy,
         role: step.role,
         verificationMode: step.verificationMode,
+        swarm: true,
       });
     }
 

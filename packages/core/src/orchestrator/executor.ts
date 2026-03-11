@@ -2199,9 +2199,7 @@ export class Executor {
   private ticketLookupId(step: PlanStep): string {
     if (step.teamId) return baseTicketId(step.ticketId);
     const slash = step.ticketId.lastIndexOf("/");
-    if (slash >= 0 && this.isSwarmSubtask(step)) {
-      return step.ticketId.slice(slash + 1);
-    }
+    if (slash >= 0) return step.ticketId.slice(slash + 1);
     return step.ticketId;
   }
 
@@ -3009,15 +3007,10 @@ export function matchesDenyPath(filePath: string, denyPaths: string[]): string |
 // --- Swarm helpers (exported for testing) ---
 
 /**
- * Check if a step is a swarm subtask (has parent/subtask ticketId format
- * AND has sibling steps from the same parent).
+ * Check if a step is a swarm subtask (explicitly flagged by expandSubtaskSteps).
  */
-export function isSwarmSubtask(step: PlanStep, allSteps: PlanStep[]): boolean {
-  if (!step.ticketId.includes("/") || step.teamId) return false;
-  const parentId = baseTicketId(step.ticketId);
-  return allSteps.some(
-    (s) => s.ticketId !== step.ticketId && baseTicketId(s.ticketId) === parentId,
-  );
+export function isSwarmSubtask(step: PlanStep, _allSteps: PlanStep[]): boolean {
+  return step.swarm === true;
 }
 
 /**
