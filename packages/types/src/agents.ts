@@ -67,6 +67,9 @@ export interface NormalizedEvent {
     // compaction events
     contextTokens?: number;
 
+    // extended thinking content (vs regular text)
+    thinking?: boolean;
+
     // raw event for debugging
     raw?: unknown;
   };
