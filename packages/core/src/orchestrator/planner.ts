@@ -119,37 +119,20 @@ export function computePlan(
   // Parents are excluded from plan steps — their children are the steps.
   const parentIds = findParentTicketIds(allTickets);
 
-  // Build a mapping from raw ticket ID to step ID.
-  // Sub-tickets with a parent use "parent/id" format for step IDs
-  // so tracks are named correctly and swarm worktree logic works.
-  const stepIdMap = new Map<string, string>();
-  for (const [ticketId, { ticket }] of allTickets) {
-    if (parentIds.has(ticketId)) continue;
-    if (ticket.parent && parentIds.has(ticket.parent)) {
-      stepIdMap.set(ticketId, `${ticket.parent}/${ticketId}`);
-    } else {
-      stepIdMap.set(ticketId, ticketId);
-    }
-  }
-
   // Build steps
   let steps: PlanStep[] = [];
   for (const [ticketId, { ticket, projectId }] of allTickets) {
     // Skip parent tickets — children are the executable steps
     if (parentIds.has(ticketId)) continue;
 
-    const stepId = stepIdMap.get(ticketId) ?? ticketId;
-
     // Only include deps that are in our scope and are not parent tickets
-    // Map dep IDs to their step IDs (parent/id format)
     const blockedBy = ticket.deps
-      .filter((d) => allTickets.has(d) && !parentIds.has(d))
-      .map((d) => stepIdMap.get(d) ?? d);
+      .filter((d) => allTickets.has(d) && !parentIds.has(d));
 
     const status: StepStatus = blockedBy.length > 0 ? "blocked" : "ready";
 
     steps.push({
-      ticketId: stepId,
+      ticketId,
       projectId,
       status,
       blockedBy,
