@@ -886,10 +886,10 @@ export class TuiApp {
       case "P": { // Create plan for selected project
         const project = state.projects[state.selectedIndex[0]];
         if (project) {
-          this.client.createPlan(project.id).then((plan) => {
+          this.client.createPlan(project.id).then((result) => {
             this.syncData();
-            if (plan) {
-              this.navigateToPlanOverview(plan);
+            if (result) {
+              this.navigateToPlanOverview(result.plan, result.assessments);
             }
             this.scheduleRender();
           }).catch(() => {});
@@ -1179,10 +1179,10 @@ export class TuiApp {
 
       case "P": // Create plan for this project
         if (this.focusedProjectId) {
-          this.client.createPlan(this.focusedProjectId).then((plan) => {
+          this.client.createPlan(this.focusedProjectId).then((result) => {
             this.syncData();
-            if (plan) {
-              this.navigateToPlanOverview(plan);
+            if (result) {
+              this.navigateToPlanOverview(result.plan, result.assessments);
             }
             this.scheduleRender();
           }).catch(() => {});
@@ -1997,6 +1997,28 @@ export class TuiApp {
       return;
     }
 
+    // Handle decomposition overlay input before normal plan overview input
+    if (state.decompositionAssessments && state.decompositionAssessments.length > 0 && !state.decompositionResolved) {
+      switch (data) {
+        case "d": { // Decompose
+          // For now, resolve decomposition and proceed — full LLM decomposition
+          // requires a backend. Use `opcom plan create --decompose` for LLM-powered decomposition.
+          state.decompositionResolved = true;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          return;
+        }
+        case "s": // Skip
+          state.decompositionResolved = true;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          return;
+        case "\x1b": // Escape
+        case "q":
+          this.navigateBack();
+          return;
+      }
+      return; // Block other keys while decomposition overlay is active
+    }
+
     switch (data) {
       case "\x1b": // Escape
       case "q":
@@ -2244,7 +2266,10 @@ export class TuiApp {
     }).catch(() => {});
   }
 
-  private navigateToPlanOverview(plan: import("@opcom/types").Plan): void {
+  private navigateToPlanOverview(
+    plan: import("@opcom/types").Plan,
+    decompositionAssessments?: import("@opcom/types").DecompositionAssessment[],
+  ): void {
     this.navStack.push({
       level: this.level,
       projectId: this.focusedProjectId ?? undefined,
@@ -2258,7 +2283,7 @@ export class TuiApp {
       allTickets.push(...tickets);
     }
 
-    this.planOverviewState = createPlanOverviewState(plan, allTickets);
+    this.planOverviewState = createPlanOverviewState(plan, allTickets, decompositionAssessments);
     this.agentFocusState = null;
     this.ticketFocusState = null;
     this.planStepFocusState = null;

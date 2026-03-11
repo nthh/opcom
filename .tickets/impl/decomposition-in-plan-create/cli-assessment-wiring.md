@@ -1,7 +1,7 @@
 ---
 id: cli-assessment-wiring
 title: "Wire decomposition assessment into opcom plan create CLI"
-status: open
+status: closed
 type: feature
 priority: 1
 parent: decomposition-in-plan-create

@@ -76,6 +76,9 @@ vi.mock("@opcom/core", () => ({
   savePlan: (...args: unknown[]) => mockSavePlan(...args),
   deletePlan: vi.fn(),
   checkHygiene: vi.fn(),
+  assessTicketsForDecomposition: vi.fn(() => []),
+  generateDecomposition: vi.fn(),
+  writeSubTickets: vi.fn(async () => []),
   defaultOrchestratorConfig: vi.fn(() => ({
     maxConcurrentAgents: 3,
     worktree: true,

@@ -2,7 +2,7 @@
 // Shows a full summary of a plan before execution: steps, tracks, settings,
 // blocked/ready breakdown, dependency structure, confirm/cancel prompt.
 
-import type { Plan, PlanStep, OrchestratorConfig, WorkItem } from "@opcom/types";
+import type { Plan, PlanStep, OrchestratorConfig, WorkItem, DecompositionAssessment } from "@opcom/types";
 import { formatTeamBadge } from "./plan-step-focus.js";
 import type { Panel } from "../layout.js";
 import {
@@ -200,9 +200,17 @@ export interface PlanOverviewState {
   confirmed: boolean | null; // null = pending, true = confirmed, false = cancelled
   editMode: boolean;
   editFieldIndex: number;
+  /** Flagged tickets that may need decomposition (shown before plan overview) */
+  decompositionAssessments?: DecompositionAssessment[];
+  /** Whether decomposition overlay has been resolved (d=decompose, s=skip) */
+  decompositionResolved: boolean;
 }
 
-export function createPlanOverviewState(plan: Plan, allTickets?: WorkItem[]): PlanOverviewState {
+export function createPlanOverviewState(
+  plan: Plan,
+  allTickets?: WorkItem[],
+  decompositionAssessments?: DecompositionAssessment[],
+): PlanOverviewState {
   const summary = computePlanSummary(plan, allTickets);
   const state: PlanOverviewState = {
     plan,
@@ -213,6 +221,8 @@ export function createPlanOverviewState(plan: Plan, allTickets?: WorkItem[]): Pl
     confirmed: null,
     editMode: false,
     editFieldIndex: 0,
+    decompositionAssessments,
+    decompositionResolved: !decompositionAssessments || decompositionAssessments.length === 0,
   };
   rebuildDisplayLines(state);
   return state;
@@ -263,6 +273,23 @@ function stepStatusColor(status: string): string {
 export function rebuildDisplayLines(state: PlanOverviewState, width = 80): void {
   const { plan, summary } = state;
   const lines: string[] = [];
+
+  // --- Decomposition overlay ---
+  if (state.decompositionAssessments && state.decompositionAssessments.length > 0 && !state.decompositionResolved) {
+    lines.push(bold(color(ANSI.yellow, "Decomposition Assessment")));
+    lines.push("");
+    lines.push(`${state.decompositionAssessments.length} oversized ticket(s) detected:`);
+    lines.push("");
+    for (const a of state.decompositionAssessments) {
+      lines.push(`  ${color(ANSI.yellow, "!")} ${bold(a.ticketId)}`);
+      lines.push(`    ${dim(a.reason)}`);
+    }
+    lines.push("");
+    lines.push(`Press ${bold("d")} to decompose, ${bold("s")} to skip, ${bold("Esc")} to cancel`);
+    state.displayLines = lines;
+    state.wrapWidth = width;
+    return;
+  }
 
   // --- Header ---
   lines.push(bold(`Plan: ${plan.name}`));
