@@ -1,7 +1,7 @@
 ---
 id: protect-ticket-files
 title: "Prevent agents from modifying ticket files"
-status: open
+status: closed
 type: bugfix
 priority: 1
 created: 2026-03-10
