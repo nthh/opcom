@@ -1714,17 +1714,29 @@ export class Executor {
     let cleanup: () => void;
 
     const responseText = await new Promise<string>(async (resolve, reject) => {
+      let messageComplete = false;
+
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
         if (!oracleSessionId || sessionId !== oracleSessionId) return;
         if (ev.type === "message_delta" && ev.data?.text) {
           text += ev.data.text;
         }
+        // Oracle has disableAllTools — once a message completes, stop the session
+        // immediately rather than waiting for the process to exit on its own.
+        if (ev.type === "message_end" && !messageComplete) {
+          messageComplete = true;
+          cleanup();
+          this.sessionManager.stopSession(oracleSessionId).catch(() => {});
+          resolve(text);
+        }
       };
 
       const onStopped = (stopped: import("@opcom/types").AgentSession) => {
         if (!oracleSessionId || stopped.id !== oracleSessionId) return;
-        cleanup();
-        resolve(text);
+        if (!messageComplete) {
+          cleanup();
+          resolve(text);
+        }
       };
 
       const timer = setTimeout(() => {
