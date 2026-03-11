@@ -31,7 +31,7 @@ import { loadProject } from "../config/loader.js";
 import { scanTickets } from "../detection/tickets.js";
 import { commitStepChanges, captureChangeset } from "./git-ops.js";
 import { WorktreeManager } from "./worktree.js";
-import { collectOracleInputs, formatOraclePrompt, parseOracleResponse } from "../skills/oracle.js";
+import { collectOracleInputs, formatOraclePrompt, parseOracleResponse, extractAcceptanceCriteria } from "../skills/oracle.js";
 import { loadRole, resolveRoleConfig } from "../config/roles.js";
 import { updateProjectSummary } from "../config/summary.js";
 import { createLogger } from "../logger.js";
@@ -1514,7 +1514,11 @@ export class Executor {
       });
       try {
         const tickets = await scanTickets(project.path);
-        const workItem = tickets.find((t) => t.id === step.ticketId);
+        // For subtask steps (parent/subtask), look up the subtask ID
+        const oracleLookupId = step.ticketId.includes("/") && !step.teamId
+          ? step.ticketId.split("/").pop()!
+          : step.ticketId;
+        const workItem = tickets.find((t) => t.id === oracleLookupId);
         if (workItem) {
           const oracleInput = await collectOracleInputs(
             project.path,
@@ -1525,6 +1529,22 @@ export class Executor {
               worktreeBranch: step.worktreeBranch,
             },
           );
+
+          // For final swarm subtask, include parent ticket's acceptance criteria
+          if (this.isFinalSwarmSubtask(step)) {
+            const parentId = baseTicketId(step.ticketId);
+            const parentTicket = tickets.find((t) => t.id === parentId);
+            if (parentTicket) {
+              const parentCriteria = await extractAcceptanceCriteria(parentTicket.filePath);
+              if (parentCriteria.length > 0) {
+                oracleInput.acceptanceCriteria = [
+                  ...oracleInput.acceptanceCriteria,
+                  ...parentCriteria.map((c) => `[parent] ${c}`),
+                ];
+              }
+            }
+          }
+
           // Feed test results into oracle context
           if (result.testGate) {
             oracleInput.testResults = result.testGate.output;
