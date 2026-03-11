@@ -196,6 +196,7 @@ import {
   scrollToBottom as serviceScrollToBottom,
   type ServiceDetailState,
 } from "./views/service-detail.js";
+import { createAnthropicLlmCall } from "./llm.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -2001,10 +2002,27 @@ export class TuiApp {
     if (state.decompositionAssessments && state.decompositionAssessments.length > 0 && !state.decompositionResolved) {
       switch (data) {
         case "d": { // Decompose
-          // For now, resolve decomposition and proceed — full LLM decomposition
-          // requires a backend. Use `opcom plan create --decompose` for LLM-powered decomposition.
+          const projectId = state.plan.scope.projectIds?.[0];
+          const assessments = state.decompositionAssessments;
+          const llmCall = createAnthropicLlmCall();
+          if (!projectId || !assessments || !llmCall) {
+            // No project, assessments, or LLM backend — fall back to skip
+            state.decompositionResolved = true;
+            rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+            return;
+          }
+          // Mark as resolved immediately so UI unblocks
           state.decompositionResolved = true;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          // Run decomposition async, then update the plan overview
+          this.client.decomposeAndRecreatePlan(projectId, assessments, llmCall).then((newPlan) => {
+            if (newPlan && this.planOverviewState === state) {
+              this.navigateToPlanOverview(newPlan);
+            }
+            this.scheduleRender();
+          }).catch(() => {
+            this.scheduleRender();
+          });
           return;
         }
         case "s": // Skip
