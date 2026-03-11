@@ -56,12 +56,12 @@ In the executor's bash/write tool interception (or in `allowedBashPatterns`):
 ## Tasks
 
 - [ ] Add `denyPaths` field to `RoleDefinition` type
-- [ ] Add `.tickets/**` to `engineer` role's deny paths
-- [ ] Implement path check in executor's write interception (before agent writes)
-- [ ] Return clear error message to agent when write is denied
-- [ ] Emit `denied_write` event for TUI/logging visibility
-- [ ] Ensure `updateTicketStatus()` (executor-initiated) is not affected
-- [ ] Tests: engineer can't write to .tickets/, planner can, executor status updates work
+- [ ] Add `.tickets/**` to `engineer` role's deny paths (deps: add-denypaths-field-to-roledefinition-type)
+- [ ] Implement path check in executor's write interception (deps: add-tickets-to-engineer-role-s-deny-paths)
+- [ ] Return clear error message to agent when write is denied (deps: implement-path-check-in-executor-s-write-interception)
+- [ ] Emit `denied_write` event for TUI/logging visibility (deps: implement-path-check-in-executor-s-write-interception)
+- [ ] Ensure `updateTicketStatus()` (executor-initiated) is not affected (deps: implement-path-check-in-executor-s-write-interception)
+- [ ] Tests: engineer can't write to .tickets/, planner can, executor status updates work (deps: return-clear-error-message-to-agent-when-write-is-denied, emit-denied-write-event-for-tui-logging-visibility, ensure-updateticketstatus-executor-initiated-is-not-affected)
 
 ## Acceptance Criteria
 
