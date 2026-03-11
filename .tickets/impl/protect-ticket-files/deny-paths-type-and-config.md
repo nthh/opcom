@@ -1,7 +1,7 @@
 ---
 id: deny-paths-type-and-config
 title: "Add denyPaths to RoleDefinition and configure engineer role"
-status: open
+status: closed
 type: feature
 priority: 1
 parent: protect-ticket-files
