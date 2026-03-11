@@ -109,6 +109,55 @@ class MockSessionManager {
     });
   }
 
+  simulateThinkingOnlyResponse(session: AgentSession, thinkingText: string): void {
+    // Emit thinking-only message_delta (no structured text)
+    this.emit("agent_event", {
+      sessionId: session.id,
+      event: {
+        type: "message_delta",
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+        data: { text: thinkingText, thinking: true },
+      },
+    });
+    // Emit message_end (thinking-only message completes)
+    this.emit("agent_event", {
+      sessionId: session.id,
+      event: {
+        type: "message_end",
+        sessionId: session.id,
+        timestamp: new Date().toISOString(),
+        data: { role: "assistant" },
+      },
+    });
+  }
+
+  simulateThinkingThenText(session: AgentSession, thinkingText: string, responseText: string, delayMs = 10): void {
+    // Emit thinking-only message first
+    this.simulateThinkingOnlyResponse(session, thinkingText);
+    // After a delay, emit the structured text response
+    setTimeout(() => {
+      this.emit("agent_event", {
+        sessionId: session.id,
+        event: {
+          type: "message_delta",
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+          data: { text: responseText },
+        },
+      });
+      this.emit("agent_event", {
+        sessionId: session.id,
+        event: {
+          type: "message_end",
+          sessionId: session.id,
+          timestamp: new Date().toISOString(),
+          data: { role: "assistant" },
+        },
+      });
+    }, delayMs);
+  }
+
   simulateCompletion(sessionId: string): void {
     const session: AgentSession = {
       id: sessionId,
@@ -597,6 +646,114 @@ describe("Executor oracle agent session", () => {
 
     expect(verifyingObserved).toBe(true);
     expect(plan.steps[0].status).toBe("done");
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("oracle resolves with thinking text when structured text follows", async () => {
+    // Simulate extended thinking flow: thinking-only message, then text message
+    mockSM.onOracleStart = (session) => {
+      mockSM.simulateThinkingThenText(
+        session,
+        "Let me analyze the code changes...",
+        ORACLE_RESPONSE_ALL_MET,
+        10,
+      );
+    };
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await waitFor(() => plan.steps[0].status === "in-progress");
+
+    mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
+
+    const step = plan.steps[0];
+    expect(step.status).toBe("done");
+    expect(step.verification!.oracle!.passed).toBe(true);
+    expect(step.verification!.oracle!.criteria).toHaveLength(2);
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("oracle timeout resolves with accumulated thinking text instead of rejecting", async () => {
+    vi.useFakeTimers();
+
+    // Simulate thinking-only response with no follow-up text
+    mockSM.onOracleStart = (session) => {
+      mockSM.simulateThinkingOnlyResponse(
+        session,
+        "Let me analyze... this is thinking content without structured criteria format.",
+      );
+      // Never send structured text — simulates the timeout scenario
+    };
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+
+    // Advance time to start the step
+    await vi.advanceTimersByTimeAsync(100);
+
+    // Complete the coding agent
+    if (plan.steps[0].agentSessionId) {
+      mockSM.simulateCompletion(plan.steps[0].agentSessionId);
+    }
+
+    // Advance past oracle grace timer (120s) + main timer (180s)
+    await vi.advanceTimersByTimeAsync(200_000);
+
+    const step = plan.steps[0];
+    // Should have resolved with thinking text (not thrown a timeout error)
+    // The parser can't extract criteria from thinking text → 0 criteria → failed
+    if (step.verification) {
+      expect(step.verification.passed).toBe(false);
+      // Should NOT have "timed out" error — should have parsed response (even if 0 criteria)
+      const hasTimeoutError = step.verification.failureReasons.some((r) => r.includes("timed out"));
+      expect(hasTimeoutError).toBe(false);
+    }
+
+    executor.stop();
+    await runPromise;
+    vi.useRealTimers();
+  });
+
+  it("reports 'could not parse structured response' when oracle returns 0 criteria", async () => {
+    // Oracle returns text that doesn't match the criteria format
+    mockSM.onOracleStart = (session) => {
+      mockSM.simulateOracleResponse(
+        session,
+        "I analyzed the code but cannot provide structured criteria output.",
+      );
+    };
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ], { pauseOnFailure: false });
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await waitFor(() => plan.steps[0].status === "in-progress");
+
+    mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
+
+    const step = plan.steps[0];
+    expect(step.status).toBe("failed");
+    expect(step.verification!.passed).toBe(false);
+    expect(step.verification!.failureReasons.some((r) => r.includes("could not parse"))).toBe(true);
 
     executor.stop();
     await runPromise;

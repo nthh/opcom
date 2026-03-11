@@ -1624,12 +1624,18 @@ export class Executor {
             result.oracle = oracleResult;
             if (!oracleResult.passed) {
               result.passed = false;
-              const unmet = oracleResult.criteria
-                .filter((c) => !c.met)
-                .map((c) => c.criterion);
-              result.failureReasons.push(
-                `Oracle: ${unmet.length} criteria unmet`,
-              );
+              if (oracleResult.criteria.length === 0) {
+                result.failureReasons.push(
+                  "Oracle: could not parse structured response (model may have produced only thinking)",
+                );
+              } else {
+                const unmet = oracleResult.criteria
+                  .filter((c) => !c.met)
+                  .map((c) => c.criterion);
+                result.failureReasons.push(
+                  `Oracle: ${unmet.length} criteria unmet`,
+                );
+              }
             }
             log.info("oracle result", {
               ticketId: step.ticketId,
@@ -1733,6 +1739,7 @@ export class Executor {
     const responseText = await new Promise<string>(async (resolve, reject) => {
       let messageComplete = false;
       let hasStructuredText = false;
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
         if (!oracleSessionId || sessionId !== oracleSessionId) return;
@@ -1749,6 +1756,25 @@ export class Executor {
           this.sessionManager.stopSession(oracleSessionId).catch(() => {});
           resolve(text);
         }
+        // After a thinking-only message completes, start a grace period.
+        // Claude Code with extended thinking sends thinking first, then text
+        // in a follow-up message. If the follow-up never arrives, resolve
+        // with accumulated text so the parser can handle it gracefully.
+        if (ev.type === "message_end" && !messageComplete && !hasStructuredText && text.length > 0 && !graceTimer) {
+          graceTimer = setTimeout(() => {
+            if (!messageComplete) {
+              messageComplete = true;
+              log.warn("oracle grace timeout: resolving with thinking-only text", {
+                ticketId: step.ticketId, textLen: text.length,
+              });
+              cleanup();
+              if (oracleSessionId) {
+                this.sessionManager.stopSession(oracleSessionId).catch(() => {});
+              }
+              resolve(text);
+            }
+          }, 120_000);
+        }
       };
 
       const onStopped = (stopped: import("@opcom/types").AgentSession) => {
@@ -1764,11 +1790,22 @@ export class Executor {
         if (oracleSessionId) {
           this.sessionManager.stopSession(oracleSessionId).catch(() => {});
         }
-        reject(new Error("Oracle agent timed out after 180s"));
+        // Resolve with whatever text we have instead of hard-failing.
+        // If only thinking was captured, the parser will return 0 criteria
+        // which is handled downstream as a soft failure.
+        if (text.trim()) {
+          log.warn("oracle timeout: resolving with accumulated text", {
+            ticketId: step.ticketId, textLen: text.length, hasStructuredText,
+          });
+          resolve(text);
+        } else {
+          reject(new Error("Oracle agent timed out after 180s with no response"));
+        }
       }, 180_000);
 
       cleanup = () => {
         clearTimeout(timer);
+        if (graceTimer) clearTimeout(graceTimer);
         this.sessionManager.off("agent_event", onEvent);
         this.sessionManager.off("session_stopped", onStopped);
       };
