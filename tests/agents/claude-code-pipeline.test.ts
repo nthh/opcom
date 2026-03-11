@@ -228,7 +228,7 @@ describe("ClaudeCodeAdapter pipeline", () => {
     // It should be suppressed (no new events emitted).
     // We'll collect what comes next — push a result event after
     // the assistant to verify the assistant was skipped.
-    const nextPromise = collectEvents(session.id, 3); // 2 already + 1 new (tool_end)
+    const nextPromise = collectEvents(session.id, 4); // 2 already + message_end + tool_end
 
     mockProc.stdout.push(JSON.stringify({
       type: "assistant",
@@ -242,9 +242,11 @@ describe("ClaudeCodeAdapter pipeline", () => {
     }) + "\n");
 
     const allEvents = await nextPromise;
-    // Should be: agent_start, message_delta (streaming), tool_end
-    // The assistant summary (message_start + message_delta + message_end) was skipped
-    expect(allEvents[2].type).toBe("tool_end");
+    // Should be: agent_start, message_delta (streaming), message_end, tool_end
+    // The assistant text content was deduped but message_end is still emitted
+    // so consumers waiting on message boundaries (e.g., oracle) get notified.
+    expect(allEvents[2].type).toBe("message_end");
+    expect(allEvents[3].type).toBe("tool_end");
   });
 
   it("does not crash on malformed JSON lines", async () => {

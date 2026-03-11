@@ -82,6 +82,49 @@ Some notes here.
     expect(criteria[0]).toBe("Cache is implemented");
   });
 
+  it("extracts from Oracle (Done When) section", () => {
+    const content = `# Phase 5: Commons Data Ingestion
+
+## Overview
+
+Some overview text.
+
+## Oracle (Done When)
+
+- [ ] 6 datasets downloaded + converted to cloud-native format
+- [ ] Each has a layer.yaml definition
+- [ ] Each validated by DeepValidator
+
+---
+
+## Tasks
+
+- [ ] T001 Download WDPA
+- [ ] T002 Convert WDPA
+- [ ] T003 Write layer.yaml
+`;
+
+    const criteria = extractCriteriaFromMarkdown(content);
+    expect(criteria).toHaveLength(3);
+    expect(criteria[0]).toBe("6 datasets downloaded + converted to cloud-native format");
+    expect(criteria[1]).toBe("Each has a layer.yaml definition");
+    expect(criteria[2]).toBe("Each validated by DeepValidator");
+  });
+
+  it("extracts from bare Oracle section", () => {
+    const content = `# Feature
+
+## Oracle
+
+- [ ] API endpoint exists
+- [ ] Returns JSON
+`;
+
+    const criteria = extractCriteriaFromMarkdown(content);
+    expect(criteria).toHaveLength(2);
+    expect(criteria[0]).toBe("API endpoint exists");
+  });
+
   it("falls back to standalone checkboxes if no AC section", () => {
     const content = `# Feature
 

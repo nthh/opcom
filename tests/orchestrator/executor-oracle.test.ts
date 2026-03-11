@@ -711,7 +711,7 @@ describe("Executor oracle agent session", () => {
       mockSM.simulateCompletion(plan.steps[0].agentSessionId);
     }
 
-    // Advance past oracle grace timer (120s) + main timer (180s)
+    // Advance past oracle grace timer (30s) × 2 attempts + buffer
     await vi.advanceTimersByTimeAsync(200_000);
 
     const step = plan.steps[0];
@@ -729,8 +729,8 @@ describe("Executor oracle agent session", () => {
     vi.useRealTimers();
   });
 
-  it("reports 'could not parse structured response' when oracle returns 0 criteria", async () => {
-    // Oracle returns text that doesn't match the criteria format
+  it("reports 'could not parse structured response' after retry when oracle returns 0 criteria", async () => {
+    // Oracle returns text that doesn't match the criteria format (both attempts)
     mockSM.onOracleStart = (session) => {
       mockSM.simulateOracleResponse(
         session,
@@ -754,6 +754,46 @@ describe("Executor oracle agent session", () => {
     expect(step.status).toBe("failed");
     expect(step.verification!.passed).toBe(false);
     expect(step.verification!.failureReasons.some((r) => r.includes("could not parse"))).toBe(true);
+    // Should have started 3 sessions: coding agent + 2 oracle attempts
+    const oracleCalls = mockSM.startCalls.filter((c) => c.ticketId?.startsWith("oracle:"));
+    expect(oracleCalls).toHaveLength(2);
+
+    executor.stop();
+    await runPromise;
+  });
+
+  it("oracle retry succeeds when first attempt returns only thinking", async () => {
+    let oracleAttempt = 0;
+    mockSM.onOracleStart = (session) => {
+      oracleAttempt++;
+      if (oracleAttempt === 1) {
+        // First attempt: thinking-only response that can't be parsed
+        mockSM.simulateOracleResponse(session, "Let me think about this... the code looks correct.");
+      } else {
+        // Second attempt: proper structured response
+        mockSM.simulateOracleResponse(session, ORACLE_RESPONSE_ALL_MET);
+      }
+    };
+
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const runPromise = executor.run();
+    await waitFor(() => plan.steps[0].status === "in-progress");
+
+    mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
+
+    const step = plan.steps[0];
+    expect(step.status).toBe("done");
+    expect(step.verification!.oracle!.passed).toBe(true);
+    expect(step.verification!.oracle!.criteria).toHaveLength(2);
+    // Verify two oracle sessions were started
+    const oracleCalls = mockSM.startCalls.filter((c) => c.ticketId?.startsWith("oracle:"));
+    expect(oracleCalls).toHaveLength(2);
 
     executor.stop();
     await runPromise;

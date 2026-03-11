@@ -411,6 +411,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
                   }
                 }
               }
+              // Still emit message_end so consumers (e.g., oracle) waiting
+              // on message boundaries know the message completed, even though
+              // the text content was already delivered via native streaming.
+              events.push({
+                type: "message_end",
+                sessionId,
+                timestamp: ts,
+                data: { role: "assistant" },
+              });
               break;
             }
           }

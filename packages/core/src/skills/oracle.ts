@@ -125,9 +125,9 @@ export async function extractAcceptanceCriteria(
 export function extractCriteriaFromMarkdown(content: string): string[] {
   const criteria: string[] = [];
 
-  // Look for "## Acceptance Criteria" section
+  // Look for "## Acceptance Criteria" or "## Oracle (...)" section
   const acMatch = content.match(
-    /## Acceptance Criteria\s*\n([\s\S]*?)(?=\n## |\n#[^#]|$)/,
+    /## (?:Acceptance Criteria|Oracle(?:\s*\([^)]*\))?)\s*\n([\s\S]*?)(?=\n## |\n#[^#]|$)/,
   );
   if (acMatch) {
     const lines = acMatch[1].split("\n");
@@ -203,6 +203,8 @@ export function formatOraclePrompt(input: OracleInput): string {
 
   sections.push("");
   sections.push("# Instructions");
+  sections.push("");
+  sections.push("IMPORTANT: Your response MUST be visible text output (not just internal thinking). Output the structured evaluation below directly.");
   sections.push("");
   sections.push("For each acceptance criterion, determine if it is met by the code changes.");
   sections.push("Respond with:");
