@@ -1,7 +1,7 @@
 ---
 id: swarm-shared-worktree
 title: "Swarm subtasks share one worktree with oracle-only intermediate verification"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-10
@@ -133,13 +133,13 @@ const { runTests, runOracle } = getStepVerificationMode(step, this.plan);
 
 ## Tasks
 
-- [ ] Implement `getStepVerificationMode()` — oracle-only for intermediate subtasks, full verification for final
-- [ ] Update `startStep()` to reuse worktree from sibling subtask steps
-- [ ] Update `runVerification()` to accept per-step test/oracle flags
-- [ ] Ensure auto-commit runs for each subtask (agents commit to shared branch)
-- [ ] Update worktree cleanup to only delete after final subtask merge
-- [ ] Ensure file-overlap scheduling works within shared worktree (serializes conflicting subtasks)
-- [ ] Tests: shared worktree reuse across subtasks, oracle-only on intermediate, full verification on final, worktree cleanup after merge, file-overlap serialization
+- [x] Implement `getStepVerificationMode()` — oracle-only for intermediate subtasks, full verification for final
+- [x] Update `startStep()` to reuse worktree from sibling subtask steps
+- [x] Update `runVerification()` to accept per-step test/oracle flags
+- [x] Ensure auto-commit runs for each subtask (agents commit to shared branch)
+- [x] Update worktree cleanup to only delete after final subtask merge
+- [x] Ensure file-overlap scheduling works within shared worktree (serializes conflicting subtasks)
+- [x] Tests: shared worktree reuse across subtasks, oracle-only on intermediate, full verification on final, worktree cleanup after merge, file-overlap serialization
 
 ## Acceptance Criteria
 

@@ -982,7 +982,8 @@ export class Executor {
     this.emit("plan_updated", { plan: this.plan });
 
     const roleVerify = this.stepVerification.get(step.ticketId);
-    const verification = await this.runVerification(step, event, roleVerify);
+    const swarmVerify = this.getStepVerificationMode(step);
+    const verification = await this.runVerification(step, event, swarmVerify ?? roleVerify);
 
     if (verification && !verification.passed) {
       const attempt = step.attempt ?? 1;
@@ -1040,8 +1041,37 @@ export class Executor {
       return;
     }
 
+    // Swarm subtasks: intermediate steps don't merge to main — they just commit
+    // to the shared branch and mark as done. Only the final subtask merges.
+    if (this.isSwarmSubtask(step) && !this.isFinalSwarmSubtask(step)) {
+      step.status = "done";
+      step.completedAt = new Date().toISOString();
+      if (verification) step.verification = verification;
+      step.stallSignal = undefined;
+      this.stallDetector.recordStepTransition();
+
+      // Don't clear worktree — siblings will reuse it
+      // Don't merge — branch stays for next subtask agent
+
+      if (this.plan.config.ticketTransitions) {
+        await this.updateTicketStatusSafe(step, "closed");
+      }
+
+      await this.updateSummary(step);
+      this.emit("step_completed", { step });
+      this.logPlanEvent("step_completed", {
+        stepTicketId: step.ticketId,
+        agentSessionId: event.sessionId,
+        detail: { mode: "worktree", swarmIntermediate: true, verification },
+      });
+      await this.writeStepArtifacts(step);
+      return;
+    }
+
     // Verification passed (or skipped) — merge into main tree
-    let mergeResult = await this.worktreeManager.merge(step.ticketId);
+    // For swarm final subtask, use parent ID for the merge (branch is work/<parent>)
+    const mergeId = this.isSwarmSubtask(step) ? baseTicketId(step.ticketId) : step.ticketId;
+    let mergeResult = await this.worktreeManager.merge(mergeId);
 
     if (mergeResult.conflict) {
       if (verification) step.verification = verification;
@@ -1141,11 +1171,23 @@ export class Executor {
     }
 
     // Clean up worktree after successful merge + verification
-    await this.worktreeManager.remove(step.ticketId).catch((err) => {
+    const removeId = this.isSwarmSubtask(step) ? baseTicketId(step.ticketId) : step.ticketId;
+    await this.worktreeManager.remove(removeId).catch((err) => {
       log.warn("worktree cleanup after merge failed", { ticketId: step.ticketId, error: String(err) });
     });
     step.worktreePath = undefined;
     step.worktreeBranch = undefined;
+
+    // For swarm final subtask, also clear worktree refs from all siblings
+    if (this.isSwarmSubtask(step)) {
+      const parentId = baseTicketId(step.ticketId);
+      for (const s of this.plan.steps) {
+        if (s.ticketId !== step.ticketId && baseTicketId(s.ticketId) === parentId) {
+          s.worktreePath = undefined;
+          s.worktreeBranch = undefined;
+        }
+      }
+    }
 
     // Ticket transition
     if (this.plan.config.ticketTransitions) {
@@ -2042,6 +2084,22 @@ export class Executor {
     return workItem?.priority ?? 4;
   }
 
+  private isSwarmSubtask(step: PlanStep): boolean {
+    return isSwarmSubtask(step, this.plan.steps);
+  }
+
+  private isFinalSwarmSubtask(step: PlanStep): boolean {
+    return isFinalSwarmSubtask(step, this.plan.steps);
+  }
+
+  private getStepVerificationMode(step: PlanStep): { runTests: boolean; runOracle: boolean } | undefined {
+    return getSwarmVerificationMode(step, this.plan.steps);
+  }
+
+  private findSwarmWorktree(step: PlanStep): { worktreePath: string; worktreeBranch: string } | null {
+    return findSwarmWorktree(step, this.plan.steps);
+  }
+
   private async startStep(step: PlanStep): Promise<void> {
     const project = await loadProject(step.projectId);
     if (!project) {
@@ -2067,16 +2125,28 @@ export class Executor {
     // Create worktree if enabled — agent runs in isolation
     // Skip creation if rebaseConflict is set (worktree already exists from the original step)
     // Team sub-steps share the worktree from earlier steps in the same team sequence
+    // Swarm subtasks share worktree from sibling steps of the same parent
     let agentCwd: string | undefined;
     const teamWorktree = step.teamId ? this.findTeamWorktree(step) : null;
+    const swarmWorktree = !teamWorktree ? this.findSwarmWorktree(step) : null;
     if (teamWorktree) {
       // Reuse worktree from a prior team step on the same ticket
       step.worktreePath = teamWorktree.worktreePath;
       step.worktreeBranch = teamWorktree.worktreeBranch;
       agentCwd = teamWorktree.worktreePath;
       contextPacket.project.path = teamWorktree.worktreePath;
+    } else if (swarmWorktree) {
+      // Reuse worktree from a sibling swarm subtask (shared branch)
+      step.worktreePath = swarmWorktree.worktreePath;
+      step.worktreeBranch = swarmWorktree.worktreeBranch;
+      agentCwd = swarmWorktree.worktreePath;
+      contextPacket.project.path = swarmWorktree.worktreePath;
+      log.info("reusing swarm worktree", { ticketId: step.ticketId, worktree: swarmWorktree.worktreePath });
     } else if (this.plan.config.worktree && !step.rebaseConflict) {
-      const worktreeId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
+      // Swarm subtasks use parent ID so all siblings share one worktree
+      const worktreeId = step.teamId ? baseTicketId(step.ticketId)
+        : this.isSwarmSubtask(step) ? baseTicketId(step.ticketId)
+        : step.ticketId;
       const wtInfo = await this.worktreeManager.create(
         project.path,
         worktreeId,
@@ -2776,4 +2846,63 @@ export async function stampTicketFiles(
 
   const updated = frontmatter + newFields + content.slice(fmEnd);
   await writeFile(ticketPath, updated, "utf-8");
+}
+
+// --- Swarm helpers (exported for testing) ---
+
+/**
+ * Check if a step is a swarm subtask (has parent/subtask ticketId format
+ * AND has sibling steps from the same parent).
+ */
+export function isSwarmSubtask(step: PlanStep, allSteps: PlanStep[]): boolean {
+  if (!step.ticketId.includes("/") || step.teamId) return false;
+  const parentId = baseTicketId(step.ticketId);
+  return allSteps.some(
+    (s) => s.ticketId !== step.ticketId && baseTicketId(s.ticketId) === parentId,
+  );
+}
+
+/**
+ * Check if this is the final subtask of a swarm parent — all siblings are done.
+ */
+export function isFinalSwarmSubtask(step: PlanStep, allSteps: PlanStep[]): boolean {
+  if (!isSwarmSubtask(step, allSteps)) return false;
+  const parentId = baseTicketId(step.ticketId);
+  return allSteps
+    .filter((s) => s.ticketId !== step.ticketId && baseTicketId(s.ticketId) === parentId)
+    .every((s) => s.status === "done" || s.status === "skipped");
+}
+
+/**
+ * Get verification mode for a step. Swarm subtasks use oracle-only for
+ * intermediate steps and full verification for the final one.
+ */
+export function getSwarmVerificationMode(
+  step: PlanStep,
+  allSteps: PlanStep[],
+): { runTests: boolean; runOracle: boolean } | undefined {
+  if (!isSwarmSubtask(step, allSteps)) return undefined;
+
+  if (isFinalSwarmSubtask(step, allSteps)) {
+    return { runTests: true, runOracle: true };
+  }
+
+  return { runTests: false, runOracle: true };
+}
+
+/**
+ * Find a sibling swarm subtask that already has a worktree.
+ */
+export function findSwarmWorktree(
+  step: PlanStep,
+  allSteps: PlanStep[],
+): { worktreePath: string; worktreeBranch: string } | null {
+  if (!isSwarmSubtask(step, allSteps)) return null;
+  const parentId = baseTicketId(step.ticketId);
+  const sibling = allSteps.find(
+    (s) => s.ticketId !== step.ticketId
+      && baseTicketId(s.ticketId) === parentId
+      && s.worktreePath,
+  );
+  return sibling ? { worktreePath: sibling.worktreePath!, worktreeBranch: sibling.worktreeBranch! } : null;
 }
