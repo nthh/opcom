@@ -13,6 +13,8 @@ export interface OracleInput {
   gitDiff: string;
   testResults?: string;
   acceptanceCriteria: string[];
+  fileListing?: string;
+  screenshots?: string[];   // absolute paths to screenshots captured during E2E tests
 }
 
 export interface OracleResult {
@@ -80,6 +82,20 @@ export async function collectOracleInputs(
     }
   }
 
+  // Collect file listing so the oracle knows what exists in the worktree,
+  // not just what changed. This prevents false negatives when criteria
+  // reference files that pre-exist on main (unchanged by the branch).
+  let fileListing = "";
+  try {
+    const result = await exec("git", ["ls-files"], {
+      cwd: diffCwd,
+      maxBuffer: 5 * 1024 * 1024,
+    });
+    fileListing = result.stdout;
+  } catch {
+    // No file listing available
+  }
+
   // Read spec file if referenced in ticket.
   // Resolve relative links against the project path.
   let spec: string | undefined;
@@ -106,6 +122,7 @@ export async function collectOracleInputs(
     spec,
     gitDiff,
     acceptanceCriteria,
+    fileListing: fileListing || undefined,
   };
 }
 
@@ -189,6 +206,21 @@ export function formatOraclePrompt(input: OracleInput): string {
     sections.push(input.spec);
   }
 
+  if (input.fileListing) {
+    sections.push("");
+    sections.push("# Repository File Listing");
+    sections.push("These files exist in the worktree (not just changed files — the full tracked tree).");
+    sections.push("Use this to verify file-existence criteria even when a file is unchanged from main.");
+    // Truncate very long listings — keep paths matching common criteria patterns
+    const maxListingLength = 10000;
+    if (input.fileListing.length > maxListingLength) {
+      sections.push(input.fileListing.slice(0, maxListingLength));
+      sections.push(`... (truncated, ${input.fileListing.length - maxListingLength} chars omitted)`);
+    } else {
+      sections.push(input.fileListing);
+    }
+  }
+
   sections.push("");
   sections.push("# Code Changes (Git Diff)");
   if (input.gitDiff.length > 0) {
@@ -208,6 +240,17 @@ export function formatOraclePrompt(input: OracleInput): string {
     sections.push("");
     sections.push("# Test Results");
     sections.push(input.testResults);
+  }
+
+  if (input.screenshots && input.screenshots.length > 0) {
+    sections.push("");
+    sections.push("# Screenshots");
+    sections.push("The following screenshots were captured during E2E browser testing.");
+    sections.push("Use the Read tool to view each screenshot, then evaluate visual/UI acceptance criteria (layout, rendering, appearance).");
+    sections.push("");
+    for (const path of input.screenshots) {
+      sections.push(`- ${path}`);
+    }
   }
 
   sections.push("");

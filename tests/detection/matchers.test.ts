@@ -29,7 +29,7 @@ describe("parsePackageJson", () => {
     ]);
     expect(result.frameworks.map((f) => f.name)).toContain("React");
     expect(result.frameworks.map((f) => f.name)).toContain("Next.js");
-    expect(result.testing?.framework).toBe("vitest");
+    expect(result.testing[0]?.framework).toBe("vitest");
     expect(result.linting.map((l) => l.name)).toContain("eslint");
   });
 
@@ -62,7 +62,7 @@ describe("parsePackageJson", () => {
     });
     const result = parsePackageJson(pkg, "package.json");
 
-    expect(result.testing?.framework).toBe("mocha");
+    expect(result.testing[0]?.framework).toBe("mocha");
     expect(result.linting.map((l) => l.name)).toContain("biome");
   });
 });
@@ -87,7 +87,7 @@ describe("parsePyprojectData", () => {
     expect(result.languages[0]).toEqual({ name: "python", version: "3.11", sourceFile: "pyproject.toml" });
     expect(result.frameworks.map((f) => f.name)).toContain("FastAPI");
     expect(result.frameworks.map((f) => f.name)).toContain("Pydantic");
-    expect(result.testing?.framework).toBe("pytest");
+    expect(result.testing[0]?.framework).toBe("pytest");
     expect(result.linting.map((l) => l.name)).toContain("ruff");
     expect(result.linting.map((l) => l.name)).toContain("mypy");
   });

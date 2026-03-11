@@ -75,8 +75,9 @@ export async function runWork(target: string, options: {
     console.log(`  Ticket: ${workItem.title} (P${workItem.priority}, ${workItem.status})`);
   }
 
-  if (project.testing) {
-    console.log(`  Testing: ${project.testing.framework}`);
+  const suites = Array.isArray(project.testing) ? project.testing : [];
+  if (suites.length > 0) {
+    console.log(`  Testing: ${suites.map((s) => s.name).join(", ")}`);
   }
 
   // Start agent session

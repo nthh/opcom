@@ -4,11 +4,11 @@
  * Returns strings in "Bash(pattern)" format suitable for --allowedTools.
  */
 
-import type { StackInfo, TestingConfig, LintConfig, AgentConstraint } from "@opcom/types";
+import type { StackInfo, TestSuite, LintConfig, AgentConstraint } from "@opcom/types";
 
 export interface AllowedBashInput {
   stack: StackInfo;
-  testing: TestingConfig | null;
+  testing: TestSuite[] | { command?: string } | null;
   linting: LintConfig[];
 }
 
@@ -96,8 +96,12 @@ export function deriveAllowedBashTools(
     }
   }
 
-  // Explicit test command
-  if (input.testing?.command) {
+  // Explicit test commands from all suites
+  if (Array.isArray(input.testing)) {
+    for (const suite of input.testing) {
+      if (suite.command) patterns.add(suite.command + "*");
+    }
+  } else if (input.testing && "command" in input.testing && input.testing.command) {
     patterns.add(input.testing.command + "*");
   }
 

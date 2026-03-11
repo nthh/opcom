@@ -63,7 +63,7 @@ describe("config roundtrip", () => {
       docs: {},
       services: [{ name: "api", port: 3000 }],
       environments: [],
-      testing: { framework: "vitest" },
+      testing: [{ name: "vitest", framework: "vitest", command: "npx vitest run" }],
       linting: [{ name: "eslint", sourceFile: "eslint.config.js" }],
       subProjects: [],
       cloudServices: [],
@@ -80,7 +80,7 @@ describe("config roundtrip", () => {
     expect(loaded!.git?.branch).toBe("main");
     expect(loaded!.workSystem?.type).toBe("tickets-dir");
     expect(loaded!.services[0].port).toBe(3000);
-    expect(loaded!.testing?.framework).toBe("vitest");
+    expect(loaded!.testing[0]?.framework).toBe("vitest");
   });
 
   it("lists workspaces and projects", async () => {
@@ -94,7 +94,7 @@ describe("config roundtrip", () => {
     const workspaces = await listWorkspaces();
     expect(workspaces).toHaveLength(2);
 
-    await saveProject({ id: "p1", name: "P1", path: "/tmp/p1", stack: emptyStack(), git: null, workSystem: null, docs: {}, services: [], environments: [], testing: null, linting: [], subProjects: [], cloudServices: [], lastScannedAt: "2026-01-01T00:00:00Z" });
+    await saveProject({ id: "p1", name: "P1", path: "/tmp/p1", stack: emptyStack(), git: null, workSystem: null, docs: {}, services: [], environments: [], testing: [], linting: [], subProjects: [], cloudServices: [], lastScannedAt: "2026-01-01T00:00:00Z" });
     const projects = await listProjects();
     expect(projects).toHaveLength(1);
   });

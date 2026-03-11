@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { parse as parseYaml } from "yaml";
-import type { DetectionResult, DetectionEvidence, ProjectDocs, TestingConfig, LintConfig } from "@opcom/types";
+import type { DetectionResult, DetectionEvidence, ProjectDocs, TestSuite, LintConfig } from "@opcom/types";
 import {
   parsePackageJson,
   parsePyprojectData,
@@ -28,7 +28,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
   const name = basename(projectPath);
   const evidence: DetectionEvidence[] = [];
   const partialStacks: Parameters<typeof mergeStacks> = [];
-  let testing: TestingConfig | null = null;
+  const testing: TestSuite[] = [];
   const linting: LintConfig[] = [];
   let allServices: DetectionResult["services"] = [];
   let docs: ProjectDocs = {};
@@ -48,7 +48,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
         frameworks: result.frameworks,
         packageManagers: result.packageManagers,
       });
-      if (result.testing) testing = result.testing;
+      testing.push(...result.testing);
       linting.push(...result.linting);
       evidence.push(...result.evidence);
     } catch {
@@ -68,7 +68,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
         frameworks: result.frameworks,
         packageManagers: result.packageManagers,
       });
-      if (result.testing) testing = result.testing;
+      testing.push(...result.testing);
       linting.push(...result.linting);
       evidence.push(...result.evidence);
     } catch {
@@ -276,10 +276,12 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     evidence.push(mt.evidence);
   }
 
-  // --- Vitest config (standalone check) ---
+  // --- Vitest config (standalone check — only add if not already detected from package.json) ---
   for (const vitestFile of ["vitest.config.ts", "vitest.config.js", "vitest.config.mts"]) {
     if (existsSync(join(projectPath, vitestFile))) {
-      if (!testing) testing = { framework: "vitest", command: "npx vitest run" };
+      if (!testing.some((s) => s.framework === "vitest")) {
+        testing.push({ name: "vitest", framework: "vitest", command: "npx vitest run" });
+      }
       evidence.push({ file: vitestFile, detectedAs: "testing:vitest" });
       break;
     }
@@ -405,6 +407,83 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
   if (ticketResult) evidence.push(...ticketResult.evidence);
   if (subProjectResult) evidence.push(...subProjectResult.evidence);
 
+  // --- Sub-project test suite detection ---
+  // Scan sub-projects for test frameworks (vitest, jest in package.json)
+  // and assign path globs based on the sub-project's relative path.
+  for (const sub of subProjectResult.subProjects) {
+    const subPkgPath = join(sub.path, "package.json");
+    if (existsSync(subPkgPath)) {
+      try {
+        const content = await readFile(subPkgPath, "utf-8");
+        const subResult = parsePackageJson(content, `${sub.relativePath}/package.json`);
+        for (const suite of subResult.testing) {
+          // Avoid duplicating a suite already found at root level
+          if (testing.some((s) => s.framework === suite.framework && s.name === suite.name)) continue;
+          testing.push({
+            ...suite,
+            name: `${sub.name}`,
+            command: `cd ${sub.relativePath} && ${suite.command}`,
+            paths: [`${sub.relativePath}/**`],
+            testDir: sub.relativePath,
+          });
+        }
+        evidence.push(...subResult.evidence);
+      } catch {
+        // Skip unparseable sub-project package.json
+      }
+    }
+  }
+
+  // --- Playwright config detection ---
+  // Search for playwright.config.* in known locations (tests/, e2e/, sub-projects).
+  const playwrightSearchDirs = [
+    projectPath,
+    join(projectPath, "tests"),
+    join(projectPath, "tests", "e2e"),
+    join(projectPath, "e2e"),
+    ...subProjectResult.subProjects.map((s) => s.path),
+  ];
+  for (const searchDir of playwrightSearchDirs) {
+    if (!existsSync(searchDir)) continue;
+    try {
+      const entries = await readdir(searchDir);
+      for (const entry of entries) {
+        // Check both the directory itself and one level of subdirs
+        const checkDirs = [searchDir];
+        const entryPath = join(searchDir, entry);
+        try {
+          const stat = await import("node:fs/promises").then((m) => m.stat(entryPath));
+          if (stat.isDirectory()) checkDirs.push(entryPath);
+        } catch { /* skip */ }
+
+        for (const dir of checkDirs) {
+          for (const pwFile of ["playwright.config.ts", "playwright.config.js", "playwright.config.mjs"]) {
+            if (existsSync(join(dir, pwFile))) {
+              const relDir = dir === projectPath ? "." : dir.replace(projectPath + "/", "");
+              if (!testing.some((s) => s.framework === "playwright")) {
+                // Infer paths: playwright tests the web app, so trigger on app-related paths
+                const appSub = subProjectResult.subProjects.find((s) =>
+                  s.name === "app" || s.name === "web" || s.name === "frontend",
+                );
+                const triggerPaths = appSub ? [`${appSub.relativePath}/**`] : undefined;
+                testing.push({
+                  name: "browser",
+                  framework: "playwright",
+                  command: `cd ${relDir} && npx playwright test`,
+                  paths: triggerPaths,
+                  testDir: relDir,
+                });
+                evidence.push({ file: `${relDir}/${pwFile}`, detectedAs: "testing:playwright" });
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Skip unreadable dirs
+    }
+  }
+
   // ===================================================================
   // TIER 3: Source file glob fallback (Google pattern)
   // Only runs if no languages detected from manifests/configs above.
@@ -439,6 +518,40 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
   );
   evidence.push(...profileResult.evidence);
 
+  // --- Refine test suite commands from Makefile/build-system profile ---
+  // If the profile found test commands (from Makefile targets like `test-smoke`, `test`),
+  // use those as the preferred commands for existing suites.
+  if (profileResult.profile.commands) {
+    const profileTest = profileResult.profile.commands.find((c) => c.name === "test");
+    const profileTestFull = profileResult.profile.commands.find((c) => c.name === "testFull");
+    // If there's a "test" profile command, override the first required suite's command
+    if (profileTest) {
+      const primarySuite = testing.find((s) => s.required);
+      if (primarySuite) {
+        primarySuite.command = profileTest.command;
+      }
+    }
+    // If there's a "testFull" profile command, add it as a separate reference
+    // (used by smoke tests, not per-step test-gate)
+    if (profileTestFull && profileTest) {
+      const primarySuite = testing.find((s) => s.required);
+      if (primarySuite) {
+        // Prefer the smoke command for the test-gate (fast), full for smoke tests
+        primarySuite.command = profileTest.command;
+      }
+    }
+  }
+
+  // --- Deduplicate test suites by name ---
+  const seenNames = new Set<string>();
+  const dedupedTesting: TestSuite[] = [];
+  for (const suite of testing) {
+    if (!seenNames.has(suite.name)) {
+      seenNames.add(suite.name);
+      dedupedTesting.push(suite);
+    }
+  }
+
   // --- Determine confidence ---
   let confidence: DetectionResult["confidence"] = "low";
   if (stack.languages.length > 0 && (stack.frameworks.length > 0 || stack.infrastructure.length > 0)) {
@@ -456,7 +569,7 @@ export async function detectProject(projectPath: string): Promise<DetectionResul
     workSystem: ticketResult?.workSystem ?? null,
     docs,
     services: allServices,
-    testing,
+    testing: dedupedTesting,
     linting,
     subProjects: subProjectResult.subProjects,
     cloudServices: cloudResult.configs,

@@ -12,7 +12,7 @@ export interface ProjectConfig {
   docs: ProjectDocs;
   services: ServiceDefinition[];
   environments: EnvironmentConfig[];
-  testing: TestingConfig | null;
+  testing: TestSuite[];
   linting: LintConfig[];
   subProjects: SubProject[];
   cloudServices: CloudServiceConfig[];
@@ -101,10 +101,27 @@ export interface EnvironmentConfig {
   type: "local" | "staging" | "production";
 }
 
+/** @deprecated Use TestSuite instead. Kept for backward-compat during migration. */
 export interface TestingConfig {
   framework: string;
   command?: string;
   testDir?: string;
+}
+
+/**
+ * A single test suite within a project.
+ * Projects may have multiple suites (e.g. pytest for backend, vitest for frontend,
+ * playwright for E2E). Each suite declares which file-path globs trigger it so the
+ * test-gate can run only the relevant suites for a given set of changes.
+ */
+export interface TestSuite {
+  name: string;           // human-readable identifier: "backend", "frontend", "e2e"
+  framework: string;      // "pytest", "vitest", "playwright", "jest", etc.
+  command: string;        // full shell command to run
+  paths?: string[];       // globs — suite runs if changed files match (empty = manual only)
+  testDir?: string;       // where test files live (relative to project root)
+  required?: boolean;     // always run regardless of path match
+  timeout?: number;       // ms, default 300000
 }
 
 export interface LintConfig {
@@ -161,7 +178,7 @@ export interface ProjectProfile {
   path: string;
   description?: string;
   stack: StackInfo;
-  testing: TestingConfig | null;
+  testing: TestSuite[];
   linting: LintConfig[];
   services: ServiceDefinition[];
   environments?: EnvironmentConfig[];

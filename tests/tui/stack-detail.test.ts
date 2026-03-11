@@ -49,7 +49,7 @@ function makeConfig(overrides: Partial<ProjectConfig> = {}): ProjectConfig {
       { name: "worker" },
     ],
     environments: [],
-    testing: { framework: "vitest", command: "npx vitest run", testDir: "tests/" },
+    testing: [{ name: "vitest", framework: "vitest", command: "npx vitest run", testDir: "tests/" }],
     linting: [
       { name: "eslint", sourceFile: ".eslintrc.json" },
     ],
@@ -139,7 +139,7 @@ describe("buildStackItemList", () => {
   it("includes testing framework", () => {
     const config = makeConfig();
     const items = buildStackItemList(config);
-    const vitest = items.find((i) => i.name === "vitest");
+    const vitest = items.find((i) => i.name === "vitest (vitest)");
     expect(vitest).toBeDefined();
     expect(vitest!.category).toBe("testing");
   });
@@ -162,7 +162,7 @@ describe("buildStackItemList", () => {
         packageManagers: [],
         versionManagers: [],
       },
-      testing: null,
+      testing: [],
       services: [],
     });
     const items = buildStackItemList(config);
@@ -330,7 +330,7 @@ describe("renderStackDetail", () => {
 
   it("renders testing detail", () => {
     const item: StackItem = {
-      name: "vitest",
+      name: "vitest (vitest)",
       category: "testing",
     };
     const config = makeConfig();

@@ -87,9 +87,10 @@ export function buildStackItemList(config: ProjectConfig): StackItem[] {
       sourceFile: vm.sourceFile,
     });
   }
-  if (config.testing) {
+  const testSuites = Array.isArray(config.testing) ? config.testing : [];
+  for (const suite of testSuites) {
     items.push({
-      name: config.testing.framework,
+      name: `${suite.name} (${suite.framework})`,
       category: "testing",
     });
   }
@@ -357,13 +358,13 @@ function buildTestingDetails(
   config: ProjectConfig,
   lines: string[],
 ): void {
-  if (config.testing) {
-    if (config.testing.command) {
-      lines.push(`${bold("Command:")} ${config.testing.command}`);
-    }
-    if (config.testing.testDir) {
-      lines.push(`${bold("Test directory:")} ${config.testing.testDir}`);
-    }
+  const suites = Array.isArray(config.testing) ? config.testing : [];
+  for (const suite of suites) {
+    lines.push(`${bold(suite.name)} (${suite.framework})`);
+    lines.push(`  ${bold("Command:")} ${suite.command}`);
+    if (suite.testDir) lines.push(`  ${bold("Test directory:")} ${suite.testDir}`);
+    if (suite.paths?.length) lines.push(`  ${bold("Triggers on:")} ${suite.paths.join(", ")}`);
+    if (suite.required) lines.push(`  ${bold("Always runs:")} yes`);
     lines.push("");
   }
 

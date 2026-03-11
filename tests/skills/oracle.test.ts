@@ -243,6 +243,32 @@ describe("formatOraclePrompt", () => {
     expect(prompt).toContain("No changes detected");
   });
 
+  it("includes file listing when provided", () => {
+    const input = makeOracleInput({
+      fileListing: "src/cache.ts\nsrc/index.ts\ndemos/solar-siting-utah/folia.yaml\ntests/cache.test.ts",
+    });
+    const prompt = formatOraclePrompt(input);
+
+    expect(prompt).toContain("# Repository File Listing");
+    expect(prompt).toContain("demos/solar-siting-utah/folia.yaml");
+    expect(prompt).toContain("not just changed files");
+  });
+
+  it("omits file listing section when not provided", () => {
+    const input = makeOracleInput();
+    const prompt = formatOraclePrompt(input);
+
+    expect(prompt).not.toContain("# Repository File Listing");
+  });
+
+  it("truncates very long file listings", () => {
+    const longListing = "file.ts\n".repeat(5000);
+    const input = makeOracleInput({ fileListing: longListing });
+    const prompt = formatOraclePrompt(input);
+
+    expect(prompt).toContain("truncated");
+  });
+
   it("truncates very long diffs", () => {
     const longDiff = "x".repeat(60000);
     const input = makeOracleInput({ gitDiff: longDiff });

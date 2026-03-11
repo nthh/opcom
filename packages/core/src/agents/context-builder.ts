@@ -193,11 +193,20 @@ export function contextPacketToMarkdown(
   }
 
   // Testing
-  if (packet.project.testing) {
+  if (packet.project.testing && (Array.isArray(packet.project.testing) ? packet.project.testing.length > 0 : true)) {
     lines.push(`## Testing`);
-    lines.push(`Framework: ${packet.project.testing.framework}`);
-    if (packet.project.testing.command) {
-      lines.push(`Command: \`${packet.project.testing.command}\``);
+    const suites = Array.isArray(packet.project.testing) ? packet.project.testing : [packet.project.testing];
+    if (suites.length === 1) {
+      const s = suites[0];
+      lines.push(`Framework: ${s.framework}`);
+      if (s.command) lines.push(`Command: \`${s.command}\``);
+    } else {
+      lines.push(`Suites:`);
+      for (const s of suites) {
+        const pathHint = s.paths?.length ? ` (triggers on: ${s.paths.join(", ")})` : "";
+        const reqHint = s.required ? " [always runs]" : "";
+        lines.push(`- **${s.name}** (${s.framework}): \`${s.command}\`${pathHint}${reqHint}`);
+      }
     }
     lines.push("");
   }
@@ -339,8 +348,24 @@ export function contextPacketToMarkdown(
   if (roleConfig?.instructions) {
     lines.push(roleConfig.instructions);
   } else if (needsTests) {
-    lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
-    lines.push(`- Run tests relevant to your changes during development (specific test files, not the full suite).`);
+    const suites = Array.isArray(packet.project.testing) ? packet.project.testing : [];
+    if (suites.length > 1) {
+      lines.push(`- All changes MUST include tests in the relevant test suites. Your work will be verified by the test suites listed in the Testing section above.`);
+      lines.push(`- For each suite whose trigger paths match your changes, write appropriate tests:`);
+      for (const s of suites) {
+        if (s.required) continue; // required suites (like pytest backend) always run — agent may not need to write tests there
+        const pathHint = s.paths?.length ? ` (triggered by changes to ${s.paths.join(", ")})` : "";
+        if (s.framework === "playwright" || s.framework === "cypress") {
+          lines.push(`  - **${s.name}** (${s.framework})${pathHint}: Write E2E browser tests for visual behavior, user interactions, and rendering. Test dir: \`${s.testDir ?? "tests/e2e"}\``);
+        } else {
+          lines.push(`  - **${s.name}** (${s.framework})${pathHint}: Write unit/integration tests for component logic and data flow. Test dir: \`${s.testDir ?? "tests"}\``);
+        }
+      }
+      lines.push(`- Run tests relevant to your changes during development (specific test files, not the full suite).`);
+    } else {
+      lines.push(`- All changes MUST include tests. Write tests for new functionality and update existing tests for modified behavior.`);
+      lines.push(`- Run tests relevant to your changes during development (specific test files, not the full suite).`);
+    }
     lines.push(`- The full test suite will be run by the verification pipeline after you finish. Do not run it yourself.`);
   }
   lines.push(`- Never use \`git stash\`. All work must stay in the working tree or be committed. Stashed changes are lost when the worktree is cleaned up.`);

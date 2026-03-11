@@ -8,7 +8,7 @@ import type {
   InfrastructureInfo,
   VersionManagerInfo,
   ServiceDefinition,
-  TestingConfig,
+  TestSuite,
   LintConfig,
   DetectionEvidence,
 } from "@opcom/types";
@@ -19,7 +19,7 @@ export interface PackageJsonResult {
   languages: LanguageInfo[];
   frameworks: FrameworkInfo[];
   packageManagers: PackageManagerInfo[];
-  testing: TestingConfig | null;
+  testing: TestSuite[];
   linting: LintConfig[];
   evidence: DetectionEvidence[];
   nodeVersion?: string;
@@ -83,15 +83,17 @@ export function parsePackageJson(content: string, sourceFile: string): PackageJs
   }
 
   // Detect testing from devDeps
-  let testingResult: TestingConfig | null = null;
+  const testing: TestSuite[] = [];
   if (allDeps?.vitest) {
-    testingResult = { framework: "vitest", command: "npx vitest run" };
+    testing.push({ name: "vitest", framework: "vitest", command: "npx vitest run" });
     evidence.push({ file: sourceFile, detectedAs: "testing:vitest" });
-  } else if (allDeps?.jest) {
-    testingResult = { framework: "jest", command: "npx jest" };
+  }
+  if (allDeps?.jest) {
+    testing.push({ name: "jest", framework: "jest", command: "npx jest" });
     evidence.push({ file: sourceFile, detectedAs: "testing:jest" });
-  } else if (allDeps?.mocha) {
-    testingResult = { framework: "mocha", command: "npx mocha" };
+  }
+  if (allDeps?.mocha) {
+    testing.push({ name: "mocha", framework: "mocha", command: "npx mocha" });
     evidence.push({ file: sourceFile, detectedAs: "testing:mocha" });
   }
 
@@ -102,7 +104,7 @@ export function parsePackageJson(content: string, sourceFile: string): PackageJs
 
   evidence.push({ file: sourceFile, detectedAs: `language:${languages[0]?.name ?? "javascript"}` });
 
-  return { languages, frameworks, packageManagers, testing: testingResult, linting, evidence, nodeVersion };
+  return { languages, frameworks, packageManagers, testing, linting, evidence, nodeVersion };
 }
 
 // --- pyproject.toml ---
@@ -111,7 +113,7 @@ export interface PyprojectResult {
   languages: LanguageInfo[];
   frameworks: FrameworkInfo[];
   packageManagers: PackageManagerInfo[];
-  testing: TestingConfig | null;
+  testing: TestSuite[];
   linting: LintConfig[];
   evidence: DetectionEvidence[];
 }
@@ -160,7 +162,7 @@ export function parsePyprojectData(data: Record<string, unknown>, sourceFile: st
   }
 
   // Detect testing
-  let testing: TestingConfig | null = null;
+  const testing: TestSuite[] = [];
   const tool = data.tool as Record<string, unknown> | undefined;
   const hasPytest = tool?.pytest || tool?.["pytest.ini_options"] || depNames.includes("pytest");
   if (hasPytest) {
@@ -168,7 +170,7 @@ export function parsePyprojectData(data: Record<string, unknown>, sourceFile: st
     // without a local virtualenv.
     const useUv = tool?.uv || packageManagers.some((p) => p.name === "uv");
     const cmd = useUv ? "uv run pytest" : "pytest";
-    testing = { framework: "pytest", command: cmd };
+    testing.push({ name: "pytest", framework: "pytest", command: cmd, paths: ["**/*.py", "pyproject.toml"], required: true });
     evidence.push({ file: sourceFile, detectedAs: "testing:pytest" });
   }
 

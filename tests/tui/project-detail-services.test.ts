@@ -52,7 +52,7 @@ function makeProjectConfig(): ProjectConfig {
       { name: "worker", command: "node worker.js" },
     ],
     environments: [],
-    testing: { framework: "vitest", command: "npx vitest run" },
+    testing: [{ name: "vitest", framework: "vitest", command: "npx vitest run" }],
     cloudServices: [],
   };
 }

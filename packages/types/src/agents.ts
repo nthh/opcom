@@ -91,6 +91,7 @@ export interface AgentStartConfig {
   additionalDirs?: string[];
   systemPrompt?: string;
   resumeSessionId?: string;
+  images?: string[];           // absolute paths to images for multimodal oracle evaluation
 }
 
 export interface AgentAdapter {

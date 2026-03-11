@@ -16,9 +16,11 @@ import type {
   NormalizedEvent,
   VerificationResult,
   TestGateResult,
+  SuiteTestResult,
   RebaseResult,
   StallSignal,
   VerificationMode,
+  TestSuite,
 } from "@opcom/types";
 import type { SessionManager } from "../agents/session-manager.js";
 import type { EventStore } from "../agents/event-store.js";
@@ -1520,11 +1522,11 @@ export class Executor {
       failureReasons: [],
     };
 
-    // --- Test gate ---
-    // Run tests in the worktree if available (verification runs before merge)
+    // --- Test gate (multi-suite) ---
+    // Run matched test suites in the worktree (verification runs before merge)
     const testPath = step.worktreePath ?? project.path;
-    const resolvedTestCmd = this.resolveTestCommandFromProject(project);
-    if (verification.runTests && resolvedTestCmd) {
+    const matchedSuites = await this.resolveTestSuites(project, step);
+    if (verification.runTests && matchedSuites.length > 0) {
       step.verifyingPhase = "testing";
       step.verifyingPhaseStartedAt = new Date().toISOString();
       await savePlan(this.plan);
@@ -1533,33 +1535,78 @@ export class Executor {
         stepTicketId: step.ticketId,
         detail: { phase: "testing", startedAt: step.verifyingPhaseStartedAt },
       });
-      const testResult = await this.runTestGate(testPath, resolvedTestCmd);
-      result.testGate = testResult;
-      if (!testResult.passed) {
+
+      const suiteResults: SuiteTestResult[] = [];
+      for (const suite of matchedSuites) {
+        const suiteResult = await this.runTestGate(testPath, suite.command, suite.timeout);
+        // For E2E frameworks (playwright, cypress), look for screenshot artifacts
+        let screenshotDir: string | undefined;
+        if (suite.framework === "playwright" && suite.testDir) {
+          const possibleDirs = [
+            join(testPath, suite.testDir, "test-results"),
+            join(testPath, suite.testDir, "screenshots"),
+          ];
+          for (const d of possibleDirs) {
+            if (existsSync(d)) { screenshotDir = d; break; }
+          }
+        }
+        suiteResults.push({
+          suiteName: suite.name,
+          passed: suiteResult.passed,
+          testCommand: suiteResult.testCommand,
+          totalTests: suiteResult.totalTests,
+          passedTests: suiteResult.passedTests,
+          failedTests: suiteResult.failedTests,
+          output: suiteResult.output,
+          durationMs: suiteResult.durationMs,
+          screenshotDir,
+        });
+        log.info("test suite result", {
+          ticketId: step.ticketId,
+          suite: suite.name,
+          passed: suiteResult.passed,
+          total: suiteResult.totalTests,
+          failed: suiteResult.failedTests,
+        });
+        // Stop on first failure — no point running more suites
+        if (!suiteResult.passed) break;
+      }
+
+      // Aggregate into a single TestGateResult for backward compat
+      const allPassed = suiteResults.every((r) => r.passed);
+      const aggregated: TestGateResult = {
+        passed: allPassed,
+        testCommand: matchedSuites.map((s) => s.name).join(", "),
+        totalTests: suiteResults.reduce((sum, r) => sum + r.totalTests, 0),
+        passedTests: suiteResults.reduce((sum, r) => sum + r.passedTests, 0),
+        failedTests: suiteResults.reduce((sum, r) => sum + r.failedTests, 0),
+        output: suiteResults.map((r) => `=== Suite: ${r.suiteName} ===\n${r.output}`).join("\n\n"),
+        durationMs: suiteResults.reduce((sum, r) => sum + r.durationMs, 0),
+        suiteResults,
+      };
+      result.testGate = aggregated;
+
+      if (!allPassed) {
         result.passed = false;
-        if (testResult.totalTests === 0) {
-          result.failureReasons.push(
-            "Test command failed (no test results parsed from output)",
-          );
-        } else {
-          result.failureReasons.push(
-            `Tests failed: ${testResult.failedTests}/${testResult.totalTests} failed`,
-          );
+        for (const sr of suiteResults.filter((r) => !r.passed)) {
+          if (sr.totalTests === 0) {
+            result.failureReasons.push(
+              `Suite "${sr.suiteName}" failed (no test results parsed from output)`,
+            );
+          } else {
+            result.failureReasons.push(
+              `Suite "${sr.suiteName}" failed: ${sr.failedTests}/${sr.totalTests} tests failed`,
+            );
+          }
         }
       }
-      log.info("test gate result", {
-        ticketId: step.ticketId,
-        passed: testResult.passed,
-        total: testResult.totalTests,
-        failed: testResult.failedTests,
-      });
 
       // Ingest test gate results into the context graph
-      if (testResult.output) {
+      if (aggregated.output) {
         try {
           const commitHash = await this.getCommitHash(testPath);
           const runId = `verify-${step.ticketId}-${Date.now()}`;
-          ingestTestResults(project.name, testResult.output, commitHash, runId);
+          ingestTestResults(project.name, aggregated.output, commitHash, runId);
         } catch {
           // Graph ingestion is non-fatal
         }
@@ -1613,12 +1660,35 @@ export class Executor {
           if (result.testGate) {
             oracleInput.testResults = result.testGate.output;
           }
+
+          // Collect screenshots from E2E test suites for visual oracle evaluation
+          if (result.testGate?.suiteResults) {
+            const screenshots: string[] = [];
+            for (const sr of result.testGate.suiteResults) {
+              if (sr.screenshotDir && existsSync(sr.screenshotDir)) {
+                try {
+                  const { readdir: readdirAsync } = await import("node:fs/promises");
+                  const files = await readdirAsync(sr.screenshotDir!, { recursive: true });
+                  for (const f of files) {
+                    const fname = String(f);
+                    if (/\.(png|jpg|jpeg|webp)$/i.test(fname)) {
+                      screenshots.push(join(sr.screenshotDir!, fname));
+                    }
+                  }
+                } catch { /* skip unreadable screenshot dir */ }
+              }
+            }
+            if (screenshots.length > 0) {
+              oracleInput.screenshots = screenshots.slice(0, 10); // cap at 10 to avoid token overload
+              log.info("oracle visual context", { ticketId: step.ticketId, screenshotCount: screenshots.length });
+            }
+          }
           const oracleModel = "oracleModel" in verification
             ? (verification as { oracleModel?: string }).oracleModel
             : this.plan.config.verification.oracleModel;
 
           const oraclePrompt = formatOraclePrompt(oracleInput);
-          let oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result);
+          let oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result, oracleInput.screenshots);
           let oracleResult = oracleResponse ? parseOracleResponse(oracleResponse) : null;
 
           // Retry once if the model produced only thinking (0 criteria parsed).
@@ -1628,7 +1698,7 @@ export class Executor {
             log.warn("oracle retry: first attempt returned 0 criteria", {
               ticketId: step.ticketId, responseLen: oracleResponse?.length,
             });
-            oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result);
+            oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result, oracleInput.screenshots);
             oracleResult = oracleResponse ? parseOracleResponse(oracleResponse) : null;
           }
 
@@ -1688,18 +1758,30 @@ export class Executor {
   }
 
   /**
-   * Run the project's test command and parse results.
+   * Run a test command and parse results.
+   * Uses shell execution to support compound commands (e.g. "cd app && npx vitest run").
    */
-  private async runTestGate(projectPath: string, testCommand: string): Promise<TestGateResult> {
+  private async runTestGate(projectPath: string, testCommand: string, timeout?: number): Promise<TestGateResult> {
     const start = Date.now();
+    const useShell = testCommand.includes("&&") || testCommand.includes("|") || testCommand.includes(";") || testCommand.startsWith("cd ");
     try {
-      const parts = testCommand.split(/\s+/);
-      const { stdout, stderr } = await execFileAsync(parts[0], parts.slice(1), {
-        cwd: projectPath,
-        timeout: 300_000, // 5 min timeout for tests
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      const output = stdout + stderr;
+      let output: string;
+      if (useShell) {
+        const { stdout, stderr } = await execFileAsync("sh", ["-c", testCommand], {
+          cwd: projectPath,
+          timeout: timeout ?? 300_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        output = stdout + stderr;
+      } else {
+        const parts = testCommand.split(/\s+/);
+        const { stdout, stderr } = await execFileAsync(parts[0], parts.slice(1), {
+          cwd: projectPath,
+          timeout: timeout ?? 300_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        output = stdout + stderr;
+      }
       const { total, passed, failed } = parseTestOutput(output);
       return {
         passed: true,
@@ -1738,6 +1820,7 @@ export class Executor {
     prompt: string,
     model: string | undefined,
     result: VerificationResult,
+    images?: string[],
   ): Promise<string | null> {
     const project = await loadProject(step.projectId);
     if (!project) return null;
@@ -1858,7 +1941,11 @@ export class Executor {
             systemPrompt: prompt,
             model,
             permissionMode: "default",
-            disableAllTools: true,
+            // When screenshots are available, enable Read tool so the oracle
+            // can view images. Otherwise, disable all tools for speed.
+            ...(images && images.length > 0
+              ? { allowedTools: ["Read"], disableAllTools: false }
+              : { disableAllTools: true }),
           },
           `oracle:${step.ticketId}`,
         );
@@ -2647,14 +2734,19 @@ export class Executor {
   }
 
   /**
-   * Resolve the test command for a project.
-   * Precedence: plan-level override > profile "test" command > detected testing > fallback.
+   * Resolve the test command for a project (backward-compat single-command).
+   * Precedence: plan-level override > profile "test" command > first testing suite > fallback.
    */
-  resolveTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: { command?: string } | null }): string {
+  resolveTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: TestSuite[] | { command?: string } | null }): string {
     if (this.plan.config.testCommand) return this.plan.config.testCommand;
     const profileTest = project.profile?.commands?.find((c) => c.name === "test");
     if (profileTest) return profileTest.command;
-    if (project.testing?.command) return project.testing.command;
+    // Support both old single-object and new array format
+    if (Array.isArray(project.testing) && project.testing.length > 0) {
+      const required = project.testing.find((s) => s.required);
+      return (required ?? project.testing[0]).command;
+    }
+    if (project.testing && !Array.isArray(project.testing) && project.testing.command) return project.testing.command;
     return "npm test";
   }
 
@@ -2662,11 +2754,80 @@ export class Executor {
    * Resolve the smoke/full test command for stage and plan-completion tests.
    * Precedence: plan-level override > profile "testFull" > profile "test" > detected > fallback.
    */
-  resolveSmokeTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: { command?: string } | null }): string {
+  resolveSmokeTestCommandFromProject(project: { profile?: { commands?: Array<{ name: string; command: string }> }; testing?: TestSuite[] | { command?: string } | null }): string {
     if (this.plan.config.testCommand) return this.plan.config.testCommand;
     const profileTestFull = project.profile?.commands?.find((c) => c.name === "testFull");
     if (profileTestFull) return profileTestFull.command;
     return this.resolveTestCommandFromProject(project);
+  }
+
+  /**
+   * Resolve which test suites to run for a step, based on changed files and step overrides.
+   * 1. If plan has a testCommand override, use that as a single suite
+   * 2. Get changed files from the worktree/step
+   * 3. Match file paths against suite path globs
+   * 4. Always include required suites
+   * 5. Per-step testSuites override forces specific suites to run
+   */
+  private async resolveTestSuites(
+    project: { path: string; testing: TestSuite[]; profile?: { commands?: Array<{ name: string; command: string }> } },
+    step: PlanStep,
+  ): Promise<TestSuite[]> {
+    // Plan-level testCommand override: run as a single suite
+    if (this.plan.config.testCommand) {
+      return [{ name: "override", framework: "custom", command: this.plan.config.testCommand, required: true }];
+    }
+
+    const suites = Array.isArray(project.testing) ? project.testing : [];
+    if (suites.length === 0) {
+      // Fallback: use profile test command or npm test
+      const cmd = this.resolveTestCommandFromProject(project);
+      return [{ name: "default", framework: "unknown", command: cmd, required: true }];
+    }
+
+    // Per-step override: only run named suites
+    if (step.testSuites && step.testSuites.length > 0) {
+      const forced = suites.filter((s) => step.testSuites!.includes(s.name));
+      // Also include required suites
+      for (const s of suites) {
+        if (s.required && !forced.some((f) => f.name === s.name)) forced.push(s);
+      }
+      return forced.length > 0 ? forced : suites;
+    }
+
+    // Get changed files to match against suite paths
+    const testPath = step.worktreePath ?? project.path;
+    const changedFiles = await this.getChangedFiles(testPath, step.worktreeBranch);
+
+    const matched: TestSuite[] = [];
+    for (const suite of suites) {
+      if (suite.required) {
+        matched.push(suite);
+        continue;
+      }
+      if (!suite.paths || suite.paths.length === 0) continue;
+      // Check if any changed file matches any of the suite's path globs
+      if (changedFiles.some((f) => matchesGlobs(f, suite.paths!))) {
+        matched.push(suite);
+      }
+    }
+
+    // If no suites matched (e.g. no path patterns), fall back to required suites only
+    return matched.length > 0 ? matched : suites.filter((s) => s.required);
+  }
+
+  /** Get list of changed files in a worktree/branch relative to main. */
+  private async getChangedFiles(cwd: string, branch?: string): Promise<string[]> {
+    try {
+      const diffRef = branch ? `main...${branch}` : "HEAD~1";
+      const { stdout } = await execFileAsync("git", ["diff", "--name-only", diffRef], {
+        cwd,
+        maxBuffer: 1024 * 1024,
+      });
+      return stdout.trim().split("\n").filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   /** Resolve the test command from the primary project (for step verification). */
@@ -2985,6 +3146,27 @@ export function parseTestOutput(output: string): { total: number; passed: number
   }
 
   return { total: 0, passed: 0, failed: 0 };
+}
+
+/**
+ * Check if a file path matches any of the given glob patterns.
+ * Supports simple globs: `**` (any depth), `*` (single segment).
+ */
+function matchesGlobs(filePath: string, globs: string[]): boolean {
+  for (const glob of globs) {
+    if (matchGlob(filePath, glob)) return true;
+  }
+  return false;
+}
+
+function matchGlob(filePath: string, glob: string): boolean {
+  // Convert glob to regex
+  const regexStr = glob
+    .replace(/\*\*/g, "<<GLOBSTAR>>")
+    .replace(/\*/g, "[^/]*")
+    .replace(/<<GLOBSTAR>>/g, ".*")
+    .replace(/\?/g, "[^/]");
+  return new RegExp(`^${regexStr}$`).test(filePath);
 }
 
 export async function updateTicketStatus(ticketPath: string, newStatus: string): Promise<void> {

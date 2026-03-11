@@ -64,7 +64,7 @@ export function validateProjectConfig(data: unknown): ProjectConfig {
     docs: (obj.docs as ProjectConfig["docs"]) ?? {},
     services: Array.isArray(obj.services) ? obj.services : [],
     environments: Array.isArray(obj.environments) ? obj.environments : [],
-    testing: (obj.testing as ProjectConfig["testing"]) ?? null,
+    testing: migrateTestingConfig(obj.testing),
     linting: Array.isArray(obj.linting) ? obj.linting : [],
     subProjects: Array.isArray(obj.subProjects) ? obj.subProjects : [],
     cloudServices: Array.isArray(obj.cloudServices) ? obj.cloudServices : [],
@@ -107,4 +107,27 @@ function validateProfileConfig(data: unknown): ProjectConfig["profile"] {
   }
 
   return Object.keys(result).length > 0 ? result : undefined;
+}
+
+/**
+ * Migrate old TestingConfig (single object) to TestSuite[] (array).
+ * Handles: null, undefined, old `{ framework, command, testDir }`, and new array format.
+ */
+function migrateTestingConfig(data: unknown): ProjectConfig["testing"] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as ProjectConfig["testing"];
+  // Old format: { framework: string; command?: string; testDir?: string }
+  if (typeof data === "object") {
+    const old = data as { framework?: string; command?: string; testDir?: string };
+    if (typeof old.framework === "string") {
+      return [{
+        name: old.framework,
+        framework: old.framework,
+        command: old.command ?? `npx ${old.framework}`,
+        testDir: old.testDir,
+        required: true,
+      }];
+    }
+  }
+  return [];
 }

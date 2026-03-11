@@ -73,10 +73,17 @@ function buildOpenCodeConfig(config: AgentStartConfig): string {
   const infra = ctx.project.stack.infrastructure.map((i) => i.name).join(", ");
   if (infra) parts.push(`Infrastructure: ${infra}`);
 
-  if (ctx.project.testing) {
-    parts.push(`\nTesting: ${ctx.project.testing.framework}`);
-    if (ctx.project.testing.command) {
-      parts.push(`Test command: ${ctx.project.testing.command}`);
+  const testSuites = Array.isArray(ctx.project.testing) ? ctx.project.testing : (ctx.project.testing ? [ctx.project.testing] : []);
+  if (testSuites.length > 0) {
+    if (testSuites.length === 1) {
+      parts.push(`\nTesting: ${testSuites[0].framework}`);
+      if (testSuites[0].command) parts.push(`Test command: ${testSuites[0].command}`);
+    } else {
+      parts.push(`\nTest suites:`);
+      for (const s of testSuites) {
+        const pathHint = s.paths?.length ? ` (for changes in: ${s.paths.join(", ")})` : "";
+        parts.push(`- ${s.name} (${s.framework}): \`${s.command}\`${pathHint}`);
+      }
     }
   }
 

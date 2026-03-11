@@ -28,8 +28,8 @@ export function formatDetectionResult(result: DetectionResult): string {
   if (result.workSystem) {
     lines.push(`  Work system: ${result.workSystem.type}`);
   }
-  if (result.testing) {
-    lines.push(`  Testing: ${result.testing.framework}`);
+  if (result.testing && result.testing.length > 0) {
+    lines.push(`  Testing: ${result.testing.map((s) => `${s.name} (${s.framework})`).join(", ")}`);
   }
   if (result.linting.length > 0) {
     lines.push(`  Linting: ${result.linting.map((l) => l.name).join(", ")}`);

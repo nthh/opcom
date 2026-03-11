@@ -58,6 +58,7 @@ export interface PlanStep {
   verifyingPhaseStartedAt?: string;      // ISO timestamp when current sub-phase started
   stallSignal?: StallSignal;             // active stall warning (cleared when step progresses)
   verificationMode?: VerificationMode;   // per-step override from work item frontmatter
+  testSuites?: string[];                 // per-step override: force these named suites to run
   teamId?: string;                       // team definition that expanded this step
   teamStepRole?: string;                 // role within the team sequence (e.g. "engineer", "qa")
   deniedWriteCount?: number;             // count of write attempts blocked by denyPaths
@@ -110,6 +111,19 @@ export interface TestGateResult {
   failedTests: number;
   output: string;
   durationMs: number;
+  suiteResults?: SuiteTestResult[];     // per-suite breakdown (when multiple suites ran)
+}
+
+export interface SuiteTestResult {
+  suiteName: string;
+  passed: boolean;
+  testCommand: string;
+  totalTests: number;
+  passedTests: number;
+  failedTests: number;
+  output: string;
+  durationMs: number;
+  screenshotDir?: string;    // path to screenshot artifacts (e.g. playwright test-results/)
 }
 
 export interface VerificationResult {
