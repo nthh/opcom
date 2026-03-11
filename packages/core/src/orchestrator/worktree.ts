@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
-import { readdir, rm, writeFile, readFile } from "node:fs/promises";
+import { readdir, rm, writeFile, readFile, appendFile, mkdir } from "node:fs/promises";
 import type { RebaseResult } from "@opcom/types";
 import { createLogger } from "../logger.js";
 
@@ -11,6 +11,26 @@ const log = createLogger("worktree");
 
 /** Lock file placed inside worktrees to signal an active agent process. */
 const LOCK_FILE = ".opcom-lock";
+
+/**
+ * Ensure `.opcom-lock` is listed in the project's `.git/info/exclude` so agents
+ * never accidentally commit it.  This is idempotent — safe to call multiple times.
+ */
+async function ensureGitExclude(projectPath: string): Promise<void> {
+  const infoDir = join(projectPath, ".git", "info");
+  const excludePath = join(infoDir, "exclude");
+  try {
+    await mkdir(infoDir, { recursive: true });
+    let content = "";
+    try { content = await readFile(excludePath, "utf-8"); } catch { /* file may not exist */ }
+    if (!content.includes(LOCK_FILE)) {
+      const line = content.endsWith("\n") || content.length === 0 ? LOCK_FILE + "\n" : "\n" + LOCK_FILE + "\n";
+      await appendFile(excludePath, line);
+    }
+  } catch {
+    // Best-effort — non-fatal
+  }
+}
 
 /** Check whether a PID is alive (without sending a signal). */
 function isProcessAlive(pid: number): boolean {
@@ -143,6 +163,9 @@ export class WorktreeManager {
         { cwd: projectPath },
       );
     }
+
+    // Ensure .opcom-lock is git-excluded so agents never commit it
+    await ensureGitExclude(projectPath);
 
     // Install dependencies in the worktree
     await this.installDeps(worktreePath);
