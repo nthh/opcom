@@ -465,7 +465,7 @@ describe("applyDecomposition", () => {
     }
 
     // Plan was recomputed with sub-tickets as steps
-    // Parent should be excluded (has children), sub-tickets are the steps
+    // Parent should be excluded (has children), children use plain IDs
     const stepIds = result.plan.steps.map((s) => s.ticketId);
     expect(stepIds).toContain("serverless-types");
     expect(stepIds).toContain("serverless-cf");

@@ -25,6 +25,7 @@ import type {
   InfraEvent,
   EnvironmentStatus,
   ServiceInstance,
+  DecompositionAssessment,
 } from "@opcom/types";
 import {
   loadGlobalConfig,
@@ -47,6 +48,9 @@ import {
   GitHubActionsAdapter,
   detectInfrastructure,
   EnvironmentManager,
+  assessTicketsForDecomposition,
+  generateDecomposition,
+  writeSubTickets,
 } from "@opcom/core";
 import type { TicketSet } from "@opcom/core";
 
@@ -937,13 +941,17 @@ export class TuiClient {
     this.send({ type: "delete_plan", planId });
   }
 
-  async createPlan(projectId: string): Promise<Plan | null> {
+  async createPlan(projectId: string): Promise<{ plan: Plan; assessments: DecompositionAssessment[] } | null> {
     try {
       const tickets = this.projectTickets.get(projectId);
       if (!tickets || tickets.length === 0) {
         log.warn("createPlan: no tickets for project", { projectId });
         return null;
       }
+
+      // Assess tickets for decomposition before creating plan
+      const assessments = assessTicketsForDecomposition(tickets);
+      const flagged = assessments.filter((a) => a.needsDecomposition);
 
       const ticketSets: TicketSet[] = [{ projectId, tickets }];
       const scope = { projectIds: [projectId], query: "status:open" };
@@ -966,9 +974,63 @@ export class TuiClient {
         } catch { /* ignore */ }
       }
 
-      return plan;
+      return { plan, assessments: flagged };
     } catch (err) {
       log.error("createPlan failed", { error: String(err) });
+      return null;
+    }
+  }
+
+  /**
+   * Decompose flagged tickets and recreate the plan.
+   * Uses generateDecomposition + writeSubTickets, then rescans and recomputes.
+   */
+  async decomposeAndRecreatePlan(
+    projectId: string,
+    assessments: DecompositionAssessment[],
+    llmCall: (prompt: string) => Promise<string>,
+  ): Promise<Plan | null> {
+    try {
+      const tickets = this.projectTickets.get(projectId);
+      if (!tickets) return null;
+
+      const project = this.projectConfigs.get(projectId);
+      if (!project) return null;
+
+      for (const assessment of assessments) {
+        const ticket = tickets.find((t) => t.id === assessment.ticketId);
+        if (!ticket) continue;
+
+        const result = await generateDecomposition(ticket, undefined, tickets, llmCall);
+        if (result.subTickets.length > 0) {
+          await writeSubTickets(project.path, result);
+        }
+      }
+
+      // Rescan tickets to pick up new sub-tickets
+      const freshTickets = await scanTickets(project.path);
+      this.projectTickets.set(projectId, freshTickets);
+
+      // Recreate plan with updated tickets
+      const ticketSets: TicketSet[] = [{ projectId, tickets: freshTickets }];
+      const scope = { projectIds: [projectId], query: "status:open" };
+      const name = project.name ?? projectId;
+      const plan = computePlan(ticketSets, scope, name);
+
+      if (plan.steps.length === 0) return null;
+
+      await savePlan(plan);
+      this.activePlan = plan;
+
+      for (const handler of this.handlers) {
+        try {
+          handler({ type: "plan_updated", plan } as ServerEvent);
+        } catch { /* ignore */ }
+      }
+
+      return plan;
+    } catch (err) {
+      log.error("decomposeAndRecreatePlan failed", { error: String(err) });
       return null;
     }
   }

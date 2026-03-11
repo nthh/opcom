@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline";
 import {
   loadGlobalConfig,
   loadWorkspace,
@@ -15,8 +16,11 @@ import {
   SessionManager,
   EventStore,
   defaultOrchestratorConfig,
+  assessTicketsForDecomposition,
+  generateDecomposition,
+  writeSubTickets,
 } from "@opcom/core";
-import type { Plan, PlanScope, OrchestratorConfig, TeamDefinition } from "@opcom/types";
+import type { Plan, PlanScope, OrchestratorConfig, TeamDefinition, DecompositionAssessment, WorkItem } from "@opcom/types";
 import type { TicketSet } from "@opcom/core";
 import { computePlanSummary } from "../tui/views/plan-overview.js";
 
@@ -93,14 +97,26 @@ export async function runPlanList(): Promise<void> {
   }
 }
 
-export async function runPlanCreate(options: {
+export interface PlanCreateOptions {
   name?: string;
   scope?: string;
   ticketIds?: string[];
   projectIds?: string[];
   config?: Partial<OrchestratorConfig>;
-}): Promise<void> {
-  const ticketSets = await buildTicketSets();
+  /** true = auto-decompose, false = skip assessment, undefined = interactive */
+  decompose?: boolean;
+  /** For testing: override readline with scripted answers */
+  promptFn?: (question: string) => Promise<string>;
+  /** For testing: override LLM call for decomposition */
+  llmCall?: (prompt: string) => Promise<string>;
+  /** For testing: override ticket set building */
+  buildTicketSetsFn?: () => Promise<TicketSet[]>;
+}
+
+export async function runPlanCreate(options: PlanCreateOptions): Promise<void> {
+  let ticketSets = options.buildTicketSetsFn
+    ? await options.buildTicketSetsFn()
+    : await buildTicketSets();
 
   const scope: PlanScope = {};
   if (options.projectIds?.length) {
@@ -111,6 +127,40 @@ export async function runPlanCreate(options: {
   }
   if (options.scope) {
     scope.query = options.scope;
+  }
+
+  // --- Decomposition assessment ---
+  if (options.decompose !== false) {
+    const allTickets = ticketSets.flatMap((ts) => ts.tickets);
+    const assessments = assessTicketsForDecomposition(allTickets);
+    const flagged = assessments.filter((a) => a.needsDecomposition);
+
+    if (flagged.length > 0) {
+      console.log(`  Decomposition assessment: ${flagged.length} oversized ticket(s) found\n`);
+      for (const a of flagged) {
+        console.log(`    ! ${a.ticketId}: ${a.reason}`);
+      }
+      console.log();
+
+      const decomposed = await handleDecomposition(
+        flagged,
+        allTickets,
+        ticketSets,
+        options,
+      );
+
+      if (decomposed === "abort") {
+        console.log("  Aborted.");
+        return;
+      }
+
+      if (decomposed === "rescan") {
+        // Sub-tickets were written to disk — rescan to pick them up
+        ticketSets = options.buildTicketSetsFn
+          ? await options.buildTicketSetsFn()
+          : await buildTicketSets();
+      }
+    }
   }
 
   // Resolve teams for all tickets so the planner can expand multi-step teams
@@ -151,9 +201,113 @@ export async function runPlanCreate(options: {
   if (tracks.size > 1 || (tracks.size === 1 && ![...tracks.keys()][0].startsWith("track-"))) {
     console.log("  Tracks:");
     for (const [trackName, steps] of tracks) {
-      console.log(`    ${trackName}: ${steps.map((s) => s.ticketId).join(" → ")}`);
+      console.log(`    ${trackName}: ${steps.map((s) => s.ticketId).join(" \u2192 ")}`);
     }
   }
+}
+
+/**
+ * Handle decomposition for flagged tickets.
+ * Returns "abort" if user chose to abort, "rescan" if tickets were decomposed,
+ * or "skip" if all flagged tickets were skipped.
+ */
+async function handleDecomposition(
+  flagged: DecompositionAssessment[],
+  allTickets: WorkItem[],
+  ticketSets: TicketSet[],
+  options: PlanCreateOptions,
+): Promise<"abort" | "rescan" | "skip"> {
+  if (options.decompose === true) {
+    // Auto-decompose all flagged tickets
+    return decomposeTickets(flagged, allTickets, ticketSets, options);
+  }
+
+  // Interactive mode
+  const rl = options.promptFn
+    ? null
+    : createInterface({ input: process.stdin, output: process.stdout });
+  const ask = options.promptFn ?? ((question: string) =>
+    new Promise<string>((res) => rl!.question(question, res)));
+
+  try {
+    const answer = (await ask("  [d]ecompose / [s]kip / [a]bort: ")).trim().toLowerCase();
+
+    if (answer === "a") {
+      return "abort";
+    }
+
+    if (answer === "d") {
+      return decomposeTickets(flagged, allTickets, ticketSets, options);
+    }
+
+    // Default: skip
+    return "skip";
+  } finally {
+    rl?.close();
+  }
+}
+
+/**
+ * Decompose all flagged tickets by generating sub-tickets and writing them to disk.
+ */
+async function decomposeTickets(
+  flagged: DecompositionAssessment[],
+  allTickets: WorkItem[],
+  ticketSets: TicketSet[],
+  options: PlanCreateOptions,
+): Promise<"rescan" | "skip"> {
+  const llmCall = options.llmCall;
+  if (!llmCall) {
+    console.error("  Decomposition requires an LLM backend. Use --decompose with an available backend.");
+    return "skip";
+  }
+
+  let decomposed = false;
+  for (const assessment of flagged) {
+    const ticket = allTickets.find((t) => t.id === assessment.ticketId);
+    if (!ticket) continue;
+
+    // Find the project path for this ticket
+    const projectPath = findProjectPath(ticket, ticketSets);
+    if (!projectPath) continue;
+
+    console.log(`  Decomposing ${ticket.id}...`);
+    try {
+      const result = await generateDecomposition(ticket, undefined, allTickets, llmCall);
+
+      if (result.subTickets.length > 0) {
+        const paths = await writeSubTickets(projectPath, result);
+        console.log(`    Created ${paths.length} sub-ticket(s)`);
+        for (const p of paths) {
+          console.log(`      ${p}`);
+        }
+        decomposed = true;
+      } else {
+        console.log(`    No sub-tickets generated for ${ticket.id}`);
+      }
+    } catch (err) {
+      console.error(`    Failed to decompose ${ticket.id}: ${err}`);
+    }
+  }
+
+  return decomposed ? "rescan" : "skip";
+}
+
+/**
+ * Find the project path for a ticket by matching its file path against ticket sets.
+ */
+function findProjectPath(ticket: WorkItem, ticketSets: TicketSet[]): string | undefined {
+  for (const ts of ticketSets) {
+    if (ts.tickets.some((t) => t.id === ticket.id)) {
+      // Derive project path from ticket's filePath
+      // Ticket files are at <projectPath>/.tickets/impl/<id>/...
+      const ticketsIdx = ticket.filePath.indexOf(".tickets");
+      if (ticketsIdx > 0) {
+        return ticket.filePath.slice(0, ticketsIdx - 1);
+      }
+    }
+  }
+  return undefined;
 }
 
 export async function runPlanShow(planId?: string): Promise<void> {

@@ -221,7 +221,7 @@ async function main(): Promise<void> {
         case "ls":
           return runPlanList();
         case "create": {
-          const planOpts: { name?: string; scope?: string; ticketIds?: string[]; projectIds?: string[] } = {};
+          const planOpts: { name?: string; scope?: string; ticketIds?: string[]; projectIds?: string[]; decompose?: boolean } = {};
           for (let i = 2; i < args.length; i++) {
             if (args[i] === "--name" && args[i + 1]) { planOpts.name = args[++i]; }
             else if (args[i] === "--scope" && args[i + 1]) { planOpts.scope = args[++i]; }
@@ -233,6 +233,8 @@ async function main(): Promise<void> {
               if (!planOpts.projectIds) planOpts.projectIds = [];
               planOpts.projectIds.push(args[++i]);
             }
+            else if (args[i] === "--decompose") { planOpts.decompose = true; }
+            else if (args[i] === "--no-decompose") { planOpts.decompose = false; }
           }
           return runPlanCreate(planOpts);
         }

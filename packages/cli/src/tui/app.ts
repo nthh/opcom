@@ -196,6 +196,7 @@ import {
   scrollToBottom as serviceScrollToBottom,
   type ServiceDetailState,
 } from "./views/service-detail.js";
+import { createAnthropicLlmCall } from "./llm.js";
 
 type FocusTarget = { kind: "agent"; agent: AgentSession } | { kind: "ticket"; ticket: WorkItem };
 
@@ -886,10 +887,10 @@ export class TuiApp {
       case "P": { // Create plan for selected project
         const project = state.projects[state.selectedIndex[0]];
         if (project) {
-          this.client.createPlan(project.id).then((plan) => {
+          this.client.createPlan(project.id).then((result) => {
             this.syncData();
-            if (plan) {
-              this.navigateToPlanOverview(plan);
+            if (result) {
+              this.navigateToPlanOverview(result.plan, result.assessments);
             }
             this.scheduleRender();
           }).catch(() => {});
@@ -1179,10 +1180,10 @@ export class TuiApp {
 
       case "P": // Create plan for this project
         if (this.focusedProjectId) {
-          this.client.createPlan(this.focusedProjectId).then((plan) => {
+          this.client.createPlan(this.focusedProjectId).then((result) => {
             this.syncData();
-            if (plan) {
-              this.navigateToPlanOverview(plan);
+            if (result) {
+              this.navigateToPlanOverview(result.plan, result.assessments);
             }
             this.scheduleRender();
           }).catch(() => {});
@@ -1997,6 +1998,45 @@ export class TuiApp {
       return;
     }
 
+    // Handle decomposition overlay input before normal plan overview input
+    if (state.decompositionAssessments && state.decompositionAssessments.length > 0 && !state.decompositionResolved) {
+      switch (data) {
+        case "d": { // Decompose
+          const projectId = state.plan.scope.projectIds?.[0];
+          const assessments = state.decompositionAssessments;
+          const llmCall = createAnthropicLlmCall();
+          if (!projectId || !assessments || !llmCall) {
+            // No project, assessments, or LLM backend — fall back to skip
+            state.decompositionResolved = true;
+            rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+            return;
+          }
+          // Mark as resolved immediately so UI unblocks
+          state.decompositionResolved = true;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          // Run decomposition async, then update the plan overview
+          this.client.decomposeAndRecreatePlan(projectId, assessments, llmCall).then((newPlan) => {
+            if (newPlan && this.planOverviewState === state) {
+              this.navigateToPlanOverview(newPlan);
+            }
+            this.scheduleRender();
+          }).catch(() => {
+            this.scheduleRender();
+          });
+          return;
+        }
+        case "s": // Skip
+          state.decompositionResolved = true;
+          rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          return;
+        case "\x1b": // Escape
+        case "q":
+          this.navigateBack();
+          return;
+      }
+      return; // Block other keys while decomposition overlay is active
+    }
+
     switch (data) {
       case "\x1b": // Escape
       case "q":
@@ -2244,7 +2284,10 @@ export class TuiApp {
     }).catch(() => {});
   }
 
-  private navigateToPlanOverview(plan: import("@opcom/types").Plan): void {
+  private navigateToPlanOverview(
+    plan: import("@opcom/types").Plan,
+    decompositionAssessments?: import("@opcom/types").DecompositionAssessment[],
+  ): void {
     this.navStack.push({
       level: this.level,
       projectId: this.focusedProjectId ?? undefined,
@@ -2258,7 +2301,7 @@ export class TuiApp {
       allTickets.push(...tickets);
     }
 
-    this.planOverviewState = createPlanOverviewState(plan, allTickets);
+    this.planOverviewState = createPlanOverviewState(plan, allTickets, decompositionAssessments);
     this.agentFocusState = null;
     this.ticketFocusState = null;
     this.planStepFocusState = null;

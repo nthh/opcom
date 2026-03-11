@@ -1,7 +1,7 @@
 ---
 id: tui-integration
 title: "Wire decomposition into TUI plan creation flow"
-status: open
+status: closed
 type: feature
 priority: 2
 parent: decomposition-in-plan-create

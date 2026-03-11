@@ -1,7 +1,7 @@
 ---
 id: decomposition-in-plan-create
 title: "Wire ticket decomposition into plan creation flow"
-status: open
+status: closed
 type: bugfix
 priority: 1
 created: 2026-03-10
