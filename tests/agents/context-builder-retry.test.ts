@@ -127,6 +127,31 @@ describe("contextPacketToMarkdown with previousVerification", () => {
     expect(md).toContain("No test for empty string input");
     // Met criteria should NOT appear
     expect(md).not.toContain("Code follows project conventions");
+    // Concerns should be included when oracle failed
+    expect(md).toContain("### Concerns");
+    expect(md).toContain("Error handling is incomplete");
+  });
+
+  it("does not render concerns section when oracle failed but has no concerns", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const verification: VerificationResult = {
+      stepTicketId: "t1",
+      passed: false,
+      failureReasons: ["Oracle: 1 criteria unmet"],
+      oracle: {
+        passed: false,
+        criteria: [
+          { criterion: "Handles edge cases", met: false, reasoning: "Missing null check" },
+        ],
+        concerns: [],
+      },
+    };
+
+    const md = contextPacketToMarkdown(packet, undefined, verification);
+
+    expect(md).toContain("### Unmet Acceptance Criteria");
+    expect(md).not.toContain("### Concerns");
   });
 
   it("renders both test failures and oracle failures when both failed", async () => {

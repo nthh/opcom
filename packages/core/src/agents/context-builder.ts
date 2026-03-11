@@ -375,6 +375,13 @@ export function contextPacketToMarkdown(
         lines.push(`- **${c.criterion}**: ${c.reasoning}`);
       }
       lines.push("");
+      if (previousVerification.oracle.concerns.length > 0) {
+        lines.push(`### Concerns`);
+        for (const concern of previousVerification.oracle.concerns) {
+          lines.push(`- ${concern}`);
+        }
+        lines.push("");
+      }
     } else if (previousVerification.oracleError) {
       lines.push(`### Oracle Evaluation Failed`);
       lines.push(`The oracle could not evaluate your changes: ${previousVerification.oracleError}`);
