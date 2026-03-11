@@ -143,12 +143,13 @@ export class Executor {
             // hasCommits() and merge() can find the worktree info.
             const project = await loadProject(step.projectId);
             if (project) {
+              const wtKey = this.worktreeKey(step);
               this.worktreeManager.restore({
-                stepId: step.ticketId,
-                ticketId: step.ticketId,
+                stepId: wtKey,
+                ticketId: wtKey,
                 projectPath: project.path,
                 worktreePath: step.worktreePath,
-                branch: step.worktreeBranch ?? `work/${step.ticketId}`,
+                branch: step.worktreeBranch ?? `work/${wtKey}`,
               });
             }
             log.warn("re-running verification for stuck step", { ticketId: step.ticketId });
@@ -185,12 +186,13 @@ export class Executor {
           // Restore worktree tracking (lost on executor restart)
           const project = await loadProject(step.projectId);
           if (project) {
+            const wtKey = this.worktreeKey(step);
             this.worktreeManager.restore({
-              stepId: step.ticketId,
-              ticketId: step.ticketId,
+              stepId: wtKey,
+              ticketId: wtKey,
               projectPath: project.path,
               worktreePath: step.worktreePath,
-              branch: step.worktreeBranch ?? `work/${step.ticketId}`,
+              branch: step.worktreeBranch ?? `work/${wtKey}`,
             });
           }
           step.rebaseAttempts = 0;
@@ -538,15 +540,16 @@ export class Executor {
         for (const step of this.plan.steps) {
           // Restore worktree tracking for steps that need it (may have been
           // lost if the executor was recreated from a saved plan).
-          if (this.plan.config.worktree && step.worktreePath && !this.worktreeManager.getInfo(step.ticketId)) {
+          if (this.plan.config.worktree && step.worktreePath && !this.worktreeManager.getInfo(this.worktreeKey(step))) {
             const project = await loadProject(step.projectId);
             if (project) {
+              const wtKey = this.worktreeKey(step);
               this.worktreeManager.restore({
-                stepId: step.ticketId,
-                ticketId: step.ticketId,
+                stepId: wtKey,
+                ticketId: wtKey,
                 projectPath: project.path,
                 worktreePath: step.worktreePath,
-                branch: step.worktreeBranch ?? `work/${step.ticketId}`,
+                branch: step.worktreeBranch ?? `work/${wtKey}`,
               });
             }
           }
@@ -631,7 +634,7 @@ export class Executor {
 
           // Clean up worktree if skipped while in-progress
           if (this.plan.config.worktree && step.worktreePath) {
-            await this.worktreeManager.remove(step.ticketId).catch(() => {});
+            await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
             step.worktreePath = undefined;
             step.worktreeBranch = undefined;
           }
@@ -695,11 +698,11 @@ export class Executor {
           // Clean up worktree if present
           if (this.plan.config.worktree && step.worktreePath) {
             // Merge first if there are commits
-            const hasCommits = await this.worktreeManager.hasCommits(step.ticketId).catch(() => false);
+            const hasCommits = await this.worktreeManager.hasCommits(this.worktreeKey(step)).catch(() => false);
             if (hasCommits) {
-              await this.worktreeManager.merge(step.ticketId).catch(() => {});
+              await this.worktreeManager.merge(this.worktreeKey(step)).catch(() => {});
             }
-            await this.worktreeManager.remove(step.ticketId).catch(() => {});
+            await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
             step.worktreePath = undefined;
             step.worktreeBranch = undefined;
           }
@@ -769,7 +772,7 @@ export class Executor {
       }
     }
 
-    const hasWork = await this.worktreeManager.hasCommits(step.ticketId);
+    const hasWork = await this.worktreeManager.hasCommits(this.worktreeKey(step));
 
     if (event.sessionId) {
       this.sessionToStep.delete(event.sessionId);
@@ -786,7 +789,7 @@ export class Executor {
       log.info("verification mode: none — skipping verification", { ticketId: step.ticketId });
       if (hasWork) {
         // Merge into main
-        const mergeResult = await this.worktreeManager.merge(step.ticketId);
+        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step));
         if (!mergeResult.merged) {
           step.status = "needs-rebase";
           step.error = `Merge failed: ${mergeResult.error}`;
@@ -798,7 +801,7 @@ export class Executor {
       }
       step.status = "done";
       step.completedAt = new Date().toISOString();
-      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
       step.worktreePath = undefined;
       step.worktreeBranch = undefined;
       if (this.plan.config.ticketTransitions) {
@@ -860,7 +863,7 @@ export class Executor {
 
       // Output-exists passed — proceed to merge if there are commits
       if (hasWork) {
-        const mergeResult = await this.worktreeManager.merge(step.ticketId);
+        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step));
         if (!mergeResult.merged) {
           step.status = "needs-rebase";
           step.error = `Merge failed: ${mergeResult.error}`;
@@ -873,7 +876,7 @@ export class Executor {
 
       step.status = "done";
       step.completedAt = new Date().toISOString();
-      await this.worktreeManager.remove(step.ticketId).catch(() => {});
+      await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
       step.worktreePath = undefined;
       step.worktreeBranch = undefined;
       if (this.plan.config.ticketTransitions) {
@@ -921,7 +924,7 @@ export class Executor {
           this.stallDetector.recordStepTransition();
 
           // No merge needed — no commits to merge
-          await this.worktreeManager.remove(step.ticketId).catch(() => {});
+          await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
           step.worktreePath = undefined;
           step.worktreeBranch = undefined;
 
@@ -951,7 +954,7 @@ export class Executor {
       // Keep worktree for inspection — only clear truly empty ones
       const hasUncommitted = await this.worktreeHasChanges(step.worktreePath);
       if (!hasUncommitted) {
-        await this.worktreeManager.remove(step.ticketId).catch(() => {});
+        await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
         step.worktreePath = undefined;
         step.worktreeBranch = undefined;
       }
@@ -1069,8 +1072,7 @@ export class Executor {
     }
 
     // Verification passed (or skipped) — merge into main tree
-    // For swarm final subtask, use parent ID for the merge (branch is work/<parent>)
-    const mergeId = this.isSwarmSubtask(step) ? baseTicketId(step.ticketId) : step.ticketId;
+    const mergeId = this.worktreeKey(step);
     let mergeResult = await this.worktreeManager.merge(mergeId);
 
     if (mergeResult.conflict) {
@@ -1171,8 +1173,7 @@ export class Executor {
     }
 
     // Clean up worktree after successful merge + verification
-    const removeId = this.isSwarmSubtask(step) ? baseTicketId(step.ticketId) : step.ticketId;
-    await this.worktreeManager.remove(removeId).catch((err) => {
+    await this.worktreeManager.remove(this.worktreeKey(step)).catch((err) => {
       log.warn("worktree cleanup after merge failed", { ticketId: step.ticketId, error: String(err) });
     });
     step.worktreePath = undefined;
@@ -1223,7 +1224,7 @@ export class Executor {
     });
 
     // Stage 1: attempt clean rebase
-    const rebaseResult = await this.worktreeManager.attemptRebase(step.ticketId);
+    const rebaseResult = await this.worktreeManager.attemptRebase(this.worktreeKey(step));
 
     if (rebaseResult.rebased) {
       // Clean rebase succeeded — re-verify (upstream changes may break tests)
@@ -1283,7 +1284,7 @@ export class Executor {
       }
 
       // Post-rebase verification passed — merge again
-      const reMerge = await this.worktreeManager.merge(step.ticketId);
+      const reMerge = await this.worktreeManager.merge(this.worktreeKey(step));
       if (reMerge.merged) {
         // Success — complete the step
         step.status = "done";
@@ -1307,7 +1308,7 @@ export class Executor {
           }
         }
 
-        await this.worktreeManager.remove(step.ticketId).catch(() => {});
+        await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
         step.worktreePath = undefined;
         step.worktreeBranch = undefined;
 
@@ -1402,7 +1403,7 @@ export class Executor {
 
     // Find expected outputs from the ticket
     const tickets = project ? await scanTickets(project.path) : [];
-    const workItem = tickets.find((t) => t.id === step.ticketId);
+    const workItem = tickets.find((t) => t.id === this.ticketLookupId(step));
     const expectedOutputs = workItem?.outputs ?? [];
 
     if (expectedOutputs.length === 0) {
@@ -2085,7 +2086,7 @@ export class Executor {
     if (this.stepFiles.has(step.ticketId)) return this.stepFiles.get(step.ticketId)!;
     try {
       const tickets = this.ticketCache.get(step.projectId);
-      const workItem = tickets?.find((t) => t.id === step.ticketId);
+      const workItem = tickets?.find((t) => t.id === this.ticketLookupId(step));
       const ctx = queryGraphContext(step.projectId, step.ticketId, workItem?.links ?? []);
       const files = ctx?.relatedFiles ?? [];
       this.stepFiles.set(step.ticketId, files);
@@ -2099,8 +2100,7 @@ export class Executor {
   /** Get priority for a step from cached ticket data. */
   private getStepPriority(step: PlanStep): number {
     const tickets = this.ticketCache.get(step.projectId);
-    const lookupId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
-    const workItem = tickets?.find((t) => t.id === lookupId);
+    const workItem = tickets?.find((t) => t.id === this.ticketLookupId(step));
     return workItem?.priority ?? 4;
   }
 
@@ -2120,6 +2120,33 @@ export class Executor {
     return findSwarmWorktree(step, this.plan.steps);
   }
 
+  /**
+   * Return the worktree manager lookup key for a step.
+   * Swarm subtasks and team sub-steps share a single worktree keyed by the
+   * parent ticket ID, so we must use baseTicketId for lookups/operations.
+   */
+  private worktreeKey(step: PlanStep): string {
+    if (step.teamId || this.isSwarmSubtask(step)) {
+      return baseTicketId(step.ticketId);
+    }
+    return step.ticketId;
+  }
+
+  /**
+   * Return the raw ticket ID for WorkItem lookup.
+   * Plan steps use "parent/child" format for swarm subtasks, but WorkItems
+   * from scanTickets() use just the child basename.  Team sub-steps use
+   * "base/role" and should look up the base ticket.
+   */
+  private ticketLookupId(step: PlanStep): string {
+    if (step.teamId) return baseTicketId(step.ticketId);
+    const slash = step.ticketId.lastIndexOf("/");
+    if (slash >= 0 && this.isSwarmSubtask(step)) {
+      return step.ticketId.slice(slash + 1);
+    }
+    return step.ticketId;
+  }
+
   private async startStep(step: PlanStep): Promise<void> {
     const project = await loadProject(step.projectId);
     if (!project) {
@@ -2127,9 +2154,7 @@ export class Executor {
     }
 
     const tickets = await scanTickets(project.path);
-    // For team sub-steps (ticketId = "base/role"), look up the base ticket
-    const lookupId = step.teamId ? baseTicketId(step.ticketId) : step.ticketId;
-    const workItem = tickets.find((t) => t.id === lookupId);
+    const workItem = tickets.find((t) => t.id === this.ticketLookupId(step));
 
     // Sync verification mode from work item (may have been added after plan creation)
     if (workItem?.verification && !step.verificationMode) {
@@ -2243,7 +2268,7 @@ export class Executor {
 
     // Write lock file so cleanupOrphaned() won't remove this worktree
     if (this.plan.config.worktree && session.pid) {
-      await this.worktreeManager.writeLock(step.ticketId, session.pid).catch((err) => {
+      await this.worktreeManager.writeLock(this.worktreeKey(step), session.pid).catch((err) => {
         log.warn("failed to write worktree lock", { ticketId: step.ticketId, error: String(err) });
       });
     }
@@ -2575,7 +2600,7 @@ export class Executor {
     if (this.plan.config.worktree) {
       for (const step of this.plan.steps) {
         if (step.status === "in-progress" && step.worktreePath) {
-          const has = await this.worktreeManager.hasCommits(step.ticketId).catch(() => false);
+          const has = await this.worktreeManager.hasCommits(this.worktreeKey(step)).catch(() => false);
           if (has) stepsWithCommits.add(step.ticketId);
         }
       }
@@ -2637,7 +2662,7 @@ export class Executor {
       const project = await loadProject(step.projectId);
       if (!project) return;
       const tickets = this.ticketCache.get(step.projectId);
-      const ticket = tickets?.find((t) => t.id === step.ticketId);
+      const ticket = tickets?.find((t) => t.id === this.ticketLookupId(step));
       await updateProjectSummary(step.projectId, project.name, {
         completedTicketId: step.ticketId,
         completedTicketTitle: ticket?.title ?? step.ticketId,
@@ -2652,7 +2677,7 @@ export class Executor {
       const project = await loadProject(step.projectId);
       if (!project) return;
       const tickets = await scanTickets(project.path);
-      const ticket = tickets.find((t) => t.id === step.ticketId);
+      const ticket = tickets.find((t) => t.id === this.ticketLookupId(step));
       if (ticket) {
         await updateTicketStatus(ticket.filePath, newStatus);
 
