@@ -12,6 +12,7 @@ export interface RoleDefinition {
   runTests?: boolean;
   runOracle?: boolean | null;
   skills?: string[];
+  denyPaths?: string[];
 }
 
 export interface ResolvedRoleConfig {
@@ -25,4 +26,5 @@ export interface ResolvedRoleConfig {
   doneCriteria: string;
   runTests: boolean;
   runOracle: boolean;
+  denyPaths: string[];
 }

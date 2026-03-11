@@ -55,6 +55,29 @@ describe("BUILTIN_ROLES", () => {
     expect(devops.allowedBashPatterns).toContain("kubectl *");
     expect(devops.runTests).toBe(false);
   });
+
+  it("engineer denies writes to .tickets/", () => {
+    const eng = BUILTIN_ROLES.engineer;
+    expect(eng.denyPaths).toEqual([".tickets/**"]);
+  });
+
+  it("devops denies writes to .tickets/", () => {
+    const devops = BUILTIN_ROLES.devops;
+    expect(devops.denyPaths).toEqual([".tickets/**"]);
+  });
+
+  it("planner role has no denyPaths (can modify tickets)", () => {
+    // Planner is not a built-in role, but verify no other roles
+    // besides engineer and devops have denyPaths
+    const qa = BUILTIN_ROLES.qa;
+    const reviewer = BUILTIN_ROLES.reviewer;
+    const researcher = BUILTIN_ROLES.researcher;
+    const oracle = BUILTIN_ROLES.oracle;
+    expect(qa.denyPaths).toBeUndefined();
+    expect(reviewer.denyPaths).toBeUndefined();
+    expect(researcher.denyPaths).toBeUndefined();
+    expect(oracle.denyPaths).toBeUndefined();
+  });
 });
 
 describe("resolveRoleConfig", () => {
@@ -136,6 +159,18 @@ describe("resolveRoleConfig", () => {
     expect(resolved.disallowedTools).toEqual(["EnterPlanMode", "ExitPlanMode", "EnterWorktree"]);
   });
 
+  it("passes denyPaths through from role definition", () => {
+    const role = BUILTIN_ROLES.engineer;
+    const resolved = resolveRoleConfig(role, [], makeOrchestratorConfig());
+    expect(resolved.denyPaths).toEqual([".tickets/**"]);
+  });
+
+  it("defaults denyPaths to empty array when role has none", () => {
+    const role: RoleDefinition = { id: "unrestricted" };
+    const resolved = resolveRoleConfig(role, [], makeOrchestratorConfig());
+    expect(resolved.denyPaths).toEqual([]);
+  });
+
   it("deduplicates bash patterns", () => {
     const role: RoleDefinition = {
       id: "dup",
@@ -185,6 +220,19 @@ runTests: true`;
 
   it("returns null for empty content", () => {
     expect(parseRoleYaml("")).toBeNull();
+  });
+
+  it("parses denyPaths from YAML", () => {
+    const yaml = `---
+id: restricted
+name: Restricted
+denyPaths:
+  - .tickets/**
+  - docs/**
+---`;
+    const role = parseRoleYaml(yaml);
+    expect(role).not.toBeNull();
+    expect(role!.denyPaths).toEqual([".tickets/**", "docs/**"]);
   });
 
   it("returns null for content without id", () => {

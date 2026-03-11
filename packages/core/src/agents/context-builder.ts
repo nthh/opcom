@@ -323,6 +323,16 @@ export function contextPacketToMarkdown(
     lines.push("");
   }
 
+  // Deny paths (file write restrictions)
+  if (roleConfig?.denyPaths && roleConfig.denyPaths.length > 0) {
+    lines.push(`## File Restrictions`);
+    lines.push(`You MUST NOT modify files matching these patterns — they are read-only during execution:`);
+    for (const p of roleConfig.denyPaths) {
+      lines.push(`- \`${p}\``);
+    }
+    lines.push("");
+  }
+
   // Requirements (role instructions replace hardcoded defaults)
   lines.push(`## Requirements`);
   const needsTests = !verificationMode || verificationMode === "test-gate";

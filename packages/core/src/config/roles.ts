@@ -12,6 +12,7 @@ export const BUILTIN_ROLES: Record<string, RoleDefinition> = {
     name: "Engineer",
     permissionMode: "acceptEdits",
     disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
+    denyPaths: [".tickets/**"],
     instructions: [
       "- All changes MUST include tests.",
       "- Run tests relevant to your changes during development (specific test files, not the full suite).",
@@ -70,6 +71,7 @@ export const BUILTIN_ROLES: Record<string, RoleDefinition> = {
     name: "DevOps",
     permissionMode: "acceptEdits",
     disallowedTools: ["EnterPlanMode", "ExitPlanMode", "EnterWorktree"],
+    denyPaths: [".tickets/**"],
     allowedBashPatterns: ["docker *", "kubectl *", "helm *", "terraform *", "pulumi *"],
     instructions: [
       "- Focus on infrastructure, CI/CD, and deployment configuration.",
@@ -169,6 +171,7 @@ export function resolveRoleConfig(
     doneCriteria: role.doneCriteria ?? "",
     runTests,
     runOracle,
+    denyPaths: role.denyPaths ?? [],
   };
 }
 
@@ -219,6 +222,8 @@ export function parseRoleYaml(content: string): RoleDefinition | null {
   else if (parsed.runOracle === true) role.runOracle = true;
   // null stays as default (undefined → inherits from plan)
 
+  if (Array.isArray(parsed.denyPaths)) role.denyPaths = parsed.denyPaths.map(String);
+
   return role;
 }
 
@@ -247,6 +252,11 @@ function roleToYaml(role: RoleDefinition): string {
     for (const p of role.allowedBashPatterns) lines.push(`  - ${JSON.stringify(p)}`);
   } else {
     lines.push("allowedBashPatterns: []");
+  }
+
+  if (role.denyPaths && role.denyPaths.length > 0) {
+    lines.push("denyPaths:");
+    for (const p of role.denyPaths) lines.push(`  - ${JSON.stringify(p)}`);
   }
 
   if (role.instructions) {

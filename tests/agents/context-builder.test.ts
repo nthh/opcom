@@ -203,6 +203,52 @@ describe("contextPacketToMarkdown", () => {
     expect(md).not.toContain("## Project Summary");
   });
 
+  it("includes deny paths in file restrictions section", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const roleConfig: ResolvedRoleConfig = {
+      roleId: "engineer",
+      name: "Engineer",
+      permissionMode: "acceptEdits",
+      allowedTools: [],
+      disallowedTools: [],
+      allowedBashPatterns: [],
+      instructions: "- Write code.",
+      doneCriteria: "Code committed.",
+      runTests: true,
+      runOracle: false,
+      denyPaths: [".tickets/**"],
+    };
+
+    const md = contextPacketToMarkdown(packet, roleConfig);
+
+    expect(md).toContain("## File Restrictions");
+    expect(md).toContain("`.tickets/**`");
+    expect(md).toContain("read-only during execution");
+  });
+
+  it("omits file restrictions when denyPaths is empty", async () => {
+    const project = makeProject();
+    const packet = await buildContextPacket(project);
+    const roleConfig: ResolvedRoleConfig = {
+      roleId: "planner",
+      name: "Planner",
+      permissionMode: "acceptEdits",
+      allowedTools: [],
+      disallowedTools: [],
+      allowedBashPatterns: [],
+      instructions: "- Plan work.",
+      doneCriteria: "Plan complete.",
+      runTests: false,
+      runOracle: false,
+      denyPaths: [],
+    };
+
+    const md = contextPacketToMarkdown(packet, roleConfig);
+
+    expect(md).not.toContain("## File Restrictions");
+  });
+
   it("always includes git stash warning even with role instructions", async () => {
     const project = makeProject();
     const packet = await buildContextPacket(project);
