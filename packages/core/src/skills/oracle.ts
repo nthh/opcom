@@ -208,7 +208,7 @@ export function formatOraclePrompt(input: OracleInput): string {
   sections.push("Respond with:");
   sections.push("");
   sections.push("## Criteria");
-  sections.push("For each criterion, use this format:");
+  sections.push("For each criterion, use this EXACT format:");
   sections.push("- **Criterion**: <the criterion text>");
   sections.push("  - **Met**: YES or NO");
   sections.push("  - **Reasoning**: <brief explanation>");
