@@ -634,6 +634,23 @@ export class Executor {
             }
           }
 
+          // Reset failed steps so they get retried on resume
+          if (step.status === "failed") {
+            log.info("resetting failed step on resume", { ticketId: step.ticketId });
+            step.status = "ready";
+            step.error = undefined;
+            step.completedAt = undefined;
+            step.agentSessionId = undefined;
+            step.verification = undefined;
+            step.previousVerification = undefined;
+            step.attempt = 1;
+            step.rebaseAttempts = 0;
+            this.logPlanEvent("step_retry", {
+              stepTicketId: step.ticketId,
+              detail: { reason: "resume", previousAttempt: step.attempt },
+            });
+          }
+
           // Re-enter merge flow for needs-rebase steps (work is done, just retry merge)
           if (step.status === "needs-rebase") {
             if (this.plan.config.worktree && step.worktreePath) {
