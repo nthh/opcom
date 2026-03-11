@@ -1,7 +1,7 @@
 ---
 id: executor-enforcement
 title: "Enforce denyPaths in executor write interception"
-status: open
+status: closed
 type: feature
 priority: 1
 parent: protect-ticket-files
