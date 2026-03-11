@@ -90,7 +90,16 @@ export async function scanTickets(projectPath: string): Promise<WorkItem[]> {
 export function parseTicketFile(content: string, filePath: string, dirName: string): WorkItem | null {
   const frontmatter = parseFrontmatter(content);
   const body = extractBody(content);
-  const subtasks = body ? extractSubtasks(body) : [];
+
+  // Only extract subtasks for top-level tickets (no parent).
+  // Sub-ticket files (with parent) have task checkboxes as internal
+  // agent guidance, not separate plan steps.
+  const hasParent = frontmatter && (
+    typeof frontmatter.dir === "string"
+    || typeof frontmatter.milestone === "string"
+    || typeof frontmatter.parent === "string"
+  );
+  const subtasks = (!hasParent && body) ? extractSubtasks(body) : [];
 
   if (!frontmatter) {
     return {
@@ -116,6 +125,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     filePath,
     parent: typeof frontmatter.dir === "string" ? frontmatter.dir
       : typeof frontmatter.milestone === "string" ? frontmatter.milestone
+      : typeof frontmatter.parent === "string" ? frontmatter.parent
       : undefined,
     created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,
     due: typeof frontmatter.due === "string" ? frontmatter.due : undefined,

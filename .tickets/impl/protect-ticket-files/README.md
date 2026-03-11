@@ -53,15 +53,11 @@ In the executor's bash/write tool interception (or in `allowedBashPatterns`):
 - The executor itself modifies ticket status (`status: open` → `in-progress` → `closed`) via `updateTicketStatus()` — this is not agent-initiated and bypasses the restriction
 - The `devops` role inherits the restriction (no reason for infra agents to edit tickets)
 
-## Tasks
+## Sub-tickets
 
-- [ ] Add `denyPaths` field to `RoleDefinition` type
-- [ ] Add `.tickets/**` to `engineer` role's deny paths (deps: add-denypaths-field-to-roledefinition-type)
-- [ ] Implement path check in executor's write interception (deps: add-tickets-to-engineer-role-s-deny-paths)
-- [ ] Return clear error message to agent when write is denied (deps: implement-path-check-in-executor-s-write-interception)
-- [ ] Emit `denied_write` event for TUI/logging visibility (deps: implement-path-check-in-executor-s-write-interception)
-- [ ] Ensure `updateTicketStatus()` (executor-initiated) is not affected (deps: implement-path-check-in-executor-s-write-interception)
-- [ ] Tests: engineer can't write to .tickets/, planner can, executor status updates work (deps: return-clear-error-message-to-agent-when-write-is-denied, emit-denied-write-event-for-tui-logging-visibility, ensure-updateticketstatus-executor-initiated-is-not-affected)
+- `deny-paths-type-and-config.md` — Add denyPaths type + engineer role config
+- `executor-enforcement.md` — Enforce in executor + error + event (deps: deny-paths-type-and-config)
+- `protect-tests.md` — Full test coverage (deps: executor-enforcement)
 
 ## Acceptance Criteria
 

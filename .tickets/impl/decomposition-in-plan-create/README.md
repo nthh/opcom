@@ -81,15 +81,11 @@ From `assessDecomposition()`:
 
 When creating a plan from the TUI (pressing `P`), the decomposition prompt appears as an overlay before the plan overview screen.
 
-## Tasks
+## Sub-tickets
 
-- [ ] Call `assessTicketsForDecomposition()` in `opcom plan create` after loading tickets
-- [ ] Display decomposition warnings with ticket details and suggestions (deps: call-assessticketsfordecomposition-in-opcom-plan-create-after-loading-tickets)
-- [ ] Add interactive prompt: decompose / skip / abort (deps: display-decomposition-warnings-with-ticket-details-and-suggestions)
-- [ ] Add `--decompose` flag for automatic mode (deps: add-interactive-prompt-decompose-skip-abort)
-- [ ] Add `--no-decompose` flag to skip assessment (deps: add-interactive-prompt-decompose-skip-abort)
-- [ ] Wire into TUI plan creation flow (P key → decomposition overlay → plan overview) (deps: add-interactive-prompt-decompose-skip-abort)
-- [ ] Tests: oversized ticket triggers warning, decompose creates sub-tickets, skip preserves original, already-decomposed tickets are skipped (deps: add-decompose-flag-for-automatic-mode, add-no-decompose-flag-to-skip-assessment, wire-into-tui-plan-creation-flow-p-key-decomposition-overlay-plan-overview)
+- `cli-assessment-wiring.md` — Wire assessment + prompt + CLI flags into plan create
+- `tui-integration.md` — TUI decomposition overlay (deps: cli-assessment-wiring)
+- `decomposition-tests.md` — Full test coverage (deps: cli-assessment-wiring)
 
 ## Acceptance Criteria
 
