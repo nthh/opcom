@@ -120,6 +120,7 @@ vi.mock("../../packages/core/src/orchestrator/git-ops.js", () => ({
 vi.mock("../../packages/core/src/config/roles.js", () => ({
   loadRole: vi.fn(async () => ({ id: "engineer", name: "Engineer" })),
   resolveRoleConfig: vi.fn((_roleDef: unknown, stackPatterns: string[], planConfig: Record<string, unknown>) => ({
+    roleId: "engineer",
     name: "Engineer",
     permissionMode: "acceptEdits",
     allowedTools: [],
@@ -129,6 +130,7 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
     doneCriteria: "",
     runTests: false,
     runOracle: false,
+    denyPaths: [],
   })),
 }));
 

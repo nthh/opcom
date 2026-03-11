@@ -191,6 +191,7 @@ vi.mock("../../packages/core/src/config/roles.js", () => ({
     doneCriteria: "",
     runTests: false,
     runOracle: true, // Oracle enabled for these tests
+    denyPaths: [],
   })),
 }));
 

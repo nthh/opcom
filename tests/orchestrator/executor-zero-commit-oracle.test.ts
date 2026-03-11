@@ -181,6 +181,7 @@ const { mockResolveRoleConfig } = vi.hoisted(() => ({
     doneCriteria: "",
     runTests: false,
     runOracle: true,
+    denyPaths: [],
   })),
 }));
 
@@ -347,6 +348,7 @@ describe("Zero-commit oracle arbitration", () => {
       doneCriteria: "",
       runTests: false,
       runOracle: false,
+      denyPaths: [],
     });
 
     const plan = makePlan([

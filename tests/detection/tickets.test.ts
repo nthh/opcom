@@ -477,7 +477,7 @@ deps:
       "pipeline-v2-plan",
     );
 
-    // Parent excluded, 3 children become steps
+    // Parent excluded, 3 children become steps (plain IDs)
     const stepIds = plan.steps.map((s) => s.ticketId);
     expect(stepIds).not.toContain("pipeline-v2");
     expect(plan.steps).toHaveLength(3);

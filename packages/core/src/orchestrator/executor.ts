@@ -55,6 +55,7 @@ export interface ExecutorEvents {
   plan_updated: { plan: Plan };
   stall_detected: { signal: StallSignal };
   forbidden_command_warning: { stepTicketId: string; command: string; constraintName: string; rule: string };
+  denied_write: { stepTicketId: string; filePath: string; roleId: string; pattern: string };
 }
 
 type EventHandler<T> = (data: T) => void;
@@ -82,6 +83,7 @@ export class Executor {
   private sessionWrites = new Map<string, number>(); // sessionId → count of write tool calls
   private activeVerifications = 0; // count of concurrent verification runs
   private stepVerification = new Map<string, { runTests: boolean; runOracle: boolean }>(); // ticketId → role verification
+  private stepDenyPaths = new Map<string, { denyPaths: string[]; roleId: string }>(); // ticketId → deny paths + role
   private stepFiles = new Map<string, string[]>(); // ticketId → related file paths (cached from graph)
   private ticketCache = new Map<string, import("@opcom/types").WorkItem[]>(); // projectId → tickets
   private stepConstraints = new Map<string, import("@opcom/types").AgentConstraint[]>(); // ticketId → constraints
@@ -248,6 +250,50 @@ export class Executor {
     const onAgentEvent = ({ sessionId, event: ev }: { sessionId: string; event: NormalizedEvent }) => {
       if (ev.type === "tool_end" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolSuccess !== false) {
         this.sessionWrites.set(sessionId, (this.sessionWrites.get(sessionId) ?? 0) + 1);
+      }
+      // Deny path check — reject when agent writes to restricted paths
+      if (ev.type === "tool_start" && ev.data?.toolName && WRITE_TOOLS.has(ev.data.toolName) && ev.data.toolInput) {
+        const ticketId = this.sessionToStep.get(sessionId);
+        if (ticketId) {
+          const denyConfig = this.stepDenyPaths.get(ticketId);
+          if (denyConfig && denyConfig.denyPaths.length > 0) {
+            const filePath = extractFilePath(ev.data.toolInput);
+            if (filePath) {
+              const matched = matchesDenyPath(filePath, denyConfig.denyPaths);
+              if (matched) {
+                const errorMsg = `Cannot modify ${filePath} — files matching \`${matched}\` are read-only during execution.`;
+                log.warn("denied write to protected path", {
+                  ticketId,
+                  filePath,
+                  roleId: denyConfig.roleId,
+                  pattern: matched,
+                });
+                // Increment denied write count on the plan step
+                const planStep = this.plan.steps.find((s) => s.ticketId === ticketId);
+                if (planStep) {
+                  planStep.deniedWriteCount = (planStep.deniedWriteCount ?? 0) + 1;
+                }
+                this.emit("denied_write", {
+                  stepTicketId: ticketId,
+                  filePath,
+                  roleId: denyConfig.roleId,
+                  pattern: matched,
+                });
+                this.logPlanEvent("denied_write", {
+                  stepTicketId: ticketId,
+                  detail: {
+                    filePath,
+                    roleId: denyConfig.roleId,
+                    pattern: matched,
+                  },
+                });
+                // Best-effort: tell the agent the write was rejected.
+                // stdin may be closed in one-shot mode — enforcement is still logged.
+                this.sessionManager.promptSession(sessionId, errorMsg).catch(() => {});
+              }
+            }
+          }
+        }
       }
       // Forbidden command check — soft warn on matching agent constraints
       if (ev.type === "tool_start" && ev.data?.toolName === "Bash" && ev.data.toolInput) {
@@ -2260,6 +2306,9 @@ export class Executor {
     this.sessionToStep.set(session.id, step.ticketId);
     this.stallDetector.recordStepTransition();
     this.stepVerification.set(step.ticketId, { runTests: resolved.runTests, runOracle: resolved.runOracle });
+    if (resolved.denyPaths.length > 0) {
+      this.stepDenyPaths.set(step.ticketId, { denyPaths: resolved.denyPaths, roleId: resolved.roleId });
+    }
 
     // Cache agent constraints for forbidden command checking during execution
     if (project.profile?.agentConstraints?.length) {
@@ -2891,6 +2940,58 @@ export async function stampTicketFiles(
 
   const updated = frontmatter + newFields + content.slice(fmEnd);
   await writeFile(ticketPath, updated, "utf-8");
+}
+
+/**
+ * Extract a file path from a tool input string (JSON or plain text).
+ * Write/Edit/NotebookEdit tools use `file_path` in their JSON input.
+ */
+export function extractFilePath(toolInput: string): string | null {
+  try {
+    const parsed = JSON.parse(toolInput);
+    if (typeof parsed.file_path === "string") return parsed.file_path;
+    if (typeof parsed.filePath === "string") return parsed.filePath;
+    if (typeof parsed.path === "string") return parsed.path;
+  } catch {
+    // Not JSON — try to extract a path-like string
+  }
+  return null;
+}
+
+/**
+ * Check if a file path matches any deny path glob pattern.
+ * Returns the matched pattern, or null if no match.
+ *
+ * Supports simple glob patterns:
+ * - `dir/**` matches anything under dir/
+ * - `*.ext` matches files with that extension
+ * - Literal paths match exactly
+ */
+export function matchesDenyPath(filePath: string, denyPaths: string[]): string | null {
+  // Normalize: strip trailing slashes, work with forward slashes
+  const normalized = filePath.replace(/\\/g, "/");
+
+  for (const pattern of denyPaths) {
+    const p = pattern.replace(/\\/g, "/");
+
+    if (p.endsWith("/**")) {
+      // Directory glob: .tickets/** → matches anything starting with .tickets/
+      const prefix = p.slice(0, -3); // Remove /**
+      // Check if the normalized path starts with the prefix (relative) or contains it
+      if (normalized.startsWith(prefix + "/") || normalized === prefix) return pattern;
+      // Also match absolute paths containing the prefix as a segment
+      if (normalized.includes("/" + prefix + "/")) return pattern;
+    } else if (p.startsWith("*")) {
+      // Extension glob: *.md → matches files ending with .md
+      const suffix = p.slice(1);
+      if (normalized.endsWith(suffix)) return pattern;
+    } else {
+      // Literal match
+      if (normalized === p || normalized.endsWith("/" + p)) return pattern;
+    }
+  }
+
+  return null;
 }
 
 // --- Swarm helpers (exported for testing) ---
