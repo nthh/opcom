@@ -1,7 +1,7 @@
 ---
 id: decomposition-tests
 title: "Tests for decomposition in plan creation"
-status: open
+status: closed
 type: feature
 priority: 1
 parent: decomposition-in-plan-create
