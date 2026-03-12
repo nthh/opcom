@@ -147,9 +147,24 @@ export async function runSetup(): Promise<void> {
     lines.push("");
   }
 
-  // --- CLI commands, prioritized for agent workflow ---
+  // --- How opcom works ---
 
-  lines.push("Commands:");
+  lines.push("How opcom works:");
+  lines.push("");
+  lines.push("  opcom is a workspace manager. You seed it with tickets describing work,");
+  lines.push("  then the user runs the TUI to manage agents that execute that work.");
+  lines.push("");
+  lines.push("  1. Seed tickets     — describe the work to be done");
+  lines.push("  2. Create a plan    — set execution order and dependencies");
+  lines.push("  3. User runs TUI    — `npx opcom tui` to launch, manage, and monitor agents");
+  lines.push("");
+  lines.push("  Agents are managed from the TUI, not from here. Do NOT start agents");
+  lines.push("  yourself unless you are creating and executing a plan.");
+  lines.push("");
+
+  // --- CLI commands for seeding work ---
+
+  lines.push("Commands (for seeding work):");
   lines.push("");
 
   lines.push("  Tickets:");
@@ -164,22 +179,13 @@ export async function runSetup(): Promise<void> {
   lines.push("    opcom plan execute [id]                  Execute plan (starts agents)");
   lines.push("");
 
-  lines.push("  Work:");
-  lines.push("    opcom work <project>/<ticket>            Start agent on a ticket");
-  lines.push("    opcom work <project>/<ticket> --worktree   With git isolation");
-  lines.push("");
-
   lines.push("  Projects:");
   lines.push("    opcom add <path>                         Add another project");
   lines.push("    opcom status                             Workspace overview");
   lines.push("    opcom scan [project]                     Re-detect project stack");
   lines.push("");
 
-  lines.push("Workflow:");
-  lines.push("  1. Seed tickets for work the user wants done");
-  lines.push("  2. Create a plan to set execution order and dependencies");
-  lines.push("  3. Execute with 'opcom work <project>/<ticket>' or 'opcom plan execute'");
-  lines.push("  4. Tell user to run 'opcom' for the interactive dashboard");
+  lines.push("Tell the user to run `npx opcom tui` to manage their workspace.");
 
   console.log(lines.join("\n"));
 }
