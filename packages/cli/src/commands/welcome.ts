@@ -248,6 +248,7 @@ export async function runWelcome(): Promise<void> {
     console.log("");
     console.log(`  Agents run in the background. The TUI shows live progress —`);
     console.log(`  press ${BOLD}Enter${RESET} on an agent to see its event log and send prompts.`);
+    console.log(`  Press ${BOLD}?${RESET} for full keybinding help at any time.`);
     console.log("");
     console.log(`  ${workspace.projectIds.length} project(s) configured. Launching dashboard...`);
     console.log("");
