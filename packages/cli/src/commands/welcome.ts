@@ -246,8 +246,9 @@ export async function runWelcome(): Promise<void> {
     console.log(`    Press ${BOLD}Space${RESET} to start, pause, or resume a plan.`);
     console.log(`    Press ${BOLD}w${RESET} on any ticket to start a single agent on it.`);
     console.log("");
-    console.log(`  Agents run in the background. The TUI shows live progress —`);
-    console.log(`  press ${BOLD}Enter${RESET} on an agent to see its event log and send prompts.`);
+    console.log(`  The TUI must be running for agents to work — it's the process`);
+    console.log(`  that spawns and supervises them. Keep it open while agents execute.`);
+    console.log(`  Press ${BOLD}Enter${RESET} on an agent to see its live event log and send prompts.`);
     console.log(`  Press ${BOLD}?${RESET} for full keybinding help at any time.`);
     console.log("");
     console.log(`  ${workspace.projectIds.length} project(s) configured. Launching dashboard...`);

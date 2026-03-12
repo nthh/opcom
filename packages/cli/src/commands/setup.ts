@@ -168,6 +168,11 @@ export async function runSetup(): Promise<void> {
   lines.push("    - Enter on a running agent → live event log, send prompts");
   lines.push("    - ? for full keybinding help at any time");
   lines.push("");
+  lines.push("  The TUI must be running for agents to work. It is the process that");
+  lines.push("  spawns and supervises agents — without it, nothing executes. Even if");
+  lines.push("  you create a plan from the CLI, the user still needs to have the TUI");
+  lines.push("  open for agents to be launched.");
+  lines.push("");
   lines.push("  Agents run in isolated git worktrees so they don't conflict with each");
   lines.push("  other or with the user's working tree. Plans manage execution order,");
   lines.push("  dependencies between tickets, and concurrent agent limits.");
