@@ -151,15 +151,29 @@ export async function runSetup(): Promise<void> {
 
   lines.push("How opcom works:");
   lines.push("");
-  lines.push("  opcom is a workspace manager. You seed it with tickets describing work,");
-  lines.push("  then the user runs the TUI to manage agents that execute that work.");
+  lines.push("  opcom is a workspace manager. You seed it with tickets describing");
+  lines.push("  the work to be done, then the user runs the TUI dashboard to create");
+  lines.push("  plans and manage the agents that execute that work.");
   lines.push("");
-  lines.push("  1. Seed tickets     — describe the work to be done");
-  lines.push("  2. Create a plan    — set execution order and dependencies");
-  lines.push("  3. User runs TUI    — `npx opcom tui` to launch, manage, and monitor agents");
+  lines.push("  Step 1: Seed tickets");
+  lines.push("    Create tickets that describe units of work. Use the CLI commands");
+  lines.push("    below, or add markdown files directly to the project's ticket dir.");
   lines.push("");
-  lines.push("  Agents are managed from the TUI, not from here. Do NOT start agents");
-  lines.push("  yourself unless you are creating and executing a plan.");
+  lines.push("  Step 2: User launches the TUI");
+  lines.push("    The user runs `npx opcom tui` to open the dashboard. This is the");
+  lines.push("    control center — everything from here is driven by the user in the TUI:");
+  lines.push("");
+  lines.push("    - Dashboard shows all projects, tickets, and running agents");
+  lines.push("    - Press Enter on a project to see its tickets, specs, stack, and agents");
+  lines.push("    - Press P on a project to create an execution plan from its tickets");
+  lines.push("      (pick which tickets to include, set concurrency, toggle tests/oracle)");
+  lines.push("    - Press Space to start, pause, or resume a plan");
+  lines.push("    - Press w on a ticket to start a single agent on it");
+  lines.push("    - Agents run in the background; the TUI shows live progress");
+  lines.push("    - Press Enter on an agent to see its event log and send prompts");
+  lines.push("");
+  lines.push("  Do NOT start agents from here. Your job is to seed the work.");
+  lines.push("  The user manages agent execution from the TUI.");
   lines.push("");
 
   // --- CLI commands for seeding work ---
@@ -173,19 +187,13 @@ export async function runSetup(): Promise<void> {
   lines.push("    opcom ticket show <project> <id>         Show ticket details");
   lines.push("");
 
-  lines.push("  Plans:");
-  lines.push("    opcom plan create                        Create plan from tickets");
-  lines.push("    opcom plan show [id]                     Show plan details");
-  lines.push("    opcom plan execute [id]                  Execute plan (starts agents)");
-  lines.push("");
-
   lines.push("  Projects:");
   lines.push("    opcom add <path>                         Add another project");
   lines.push("    opcom status                             Workspace overview");
   lines.push("    opcom scan [project]                     Re-detect project stack");
   lines.push("");
 
-  lines.push("Tell the user to run `npx opcom tui` to manage their workspace.");
+  lines.push("Tell the user to run `npx opcom tui` when they're ready to execute.");
 
   console.log(lines.join("\n"));
 }
