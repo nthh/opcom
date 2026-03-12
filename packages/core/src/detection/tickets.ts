@@ -10,25 +10,73 @@ export interface TicketDetectionResult {
 }
 
 export async function detectTicketSystem(projectPath: string): Promise<TicketDetectionResult | null> {
+  // Check for .tickets/ directory (trk or tickets-dir)
   const ticketDir = join(projectPath, ".tickets");
-  if (!existsSync(ticketDir)) return null;
+  if (existsSync(ticketDir)) {
+    const isTrk = existsSync(join(projectPath, "scripts", "trk.py"));
+    const type = isTrk ? "trk" as const : "tickets-dir" as const;
 
-  // Check if it's trk (has scripts/trk.py)
-  const isTrk = existsSync(join(projectPath, "scripts", "trk.py"));
-  const type = isTrk ? "trk" as const : "tickets-dir" as const;
+    return {
+      workSystem: {
+        type,
+        ticketDir: existsSync(join(projectPath, ".tickets", "impl")) ? ".tickets/impl" : ".tickets",
+      },
+      evidence: [
+        { file: ".tickets/", detectedAs: `work-system:${type}` },
+      ],
+    };
+  }
 
-  return {
-    workSystem: {
-      type,
-      ticketDir: existsSync(join(projectPath, ".tickets", "impl")) ? ".tickets/impl" : ".tickets",
-    },
-    evidence: [
-      { file: ".tickets/", detectedAs: `work-system:${type}` },
-    ],
-  };
+  // Check for plan.md (Ralph Loop pattern: spec → plan.md with task lines)
+  const planMdResult = await detectPlanMd(projectPath);
+  if (planMdResult) return planMdResult;
+
+  return null;
 }
 
-export async function scanTickets(projectPath: string): Promise<WorkItem[]> {
+/**
+ * Detect plan.md work system — a flat markdown file with task lines.
+ * Each task has a status marker, description, and optionally acceptance criteria.
+ * Common in spec-driven workflows where a plan is generated from a spec.
+ */
+async function detectPlanMd(projectPath: string): Promise<TicketDetectionResult | null> {
+  const candidates = ["plan.md", "PLAN.md", "docs/plan.md"];
+  for (const candidate of candidates) {
+    const fullPath = join(projectPath, candidate);
+    if (!existsSync(fullPath)) continue;
+
+    try {
+      const content = await readFile(fullPath, "utf-8");
+      // Verify it contains task-like lines (checkboxes or status markers)
+      const taskLines = content.split("\n").filter((line) =>
+        /^\s*[-*]\s*\[[ xX~]\]/.test(line) ||
+        /^\s*\|.*\b(done|todo|in[- ]progress|pending|blocked|skipped)\b/i.test(line),
+      );
+      if (taskLines.length < 2) continue; // Need at least 2 tasks to be a plan
+
+      const dir = candidate.includes("/") ? candidate.slice(0, candidate.lastIndexOf("/")) : ".";
+      return {
+        workSystem: {
+          type: "plan-md" as const,
+          ticketDir: dir,
+        },
+        evidence: [
+          { file: candidate, detectedAs: "work-system:plan-md", details: `${taskLines.length} tasks` },
+        ],
+      };
+    } catch {
+      // Skip unreadable files
+    }
+  }
+  return null;
+}
+
+export async function scanTickets(projectPath: string, workSystemType?: string): Promise<WorkItem[]> {
+  // plan-md: parse tasks from plan.md directly
+  if (workSystemType === "plan-md") {
+    return scanPlanMd(projectPath);
+  }
+
   // Try .tickets/impl/ first (trk convention), fall back to .tickets/ directly
   let implDir = join(projectPath, ".tickets", "impl");
   if (!existsSync(implDir)) {
@@ -278,6 +326,98 @@ export function applyFieldMappings(items: WorkItem[], mappings: FieldMapping[]):
 
     return changed ? { ...item, links, tags } : item;
   });
+}
+
+/**
+ * Parse tasks from a plan.md file.
+ * Supports two formats:
+ *   1. Checkbox: `- [ ] Task description | acceptance: criteria here`
+ *   2. Table: `| status | task | acceptance |`
+ *
+ * Tasks are returned as WorkItems with IDs derived from line position.
+ */
+async function scanPlanMd(projectPath: string): Promise<WorkItem[]> {
+  const candidates = ["plan.md", "PLAN.md", "docs/plan.md"];
+  let planPath: string | null = null;
+  let content: string | null = null;
+
+  for (const candidate of candidates) {
+    const fullPath = join(projectPath, candidate);
+    if (existsSync(fullPath)) {
+      planPath = fullPath;
+      try {
+        content = await readFile(fullPath, "utf-8");
+      } catch {
+        continue;
+      }
+      break;
+    }
+  }
+
+  if (!content || !planPath) return [];
+
+  const items: WorkItem[] = [];
+  const lines = content.split("\n");
+  let taskIndex = 0;
+
+  for (const line of lines) {
+    // Checkbox format: - [ ] description  or  - [x] description
+    const checkboxMatch = line.match(/^\s*[-*]\s*\[([ xX~])\]\s+(.+)/);
+    if (checkboxMatch) {
+      const marker = checkboxMatch[1];
+      const rest = checkboxMatch[2];
+
+      // Split on | or — to separate description from acceptance criteria
+      const parts = rest.split(/\s*[|—]\s*acceptance:\s*/i);
+      const title = parts[0].trim();
+      const acceptance = parts[1]?.trim();
+
+      const status = marker === " " ? "open"
+        : marker === "~" ? "deferred"
+        : "closed";
+
+      taskIndex++;
+      items.push({
+        id: `plan-${taskIndex}`,
+        title,
+        status,
+        priority: 2,
+        type: "feature",
+        filePath: planPath,
+        deps: [],
+        links: [],
+        tags: acceptance ? { acceptance: [acceptance] } : {},
+      });
+      continue;
+    }
+
+    // Table row format: | status | description | acceptance |
+    const tableMatch = line.match(/^\s*\|\s*([^|]+)\|\s*([^|]+)\|?\s*(.*?)\s*\|?\s*$/);
+    if (tableMatch) {
+      const rawStatus = tableMatch[1].trim().toLowerCase();
+      const title = tableMatch[2].trim();
+      // Skip header/separator rows
+      if (rawStatus === "status" || /^[-:]+$/.test(rawStatus) || /^[-:]+$/.test(title)) continue;
+
+      const status = normalizeStatus(rawStatus);
+      const acceptance = tableMatch[3]?.trim().replace(/^\||\|$/g, "").trim();
+
+      taskIndex++;
+      items.push({
+        id: `plan-${taskIndex}`,
+        title,
+        status,
+        priority: 2,
+        type: "feature",
+        filePath: planPath,
+        deps: [],
+        links: [],
+        tags: acceptance ? { acceptance: [acceptance] } : {},
+      });
+    }
+  }
+
+  return items;
 }
 
 export function summarizeWorkItems(items: WorkItem[]): WorkSummary {

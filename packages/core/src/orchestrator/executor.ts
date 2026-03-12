@@ -1568,12 +1568,36 @@ export class Executor {
           total: suiteResult.totalTests,
           failed: suiteResult.failedTests,
         });
-        // Stop on first failure — no point running more suites
-        if (!suiteResult.passed) break;
+        // Stop on first hard failure — no point running more suites.
+        // But if a non-required suite fails with 0 tests parsed (infra issue),
+        // continue running remaining suites.
+        if (!suiteResult.passed) {
+          const isInfraWarning = !suite.required && suiteResult.totalTests === 0;
+          if (!isInfraWarning) break;
+        }
       }
 
       // Aggregate into a single TestGateResult for backward compat
-      const allPassed = suiteResults.every((r) => r.passed);
+      // Build a lookup for suite requiredness
+      const suiteRequiredMap = new Map(matchedSuites.map((s) => [s.name, !!s.required]));
+
+      // Separate hard failures from infra warnings:
+      // A non-required suite that fails with 0 tests parsed is an infra issue
+      // (e.g. vitest not installed in worktree), not a real test failure.
+      const hardFailures: SuiteTestResult[] = [];
+      const infraWarnings: SuiteTestResult[] = [];
+      for (const sr of suiteResults.filter((r) => !r.passed)) {
+        const isRequired = suiteRequiredMap.get(sr.suiteName) ?? false;
+        if (!isRequired && sr.totalTests === 0) {
+          infraWarnings.push(sr);
+        } else {
+          hardFailures.push(sr);
+        }
+      }
+
+      const allPassed = hardFailures.length === 0 && infraWarnings.length === 0
+        ? suiteResults.every((r) => r.passed)
+        : hardFailures.length === 0;
       const aggregated: TestGateResult = {
         passed: allPassed,
         testCommand: matchedSuites.map((s) => s.name).join(", "),
@@ -1586,9 +1610,17 @@ export class Executor {
       };
       result.testGate = aggregated;
 
+      // Add infra warnings as oracle concerns (not hard failures)
+      for (const sr of infraWarnings) {
+        const warning = `Suite "${sr.suiteName}" could not run (no test results parsed) — non-required suite, downgraded to warning`;
+        log.warn("test suite infra warning", { suite: sr.suiteName, warning });
+        // Append to output so oracle can see it, but don't fail the gate
+        aggregated.output += `\n\n⚠️ ${warning}`;
+      }
+
       if (!allPassed) {
         result.passed = false;
-        for (const sr of suiteResults.filter((r) => !r.passed)) {
+        for (const sr of hardFailures) {
           if (sr.totalTests === 0) {
             result.failureReasons.push(
               `Suite "${sr.suiteName}" failed (no test results parsed from output)`,
