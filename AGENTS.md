@@ -87,6 +87,26 @@ The **event store** (`events.db`) is the persistence layer for agent sessions, n
 - `npx vitest run tests/orchestrator/` — run tests in a directory
 - Do NOT run the full test suite (`npm test`, `npx vitest run` without args). The verification pipeline runs it automatically after you finish. Running it yourself wastes time and blocks the worktree.
 
+## Agent Setup
+
+Agents can set up opcom non-interactively. Running `npx opcom` from a non-TTY (or with `--auto`) will auto-detect the project and print available commands:
+
+```
+npx opcom                        # auto-setup cwd + print command guide
+npx opcom init --auto            # explicit auto-setup
+npx opcom init --auto <path>     # auto-setup a specific project
+npx opcom add <path> --auto      # add another project non-interactively
+```
+
+After setup, seed work and hand off to the user:
+
+1. Create tickets: `opcom ticket create <project> "<description>"`
+2. Create a plan: `opcom plan create`
+3. Execute work: `opcom work <project>/<ticket>`
+4. Tell user to run `opcom` for the interactive dashboard
+
+Users running `opcom` from a TTY get the interactive welcome (first run) or TUI (subsequent runs).
+
 ## Commands
 
 - `npm run build` — build all packages
@@ -94,3 +114,8 @@ The **event store** (`events.db`) is the persistence layer for agent sessions, n
 - `npx opcom add <path>` — add a project
 - `npx opcom scan [project]` — re-detect one or all projects
 - `npx opcom init` — interactive workspace setup
+- `npx opcom ticket list [project]` — list tickets
+- `npx opcom ticket create <project> "<desc>"` — create a ticket
+- `npx opcom plan create` — create execution plan from tickets
+- `npx opcom plan execute [id]` — execute a plan
+- `npx opcom work <project>/<ticket>` — start agent on a ticket

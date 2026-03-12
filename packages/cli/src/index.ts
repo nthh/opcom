@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { runInit, runInitFolder } from "./commands/init.js";
+import { runWelcome, isFirstRun } from "./commands/welcome.js";
+import { runSetup, autoSetup } from "./commands/setup.js";
 import { runAdd } from "./commands/add.js";
 import { runScan } from "./commands/scan.js";
 import { runStatus } from "./commands/status.js";
@@ -43,22 +45,36 @@ import { runTeamList, runTeamShow } from "./commands/team.js";
 import { runWorkspaceHealth, runWorkspaceDrift, runWorkspacePatterns } from "./commands/workspace.js";
 
 const args = process.argv.slice(2);
-const command = args[0];
+const command = args[0]?.startsWith("--") ? undefined : args[0];
 
 async function main(): Promise<void> {
   switch (command) {
-    case "init":
-      if (args[1]) {
-        return runInitFolder({ folder: args[1] });
+    case "init": {
+      const initAuto = args.includes("--auto");
+      const initFolder = args.find((a, i) => i > 0 && !a.startsWith("--"));
+      if (initAuto) {
+        await autoSetup(initFolder);
+        return runSetup();
+      }
+      if (initFolder) {
+        return runInitFolder({ folder: initFolder });
       }
       return runInit();
+    }
 
-    case "add":
-      if (!args[1]) {
+    case "add": {
+      const addPath = args.find((a, i) => i > 0 && !a.startsWith("--"));
+      if (!addPath) {
         console.error("  Usage: opcom add <path>");
         process.exit(1);
       }
-      return runAdd(args[1]);
+      if (args.includes("--auto")) {
+        await autoSetup(addPath);
+        console.log(`  Added ${addPath}`);
+        return;
+      }
+      return runAdd(addPath);
+    }
 
     case "scan": {
       const resetProfile = args.includes("--reset-profile");
@@ -594,13 +610,16 @@ async function main(): Promise<void> {
 
     default:
       if (!command) {
-        // If station daemon is running, default to TUI; otherwise show status
-        const { Station } = await import("@opcom/core");
-        const daemonStatus = await Station.isRunning();
-        if (daemonStatus.running) {
-          return runTui();
+        // Agent / non-interactive: auto-setup + print command guide
+        if (!process.stdin.isTTY || args.includes("--auto")) {
+          return runSetup();
         }
-        return runStatus();
+        // First run (interactive): walk user through setup → drops into TUI
+        if (isFirstRun()) {
+          return runWelcome();
+        }
+        // Subsequent runs: straight to TUI
+        return runTui();
       }
       console.error(`  Unknown command: ${command}`);
       printHelp();
