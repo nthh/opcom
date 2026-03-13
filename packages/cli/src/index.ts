@@ -43,6 +43,7 @@ import { runSkillsList, runSkillsShow, runSkillsCreate } from "./commands/skills
 import { runState } from "./commands/state.js";
 import { runTeamList, runTeamShow } from "./commands/team.js";
 import { runWorkspaceHealth, runWorkspaceDrift, runWorkspacePatterns } from "./commands/workspace.js";
+import { runMonitor } from "./commands/monitor.js";
 
 const args = process.argv.slice(2);
 const command = args[0]?.startsWith("--") ? undefined : args[0];
@@ -213,6 +214,17 @@ async function main(): Promise<void> {
         else if (args[i] === "--days" && args[i + 1]) { analyticsOpts.days = parseInt(args[++i], 10); }
       }
       return runAnalytics(sub, analyticsOpts);
+    }
+
+    case "monitor": {
+      const monitorOpts: { planId?: string; agents?: boolean; errors?: boolean; once?: boolean } = {};
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === "--plan" && args[i + 1]) { monitorOpts.planId = args[++i]; }
+        else if (args[i] === "--agents") { monitorOpts.agents = true; }
+        else if (args[i] === "--errors") { monitorOpts.errors = true; }
+        else if (args[i] === "--once") { monitorOpts.once = true; }
+      }
+      return runMonitor(monitorOpts);
     }
 
     case "changes": {
@@ -660,6 +672,10 @@ function printHelp(): void {
     ticket show <project> <id>      Show ticket details
     changes <ticket-id>             Show file changes for a ticket
     diff <ticket-id>                Show unified diff for a ticket's changes
+    monitor [--plan ID]             Live plan execution dashboard
+    monitor --once                  Print status once and exit
+    monitor --agents                Agent activity only
+    monitor --errors                Errors and stalls only
     analytics tools [--project X]    Tool usage frequency + success rates
     analytics sessions [--project X] Session durations and event counts
     analytics daily [--project X] [--days N] Daily activity summary

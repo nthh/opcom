@@ -58,12 +58,13 @@ export async function listPlans(): Promise<Plan[]> {
     if (!f.endsWith(".yaml")) continue;
     try {
       const raw = await readFile(`${dir}/${f}`, "utf-8");
-      plans.push(parseYaml(raw) as Plan);
+      const parsed = parseYaml(raw) as Plan | null;
+      if (parsed) plans.push(parsed);
     } catch {
       // Skip unreadable files
     }
   }
-  return plans.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return plans.sort((a, b) => (b.updatedAt ?? b.createdAt ?? "").localeCompare(a.updatedAt ?? a.createdAt ?? ""));
 }
 
 export async function deletePlan(id: string): Promise<void> {
