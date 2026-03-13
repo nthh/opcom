@@ -10,7 +10,8 @@
     "bundle": "npm run build && node scripts/bundle.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:tui": "tsx --watch packages/cli/src/index.ts tui"
+    "dev:tui": "tsx --watch packages/cli/src/index.ts tui",
+    "release": "node scripts/release.mjs"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
