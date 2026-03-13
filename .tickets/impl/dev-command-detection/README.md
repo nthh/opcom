@@ -1,7 +1,7 @@
 ---
 id: dev-command-detection
 title: "Detect dev/start/serve commands from build systems"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
