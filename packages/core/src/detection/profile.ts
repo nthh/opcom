@@ -141,6 +141,7 @@ const TEST_NAMES = new Set(["test"]);
 const BUILD_NAMES = new Set(["build"]);
 const DEPLOY_NAMES = new Set(["deploy"]);
 const LINT_NAMES = new Set(["lint", "check"]);
+const DEV_NAMES = new Set(["dev", "dev:start", "start", "serve"]);
 
 /**
  * Map build system targets to profile commands using priority rules:
@@ -150,6 +151,7 @@ const LINT_NAMES = new Set(["lint", "check"]);
  * - build → commands.build
  * - deploy → commands.deploy
  * - lint/check → commands.lint
+ * - dev/dev:start/start/serve → commands.dev
  */
 export function mapTargetsToCommands(targets: string[], prefix: string): ProjectCommand[] {
   const commands: ProjectCommand[] = [];
@@ -189,6 +191,12 @@ export function mapTargetsToCommands(targets: string[], prefix: string): Project
   const lintTarget = targets.find((t) => LINT_NAMES.has(t));
   if (lintTarget) {
     commands.push({ name: "lint", command: `${prefix} ${lintTarget}` });
+  }
+
+  // Dev
+  const devTarget = targets.find((t) => DEV_NAMES.has(t));
+  if (devTarget) {
+    commands.push({ name: "dev", command: `${prefix} ${devTarget}`, description: "dev environment startup" });
   }
 
   return commands;
