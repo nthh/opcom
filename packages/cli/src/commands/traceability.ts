@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from "node:fs";
 import { join, basename, relative, resolve } from "node:path";
-import { scanTickets, parseFrontmatter, EventStore } from "@opcom/core";
+import { scanTickets, parseFrontmatter, EventStore, detectProject, emptyStack, SessionManager, buildScaffoldEnrichmentPrompt } from "@opcom/core";
+import type { ContextPacket } from "@opcom/types";
 
 // --- Shared helpers ---
 
@@ -32,6 +33,55 @@ function extractSections(specPath: string): SpecSection[] {
     }
   }
   return sections;
+}
+
+interface ScaffoldableSection {
+  anchor: string;
+  title: string;
+  content: string;
+  linkRef: string;
+}
+
+function extractSectionContent(fileContent: string, anchor: string): string {
+  const pattern = new RegExp(`^##\\s+.+?\\s*\\{#${anchor}\\}\\s*$`, "m");
+  const match = fileContent.match(pattern);
+  if (!match || match.index === undefined) return "";
+
+  const sectionStart = match.index + match[0].length;
+  const nextHeading = fileContent.slice(sectionStart).search(/^##\s+/m);
+  const sectionEnd = nextHeading === -1 ? fileContent.length : sectionStart + nextHeading;
+
+  return fileContent.slice(sectionStart, sectionEnd).trim();
+}
+
+function findScaffoldableSections(specPath: string, root: string): ScaffoldableSection[] {
+  const fileContent = readFileSync(specPath, "utf-8");
+  const sections = extractSections(specPath);
+  const specName = basename(specPath, ".md");
+  const relPath = relative(root, specPath);
+  const existingLinks = existingTicketLinks(root);
+  const ticketsDir = getTicketsDir(root);
+
+  const result: ScaffoldableSection[] = [];
+  for (const section of sections) {
+    const alreadyLinked = [...existingLinks].some(l =>
+      l.includes(section.anchor) && l.includes(specName)
+    );
+    if (alreadyLinked) continue;
+
+    const ticketDir = join(ticketsDir, section.anchor);
+    if (existsSync(ticketDir)) continue;
+
+    const content = extractSectionContent(fileContent, section.anchor);
+    result.push({
+      anchor: section.anchor,
+      title: section.title,
+      content,
+      linkRef: `${relPath}#${section.anchor}`,
+    });
+  }
+
+  return result;
 }
 
 function findProjectRoot(): string {
@@ -74,8 +124,12 @@ function existingTicketLinks(root: string): Set<string> {
 
 // --- scaffold ---
 
-export async function runScaffold(specPath?: string, opts: { dryRun?: boolean; all?: boolean } = {}): Promise<void> {
+export async function runScaffold(specPath?: string, opts: { dryRun?: boolean; all?: boolean; full?: boolean } = {}): Promise<void> {
   const root = findProjectRoot();
+
+  if (opts.full) {
+    return scaffoldFull(specPath, root, opts);
+  }
 
   if (opts.all) {
     const specDir = getSpecDir(root);
@@ -98,8 +152,8 @@ export async function runScaffold(specPath?: string, opts: { dryRun?: boolean; a
   }
 
   if (!specPath) {
-    console.error("  Usage: opcom scaffold <spec-file> [--dry-run]");
-    console.error("         opcom scaffold --all [--dry-run]");
+    console.error("  Usage: opcom scaffold <spec-file> [--dry-run] [--full]");
+    console.error("         opcom scaffold --all [--dry-run] [--full]");
     process.exit(1);
     return;
   }
@@ -114,6 +168,188 @@ export async function runScaffold(specPath?: string, opts: { dryRun?: boolean; a
   console.log("");
   const created = scaffoldSpec(resolved, root, opts.dryRun ?? false);
   console.log(`\n  ${opts.dryRun ? "Would create" : "Created"} ${created} ticket(s).\n`);
+}
+
+async function scaffoldFull(
+  specPath: string | undefined,
+  root: string,
+  opts: { dryRun?: boolean; all?: boolean },
+): Promise<void> {
+  // Collect spec files
+  let specFiles: string[];
+  if (opts.all) {
+    const specDir = getSpecDir(root);
+    if (!existsSync(specDir)) {
+      console.log("\n  No docs/spec/ directory found.\n");
+      return;
+    }
+    specFiles = readdirSync(specDir).filter(f => f.endsWith(".md")).map(f => join(specDir, f));
+    if (specFiles.length === 0) {
+      console.log("\n  No spec files found.\n");
+      return;
+    }
+  } else if (specPath) {
+    const resolved = resolve(specPath);
+    if (!existsSync(resolved)) {
+      console.error(`  Spec file not found: ${specPath}`);
+      process.exit(1);
+      return;
+    }
+    specFiles = [resolved];
+  } else {
+    console.error("  Usage: opcom scaffold <spec-file> --full [--dry-run]");
+    console.error("         opcom scaffold --all --full [--dry-run]");
+    process.exit(1);
+    return;
+  }
+
+  // Collect scaffoldable sections across all spec files
+  const allSections: ScaffoldableSection[] = [];
+  for (const sf of specFiles) {
+    const sections = findScaffoldableSections(sf, root);
+    const specName = basename(sf, ".md");
+    if (sections.length === 0) {
+      console.log(`  ${specName}: all sections already have tickets`);
+    }
+    allSections.push(...sections);
+  }
+
+  if (allSections.length === 0) {
+    console.log("\n  No new sections to scaffold.\n");
+    return;
+  }
+
+  // Dry-run: show what would be created with enrichment
+  if (opts.dryRun) {
+    console.log(`\n  --full --dry-run: ${allSections.length} ticket(s) would be created with rich Context Packets:\n`);
+    for (const section of allSections) {
+      console.log(`  would create ${section.anchor} — "${section.title}" (agent-enriched)`);
+    }
+    console.log(`\n  Would create ${allSections.length} enriched ticket(s) total.\n`);
+    return;
+  }
+
+  // Detect project info for context
+  let detection;
+  try {
+    detection = await detectProject(root);
+  } catch {
+    // Detection failure is non-fatal — proceed with empty stack
+  }
+
+  const stack = detection?.stack ?? emptyStack();
+  const ticketsDir = getTicketsDir(root);
+  const existingTickets = await scanTickets(root);
+
+  // Read TEMPLATE.md for format reference
+  let templateContent = "";
+  const templatePath = join(root, ".tickets", "TEMPLATE.md");
+  if (existsSync(templatePath)) {
+    templateContent = readFileSync(templatePath, "utf-8");
+  }
+
+  // Build prompt sections with spec-relative paths
+  const promptSections = allSections.map(s => ({
+    anchor: s.anchor,
+    title: s.title,
+    content: s.content,
+  }));
+
+  // Determine the spec relative path (use first file for single-spec, generic for --all)
+  const specRelPath = specFiles.length === 1
+    ? relative(root, specFiles[0])
+    : "docs/spec/<spec-file>.md";
+
+  const systemPrompt = buildScaffoldEnrichmentPrompt(
+    promptSections,
+    allSections.map(s => s.linkRef),
+    ticketsDir,
+    templateContent,
+    existingTickets,
+    {
+      languages: stack.languages.map(l => l.name + (l.version ? ` ${l.version}` : "")).join(", ") || undefined,
+      frameworks: stack.frameworks.map(f => f.name).join(", ") || undefined,
+      testing: detection?.testing.map(t => t.framework).join(", ") || undefined,
+      services: detection?.services.map(s => s.name).join(", ") || undefined,
+    },
+  );
+
+  // Build minimal context packet for agent session
+  const contextPacket: ContextPacket = {
+    project: {
+      name: detection?.name ?? basename(root),
+      path: root,
+      stack,
+      testing: detection?.testing ?? [],
+      linting: detection?.linting ?? [],
+      services: detection?.services ?? [],
+    },
+    git: {
+      branch: detection?.git?.branch ?? "main",
+      remote: detection?.git?.remote ?? null,
+      clean: detection?.git?.clean ?? true,
+    },
+  };
+
+  console.log(`\n  Scaffolding ${allSections.length} ticket(s) with agent enrichment...\n`);
+
+  // Start agent session
+  const sessionManager = new SessionManager();
+  await sessionManager.init();
+
+  const session = await sessionManager.startSession(
+    detection?.name ?? basename(root),
+    "claude-code",
+    {
+      projectPath: root,
+      contextPacket,
+      systemPrompt,
+      allowedTools: ["Bash", "Write", "Read"],
+    },
+  );
+
+  console.log(`  Session: ${session.id}`);
+  console.log(`  Agent generating enriched tickets...\n`);
+
+  // Stream output
+  const sub = sessionManager.subscribeToSession(session.id);
+  if (sub) {
+    for await (const event of sub) {
+      switch (event.type) {
+        case "message_delta":
+          if (event.data?.text) {
+            process.stdout.write(event.data.text);
+          }
+          break;
+        case "tool_start":
+          console.log(`\n  > ${event.data?.toolName}${event.data?.toolInput ? ` ${event.data.toolInput.slice(0, 80)}` : ""}`);
+          break;
+        case "tool_end":
+          if (event.data?.toolOutput) {
+            const output = event.data.toolOutput.slice(0, 200);
+            console.log(`    ${output}`);
+          }
+          break;
+        case "agent_end":
+          console.log(`\n  Agent finished: ${event.data?.reason ?? "completed"}`);
+          break;
+        case "error":
+          console.error(`\n  Error: ${event.data?.reason}`);
+          break;
+      }
+    }
+  }
+
+  // Count actually created tickets
+  let created = 0;
+  for (const section of allSections) {
+    const ticketDir = join(ticketsDir, section.anchor);
+    if (existsSync(join(ticketDir, "README.md"))) {
+      created++;
+    }
+  }
+
+  console.log(`\n  Created ${created} enriched ticket(s).\n`);
 }
 
 function scaffoldSpec(specPath: string, root: string, dryRun: boolean): number {

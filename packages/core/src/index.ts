@@ -83,7 +83,8 @@ export { createAdapter, ClaudeCodeAdapter, OpenCodeAdapter } from "./agents/adap
 export { SessionManager } from "./agents/session-manager.js";
 export { EventStore } from "./agents/event-store.js";
 export type { ToolUsageStat, SessionStat, DailyActivity, PlanEventRecord } from "./agents/event-store.js";
-export { buildProjectProfile, buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt } from "./agents/context-builder.js";
+export { buildProjectProfile, buildContextPacket, contextPacketToMarkdown, buildTicketCreationPrompt, buildTicketChatPrompt, buildScaffoldEnrichmentPrompt } from "./agents/context-builder.js";
+export type { ScaffoldEnrichmentSection } from "./agents/context-builder.js";
 export { MessageRouter } from "./agents/message-router.js";
 
 // Phase 2: Jira Adapter
