@@ -254,6 +254,22 @@ describe("contextPacketToMarkdown with commands and constraints", () => {
     expect(md).toContain("`test`: `npx vitest run`");
   });
 
+  it("renders dev command in agent guide output", async () => {
+    const project = makeProject({
+      profile: {
+        commands: [
+          { name: "dev", command: "npm run dev", description: "dev environment startup" },
+          { name: "test", command: "npx vitest run" },
+        ],
+      },
+    });
+    const packet = await buildContextPacket(project);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("## Commands");
+    expect(md).toContain("`dev`: `npm run dev` — dev environment startup");
+  });
+
   it("renders agent constraints section", async () => {
     const project = makeProject({
       profile: {
