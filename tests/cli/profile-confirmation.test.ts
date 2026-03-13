@@ -36,6 +36,20 @@ describe("formatProfilePrompt", () => {
     expect(plain).toContain("[s] skip profile");
   });
 
+  it("formats dev command in profile prompt", async () => {
+    const { formatProfilePrompt } = await import("../../packages/cli/src/ui/format.js");
+    const result = formatProfilePrompt({
+      commands: [
+        { name: "dev", command: "npm run dev", description: "dev environment startup" },
+        { name: "test", command: "npm test" },
+      ],
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain("dev");
+    expect(result).toContain("npm run dev");
+    expect(result).toContain("dev environment startup");
+  });
+
   it("formats field mappings in profile prompt", async () => {
     const { formatProfilePrompt } = await import("../../packages/cli/src/ui/format.js");
     const result = formatProfilePrompt({

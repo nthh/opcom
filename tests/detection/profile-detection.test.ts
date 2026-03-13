@@ -162,6 +162,45 @@ describe("mapTargetsToCommands", () => {
 
     expect(commands.find((c) => c.name === "lint")!.command).toBe("make check");
   });
+
+  it("maps dev target to dev command", () => {
+    const targets = ["test", "build", "dev"];
+    const commands = mapTargetsToCommands(targets, "make");
+
+    const dev = commands.find((c) => c.name === "dev");
+    expect(dev).toBeDefined();
+    expect(dev!.command).toBe("make dev");
+    expect(dev!.description).toBe("dev environment startup");
+  });
+
+  it("maps start target to dev command", () => {
+    const targets = ["test", "start"];
+    const commands = mapTargetsToCommands(targets, "npm run");
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run start");
+  });
+
+  it("maps serve target to dev command", () => {
+    const targets = ["serve", "build"];
+    const commands = mapTargetsToCommands(targets, "just");
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("just serve");
+  });
+
+  it("maps dev:start target to dev command", () => {
+    const targets = ["test", "build", "dev:start"];
+    const commands = mapTargetsToCommands(targets, "npm run");
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run dev:start");
+  });
+
+  it("uses first matching dev target from targets list", () => {
+    const targets = ["start", "serve", "dev"];
+    const commands = mapTargetsToCommands(targets, "npm run");
+
+    // find() returns the first match from the targets array
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run start");
+  });
 });
 
 // ===================================================================
@@ -219,6 +258,81 @@ build:
     const { commands } = await detectProfileCommands(tmpDir);
     expect(commands.find((c) => c.name === "test")!.command).toBe("just test");
     expect(commands.find((c) => c.name === "build")!.command).toBe("just build");
+  });
+
+  it("detects dev target from Makefile", async () => {
+    await writeFile(join(tmpDir, "Makefile"), `
+dev:
+\tdocker compose up
+
+build:
+\tgo build ./...
+`);
+
+    const { commands } = await detectProfileCommands(tmpDir);
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("make dev");
+    expect(commands.find((c) => c.name === "build")!.command).toBe("make build");
+  });
+
+  it("detects dev script from package.json", async () => {
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "vite", test: "vitest run", build: "tsc" } }),
+    );
+
+    const { commands } = await detectProfileCommands(tmpDir);
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run dev");
+  });
+
+  it("detects start script from package.json", async () => {
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { start: "node server.js", test: "jest" } }),
+    );
+
+    const { commands } = await detectProfileCommands(tmpDir);
+
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run start");
+  });
+
+  it("detects serve recipe from justfile", async () => {
+    await writeFile(join(tmpDir, "justfile"), "serve:\n  python -m http.server\n\nbuild:\n  make build\n");
+
+    const { commands } = await detectProfileCommands(tmpDir);
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("just serve");
+  });
+
+  it("detects dev task from taskfile.yml", async () => {
+    await writeFile(
+      join(tmpDir, "taskfile.yml"),
+      "version: '3'\ntasks:\n  dev:\n    cmds:\n      - docker compose up\n  build:\n    cmds:\n      - go build\n",
+    );
+
+    const { commands } = await detectProfileCommands(tmpDir);
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("task dev");
+  });
+
+  it("prefers Makefile dev over package.json dev", async () => {
+    await writeFile(join(tmpDir, "Makefile"), "dev:\n\tdocker compose up\n");
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { dev: "vite" } }),
+    );
+
+    const { commands } = await detectProfileCommands(tmpDir);
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("make dev");
+  });
+
+  it("detects dev:start from package.json scripts", async () => {
+    await writeFile(
+      join(tmpDir, "package.json"),
+      JSON.stringify({ scripts: { "dev:start": "concurrently 'tsc -w' 'vite'", build: "tsc" } }),
+    );
+
+    const { commands } = await detectProfileCommands(tmpDir);
+    expect(commands.find((c) => c.name === "dev")!.command).toBe("npm run dev:start");
   });
 
   it("returns empty for project with no build system", async () => {
