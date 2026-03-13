@@ -47,6 +47,16 @@ import { runWorkspaceHealth, runWorkspaceDrift, runWorkspacePatterns } from "./c
 const args = process.argv.slice(2);
 const command = args[0]?.startsWith("--") ? undefined : args[0];
 
+if (args.includes("--version") || args.includes("-V")) {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { resolve, dirname } = await import("node:path");
+  const cliDir = dirname(fileURLToPath(import.meta.url));
+  const rootPkg = JSON.parse(readFileSync(resolve(cliDir, "../../..", "package.json"), "utf-8")) as { version: string };
+  console.log(`opcom ${rootPkg.version}`);
+  process.exit(0);
+}
+
 async function main(): Promise<void> {
   switch (command) {
     case "init": {
