@@ -121,6 +121,8 @@ export interface ContextPacket {
   agentConfig?: string;
   memory?: string;
   summary?: string;
+  /** For swarm subtasks: the specific subtask description this agent should focus on. */
+  swarmSubtask?: string;
 }
 
 /** Context pulled from the project's knowledge graph. */

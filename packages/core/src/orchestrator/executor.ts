@@ -2412,7 +2412,14 @@ export class Executor {
     }
 
     const tickets = await scanTickets(project.path);
-    const workItem = tickets.find((t) => t.id === this.ticketLookupId(step));
+    let workItem = tickets.find((t) => t.id === this.ticketLookupId(step));
+
+    // For swarm subtasks, fall back to parent ticket if subtask isn't a real ticket file
+    // (swarm subtasks are virtual — extracted from ## Tasks checkboxes)
+    if (!workItem && step.swarm) {
+      const parentId = baseTicketId(step.ticketId);
+      workItem = tickets.find((t) => t.id === parentId);
+    }
 
     // Sync verification mode from work item (may have been added after plan creation)
     if (workItem?.verification && !step.verificationMode) {
@@ -2424,6 +2431,14 @@ export class Executor {
     const roleDef = await loadRole(roleId);
 
     const contextPacket = await buildContextPacket(project, workItem, roleDef);
+
+    // For swarm subtasks, inject the specific subtask the agent should work on.
+    // The parent ticket has all the checkboxes — highlight the one for this step.
+    if (step.swarm && step.ticketId.includes("/")) {
+      const subtaskSlug = step.ticketId.split("/").pop()!;
+      // Convert slug back to readable description
+      contextPacket.swarmSubtask = subtaskSlug.replace(/-/g, " ");
+    }
 
     // Create worktree if enabled — agent runs in isolation
     // Skip creation if rebaseConflict is set (worktree already exists from the original step)

@@ -263,10 +263,20 @@ export function contextPacketToMarkdown(
   lines.push(`Clean: ${packet.git.clean}`);
   lines.push("");
 
+  // Swarm subtask focus — tell the agent which specific subtask to work on
+  const swarmSubtask = packet.swarmSubtask;
+  if (swarmSubtask) {
+    lines.push(`## YOUR TASK (swarm subtask)`);
+    lines.push(`You are working on ONE specific subtask from the parent ticket below.`);
+    lines.push(`**Your subtask:** ${swarmSubtask}`);
+    lines.push(`Focus ONLY on this subtask. Other agents handle the other subtasks.`);
+    lines.push("");
+  }
+
   // Work item
   if (packet.workItem) {
     const { ticket } = packet.workItem;
-    lines.push(`## Task: ${ticket.title}`);
+    lines.push(`## ${swarmSubtask ? "Parent Ticket" : "Task"}: ${ticket.title}`);
     lines.push(`ID: ${ticket.id}`);
     lines.push(`Type: ${ticket.type} | Priority: P${ticket.priority} | Status: ${ticket.status}`);
     if (ticket.deps.length > 0) {
