@@ -1,7 +1,7 @@
 ---
 id: monitor-command
 title: "opcom monitor: live CLI dashboard for plan execution"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
