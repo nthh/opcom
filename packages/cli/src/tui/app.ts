@@ -150,7 +150,7 @@ import {
   toggleSetting as settingsToggle,
   type SettingsViewState,
 } from "./views/settings-view.js";
-import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES, listSkills, baseTicketId } from "@opcom/core";
+import { loadGlobalConfig, saveGlobalConfig, defaultSettings, loadRole, BUILTIN_ROLES, listSkills, baseTicketId, savePlan } from "@opcom/core";
 import {
   renderSkillsBrowser,
   createSkillsBrowserState,
@@ -2100,6 +2100,7 @@ export class TuiApp {
           state.plan.config.maxConcurrentAgents = Math.min(32, state.plan.config.maxConcurrentAgents + 1);
           state.summary.config = state.plan.config;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          savePlan(state.plan).catch(() => {});
         }
         return;
 
@@ -2108,6 +2109,7 @@ export class TuiApp {
           state.plan.config.maxConcurrentAgents = Math.max(1, state.plan.config.maxConcurrentAgents - 1);
           state.summary.config = state.plan.config;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          savePlan(state.plan).catch(() => {});
         }
         return;
 
@@ -2116,6 +2118,7 @@ export class TuiApp {
           state.plan.config.verification.runTests = !state.plan.config.verification.runTests;
           state.summary.config = state.plan.config;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          savePlan(state.plan).catch(() => {});
         }
         return;
 
@@ -2124,6 +2127,7 @@ export class TuiApp {
           state.plan.config.verification.runOracle = !state.plan.config.verification.runOracle;
           state.summary.config = state.plan.config;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          savePlan(state.plan).catch(() => {});
         }
         return;
 
@@ -2132,6 +2136,7 @@ export class TuiApp {
           state.plan.config.worktree = !state.plan.config.worktree;
           state.summary.config = state.plan.config;
           rebuildPlanOverviewLines(state, state.wrapWidth || 80);
+          savePlan(state.plan).catch(() => {});
         }
         return;
     }

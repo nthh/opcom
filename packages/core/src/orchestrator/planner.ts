@@ -850,32 +850,58 @@ export function computeStages(steps: PlanStep[], maxStageSize = 6): PlanStage[] 
   // Topological sort tracks with priority as tiebreaker
   const orderedTracks = topoSortTracks(trackMap, trackDeps);
 
-  // Batch tracks into stages respecting maxStageSize and inter-track deps
+  // Batch tracks into stages respecting inter-track deps.
+  // Independent tracks (no inter-track deps) always share the same stage —
+  // maxStageSize only prevents merging when there ARE dependencies between
+  // the candidate track and tracks already in the current stage.
   const stages: PlanStage[] = [];
   const assignedTracks = new Set<string>();
+  const trackToStageIdx = new Map<string, number>();
 
   for (const trackName of orderedTracks) {
     const trackSteps = trackMap.get(trackName)!;
+    const deps = trackDeps.get(trackName) ?? new Set<string>();
+    const hasInterTrackDeps = deps.size > 0;
 
-    // Check if this track can fit in the current (last) stage
-    const lastStage = stages.length > 0 ? stages[stages.length - 1] : null;
-    const canMerge = lastStage &&
-      lastStage.stepTicketIds.length + trackSteps.length <= maxStageSize &&
-      // All of this track's dep tracks must be in earlier stages (not the same stage)
-      allDepsInEarlierStages(trackName, trackDeps, assignedTracks, lastStage, stepToTrack);
-
-    if (canMerge && lastStage) {
-      lastStage.stepTicketIds.push(...trackSteps.map((s) => s.ticketId));
-      if (lastStage.name) {
-        lastStage.name += ` + ${trackName}`;
+    // Find the latest stage that contains a dep-track (must go after it)
+    let earliestStageIdx = 0;
+    if (hasInterTrackDeps) {
+      for (const dep of deps) {
+        const depStage = trackToStageIdx.get(dep);
+        if (depStage !== undefined) {
+          earliestStageIdx = Math.max(earliestStageIdx, depStage + 1);
+        }
       }
-    } else {
+    }
+
+    // Try to merge into an existing stage at or after earliestStageIdx
+    let merged = false;
+    for (let i = earliestStageIdx; i < stages.length; i++) {
+      const stage = stages[i];
+      const fitsSize = stage.stepTicketIds.length + trackSteps.length <= maxStageSize;
+      const noDepsInSameStage = allDepsInEarlierStages(trackName, trackDeps, assignedTracks, stage, stepToTrack);
+
+      // Independent tracks (no deps) always merge regardless of size
+      if ((!hasInterTrackDeps || fitsSize) && noDepsInSameStage) {
+        stage.stepTicketIds.push(...trackSteps.map((s) => s.ticketId));
+        if (stage.name) {
+          stage.name += ` + ${trackName}`;
+        }
+        trackToStageIdx.set(trackName, i);
+        merged = true;
+        break;
+      }
+    }
+
+    if (!merged) {
+      const idx = stages.length;
       stages.push({
-        index: stages.length,
+        index: idx,
         name: trackName,
         stepTicketIds: trackSteps.map((s) => s.ticketId),
         status: "pending",
       });
+      trackToStageIdx.set(trackName, idx);
     }
 
     assignedTracks.add(trackName);

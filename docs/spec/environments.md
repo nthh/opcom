@@ -284,3 +284,53 @@ ports:
       end: 1023
       reason: system
 ```
+
+## Dev Startup on Init {#dev-startup-on-init}
+
+The init pipeline can optionally start the dev environment after project configuration. This bridges the gap between "opcom knows your project" and "your dev environment is running."
+
+### Dev Command Resolution
+
+The dev startup command is resolved in order:
+
+1. `profile.commands.dev` — user-configured or detected dev command
+2. `services[]` — if services exist but no dev command, start all services via ProcessManager
+3. None — no dev environment to start (skip silently)
+
+### Interactive Mode
+
+After project detection and profile confirmation, prompt:
+
+```
+  Dev command: flc dev start --only app    ← from package.json scripts
+
+  Start dev environment now? [Y/n]:
+```
+
+If the user confirms, start the dev command via ProcessManager. The process runs in the background and its output streams to the TUI once it launches. If the user edits the dev command at the prompt, save the edited value to `profile.commands.dev`.
+
+### Agent Mode
+
+During `opcom init --auto` or non-TTY setup, the dev command is detected and printed in the command guide but **not auto-started** (agents shouldn't assume the user wants processes running):
+
+```
+  Dev command: flc dev start --only app
+  Start dev: opcom dev folia
+```
+
+An agent can then run `opcom dev <project>` if it needs the dev environment, or relay the command to the user.
+
+### Dev Command as Service
+
+When `profile.commands.dev` is set but no matching `ServiceDefinition` exists, the init pipeline creates a synthetic service:
+
+```typescript
+{
+  name: "dev",
+  command: profile.commands.dev,  // e.g. "flc dev start --only app"
+  cwd: project.path,
+  // port, healthCheck, readyPattern inferred if possible
+}
+```
+
+This lets `opcom dev <project>` work even when the dev command isn't a docker-compose service.

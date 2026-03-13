@@ -140,6 +140,9 @@ Extract named targets from build files to populate `profile.commands`:
 - `build` → `profile.commands.build`
 - `deploy` or `deploy-*` → `profile.commands.deploy`
 - `lint` or `check` → `profile.commands.lint`
+- `dev` or `dev:start` or `start` or `serve` → `profile.commands.dev` (dev environment startup)
+
+The `dev` command is special — it represents the project's primary development startup. During interactive init, the user is prompted to confirm or customize it. During agent auto-setup, it's auto-detected and printed in the command guide. See [Init Pipeline](#init-pipeline) for how it integrates with first-run.
 
 When multiple candidates exist (e.g., both `make test-smoke` and `npm run test`), prefer the top-level build system (Makefile > package.json scripts) since it typically wraps the others.
 

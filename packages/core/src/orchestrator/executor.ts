@@ -1657,11 +1657,17 @@ export class Executor {
       });
       try {
         const tickets = await scanTickets(project.path);
-        // For subtask steps (parent/subtask), look up the subtask ID
+        // For subtask steps (parent/subtask), look up the subtask ID first,
+        // then fall back to the parent ticket if the subtask isn't a real ticket
+        // (swarm subtasks are virtual — extracted from ## Tasks checkboxes)
         const oracleLookupId = step.ticketId.includes("/") && !step.teamId
           ? step.ticketId.split("/").pop()!
           : step.ticketId;
-        const workItem = tickets.find((t) => t.id === oracleLookupId);
+        let workItem = tickets.find((t) => t.id === oracleLookupId);
+        if (!workItem && step.swarm) {
+          const parentId = baseTicketId(step.ticketId);
+          workItem = tickets.find((t) => t.id === parentId);
+        }
         if (workItem) {
           const oracleInput = await collectOracleInputs(
             project.path,
