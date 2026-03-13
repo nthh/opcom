@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * Release opcom: test → bump version → bundle → commit + tag → publish → push.
+ * Release opcom: test → bump version → bundle → publish → commit + tag → push.
+ *
+ * Publish happens BEFORE git commit so a failed publish doesn't leave
+ * a dangling version bump in git history.
  *
  * Usage:
  *   npm run release            # patch bump (0.1.5 → 0.1.6)
@@ -28,16 +31,18 @@ function run(cmd, opts = {}) {
   return execSync(cmd, { cwd: root, stdio: "inherit", ...opts });
 }
 
-function runCapture(cmd) {
-  console.log(`  $ ${cmd}`);
-  if (dry) return "";
-  return execSync(cmd, { cwd: root, encoding: "utf-8" }).trim();
-}
-
 // --- Pre-checks ---
 const status = execSync("git status --porcelain", { cwd: root, encoding: "utf-8" }).trim();
 if (status && !dry) {
   console.error("\n  Working tree is dirty. Commit or stash changes first.\n");
+  process.exit(1);
+}
+
+// Check npm auth
+try {
+  execSync("npm whoami", { cwd: root, stdio: "pipe" });
+} catch {
+  console.error("\n  Not logged into npm. Run: npm login\n");
   process.exit(1);
 }
 
@@ -49,7 +54,7 @@ const current = pkg.version;
 // --- Bump version ---
 const parts = current.split(".").map(Number);
 if (bump === "major") { parts[0]++; parts[1] = 0; parts[2] = 0; }
-else if (bump === "minor") { parts[0]; parts[1]++; parts[2] = 0; }
+else if (bump === "minor") { parts[1]++; parts[2] = 0; }
 else { parts[2]++; }
 const next = parts.join(".");
 
@@ -74,15 +79,25 @@ if (!dry) {
 console.log("  [3/6] Bundling...");
 run("npm run bundle");
 
-// --- 4. Git commit + tag ---
-console.log("  [4/6] Committing...");
+// --- 4. Publish (before git commit — failed publish shouldn't leave a dangling version bump) ---
+console.log("  [4/6] Publishing to npm...");
+try {
+  run("npm publish", { cwd: resolve(root, "dist", "npm") });
+} catch (err) {
+  // Revert version bump on publish failure
+  console.error("\n  Publish failed. Reverting version bump...");
+  if (!dry) {
+    pkg.version = current;
+    writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+  }
+  process.exit(1);
+}
+
+// --- 5. Git commit + tag ---
+console.log("  [5/6] Committing...");
 run(`git add package.json`);
 run(`git commit -m "${next}"`);
 run(`git tag v${next}`);
-
-// --- 5. Publish ---
-console.log("  [5/6] Publishing to npm...");
-run("npm publish", { cwd: resolve(root, "dist", "npm") });
 
 // --- 6. Push ---
 console.log("  [6/6] Pushing...");
