@@ -370,3 +370,52 @@ Without `--full`, behavior is unchanged (minimal stubs).
 - `--dry-run` shows what would be created without writing files
 - Agent-generated tickets are marked with `generated: true` in frontmatter so users know to review them
 - The agent is given the ticket template (`TEMPLATE.md`) as a format reference
+
+## Monitor Command {#monitor-command}
+
+`opcom monitor` provides a live view of plan execution, agent activity, and errors. It reads from the plan YAML and event store (SQLite) to show what's happening right now.
+
+### Usage
+
+```
+opcom monitor                    # live dashboard of current plan
+opcom monitor --plan <id>        # specific plan
+opcom monitor --agents           # focus on agent activity
+opcom monitor --errors           # only failures and stalls
+opcom monitor --once             # print once and exit (no live refresh)
+```
+
+### Default View
+
+Refreshes every 2 seconds. Shows plan progress, active agents, recent events, and errors:
+
+```
+Plan: opcom [executing] 12/43 steps done  3 in-progress  28 ready
+
+AGENTS (3 active)
+  a08ca0f5  unified-init-pipeline/audit-all-6...   streaming  2m12s  42 events
+  b12de981  dev-command-detection/parse-dev...      streaming  1m03s  18 events
+  c44fa123  flatten-ticket-directory/update...      streaming  0m31s   8 events
+
+RECENT EVENTS (last 30s)
+  16:42:01  a08ca0f5  tool_end   Write  ✓
+  16:42:03  b12de981  tool_end   Bash   ✓
+  16:42:05  a08ca0f5  tool_end   Edit   ✓
+
+ERRORS (0)
+```
+
+### Data Sources
+
+| Data | Source | Query |
+|------|--------|-------|
+| Plan progress | Plan YAML (`~/.opcom/plans/<id>.yaml`) | Step status counts |
+| Active agents | `sessions` table | `state IN ('streaming', 'waiting')` |
+| Recent events | `events` table | Last 30s, grouped by session |
+| Errors | `plan_events` + `events` tables | `step_failed` events, `tool_success = 0` runs |
+| Stalls | `sessions` + `events` tables | Sessions with no events in last `agentTimeoutMs` |
+| Tool stats | `events` table | `type = 'tool_end'` grouped by `tool_name` |
+
+### Agent-Friendly Mode
+
+`opcom monitor --once` prints the current state and exits. Useful for agents checking on plan progress without blocking on a live view.
