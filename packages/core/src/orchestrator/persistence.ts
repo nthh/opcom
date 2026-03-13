@@ -21,7 +21,7 @@ export function defaultConfig(): OrchestratorConfig {
     },
     autoContinue: true,
     maxStageSize: 6,
-    strategy: "mixed",
+    strategy: "spread",
     stall: {
       enabled: true,
       agentTimeoutMs: 20 * 60 * 1000,  // 20 minutes
