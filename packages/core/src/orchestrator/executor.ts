@@ -1746,6 +1746,13 @@ export class Executor {
           let oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result, oracleInput.screenshots);
           let oracleResult = oracleResponse ? parseOracleResponse(oracleResponse) : null;
 
+          // Dump oracle response to file for debugging
+          const { writeFileSync } = await import("node:fs");
+          try {
+            const dumpPath = `/tmp/oracle-dump-${step.ticketId}-${Date.now()}.txt`;
+            writeFileSync(dumpPath, `=== RESPONSE (${oracleResponse?.length ?? 0} chars) ===\n${oracleResponse ?? "(null)"}\n\n=== PARSED ===\n${JSON.stringify(oracleResult, null, 2)}`);
+          } catch { /* ignore */ }
+
           // Retry once if the model produced only thinking (0 criteria parsed).
           // Extended thinking models sometimes consume the entire response budget
           // on thinking blocks without producing visible structured text.
