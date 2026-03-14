@@ -602,6 +602,23 @@ export class Executor {
             }
           }
 
+          // Recover in-progress steps whose agent is no longer running.
+          // This happens when pauseOnFailure pauses the plan while other
+          // steps are still in-progress — their agents may have finished
+          // or been lost between executor restarts.
+          if (step.status === "in-progress") {
+            const sessionAlive = step.agentSessionId
+              ? this.sessionManager.getSession(step.agentSessionId) !== undefined
+              : false;
+            if (!sessionAlive) {
+              log.info("resetting orphaned in-progress step on resume", { ticketId: step.ticketId, sessionId: step.agentSessionId });
+              this.sessionToStep.delete(step.agentSessionId!);
+              this.sessionWrites.delete(step.agentSessionId!);
+              step.status = "ready";
+              step.agentSessionId = undefined;
+            }
+          }
+
           // Recover stuck verifying steps — verification is not resumable,
           // so re-enter the worktree completion flow from the start.
           if (step.status === "verifying") {
