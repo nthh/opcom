@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -182,51 +182,276 @@ describe("init-pipeline shared helpers", () => {
     });
   });
 
+  describe("resolveDevCommand", () => {
+    it("returns profile.commands.dev when present", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [], environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+        profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+      });
+
+      expect(result).toBe("npm run dev");
+    });
+
+    it("returns undefined when no dev command in profile", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [], environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+        profile: { commands: [{ name: "build", command: "npm run build" }] },
+      });
+
+      expect(result).toBeUndefined();
+    });
+
+    it("returns undefined when no profile", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [], environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBeUndefined();
+    });
+
+    it("returns undefined when profile has empty commands", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [], environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+        profile: { commands: [] },
+      });
+
+      expect(result).toBeUndefined();
+    });
+
+    it("falls back to service named 'dev' when no profile command", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "dev", command: "npm run dev" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBe("npm run dev");
+    });
+
+    it("falls back to sole service with a command when no dev service", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "web", command: "npm start" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBe("npm start");
+    });
+
+    it("returns undefined when multiple services have commands and none named dev", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [
+          { name: "web", command: "npm start" },
+          { name: "api", command: "npm run api" },
+        ],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBeUndefined();
+    });
+
+    it("prefers profile command over service fallback", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "dev", command: "npm start" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+        profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+      });
+
+      expect(result).toBe("npm run dev");
+    });
+  });
+
+  describe("createSyntheticService", () => {
+    it("creates a service definition from dev command", async () => {
+      const { createSyntheticService } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const service = createSyntheticService("npm run dev", "/home/user/project");
+
+      expect(service.name).toBe("dev");
+      expect(service.command).toBe("npm run dev");
+      expect(service.cwd).toBe("/home/user/project");
+    });
+
+    it("preserves the full command string", async () => {
+      const { createSyntheticService } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const service = createSyntheticService("flc dev start --only app --orchestrator production", "/projects/folia");
+
+      expect(service.command).toBe("flc dev start --only app --orchestrator production");
+    });
+  });
+
   describe("devStartup", () => {
-    it("is callable and does not throw", async () => {
+    it("is a no-op when no dev command exists", async () => {
       const { emptyStack } = await import("@opcom/core");
       const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
 
-      // devStartup is a stub — should be a no-op for both modes
-      await devStartup(
-        {
-          id: "test",
-          name: "test",
-          path: "/tmp/test",
-          stack: emptyStack(),
-          git: null,
-          workSystem: null,
-          docs: {},
-          services: [],
-          environments: [],
-          testing: null,
-          linting: [],
-          subProjects: [],
-          cloudServices: [],
-          lastScannedAt: new Date().toISOString(),
-        },
-        "interactive",
-      );
+      const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+      try {
+        await devStartup(
+          {
+            id: "test", name: "test", path: "/tmp/test",
+            stack: emptyStack(), git: null, workSystem: null, docs: {},
+            services: [], environments: [], testing: null, linting: [],
+            subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+          },
+          "interactive",
+        );
 
-      await devStartup(
-        {
-          id: "test",
-          name: "test",
-          path: "/tmp/test",
-          stack: emptyStack(),
-          git: null,
-          workSystem: null,
-          docs: {},
-          services: [],
-          environments: [],
-          testing: null,
-          linting: [],
-          subProjects: [],
-          cloudServices: [],
-          lastScannedAt: new Date().toISOString(),
-        },
-        "agent",
-      );
+        // No output when no dev command
+        expect(spy).not.toHaveBeenCalled();
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("agent mode: prints dev command and opcom dev hint", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const logs: string[] = [];
+      const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+        logs.push(args.join(" "));
+      });
+
+      try {
+        await devStartup(
+          {
+            id: "my-app", name: "my-app", path: "/tmp/my-app",
+            stack: emptyStack(), git: null, workSystem: null, docs: {},
+            services: [], environments: [], testing: null, linting: [],
+            subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+            profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+          },
+          "agent",
+        );
+
+        expect(logs.some((l) => l.includes("npm run dev"))).toBe(true);
+        expect(logs.some((l) => l.includes("opcom dev my-app"))).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("interactive mode: prints dev command and prompts user", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const logs: string[] = [];
+      const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+        logs.push(args.join(" "));
+      });
+
+      try {
+        // User declines to start
+        await devStartup(
+          {
+            id: "my-app", name: "my-app", path: "/tmp/my-app",
+            stack: emptyStack(), git: null, workSystem: null, docs: {},
+            services: [], environments: [], testing: null, linting: [],
+            subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+            profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+          },
+          "interactive",
+          async () => "n",
+        );
+
+        expect(logs.some((l) => l.includes("npm run dev"))).toBe(true);
+        // Should NOT have started (user said no)
+        expect(logs.some((l) => l.includes("Dev environment started"))).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("interactive mode without ask: prints dev command but does not prompt", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const logs: string[] = [];
+      const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
+        logs.push(args.join(" "));
+      });
+
+      try {
+        await devStartup(
+          {
+            id: "my-app", name: "my-app", path: "/tmp/my-app",
+            stack: emptyStack(), git: null, workSystem: null, docs: {},
+            services: [], environments: [], testing: null, linting: [],
+            subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+            profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+          },
+          "interactive",
+        );
+
+        // Should print the dev command
+        expect(logs.some((l) => l.includes("npm run dev"))).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("is a no-op for both modes when no dev command", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      // No profile → no dev command → should not throw for either mode
+      const config = {
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [], environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      };
+
+      await devStartup(config, "interactive");
+      await devStartup(config, "agent");
     });
   });
 

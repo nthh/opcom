@@ -6,7 +6,7 @@ import {
   scanTickets,
 } from "@opcom/core";
 import type { ProjectConfig } from "@opcom/types";
-import { initPipeline, ensureWorkspace } from "./init-pipeline.js";
+import { initPipeline, ensureWorkspace, resolveDevCommand } from "./init-pipeline.js";
 
 /**
  * Non-interactive setup: detect project at given path (or cwd),
@@ -60,6 +60,12 @@ export async function runSetup(): Promise<void> {
     }
     if (setupConfig.docs?.specsDir) {
       lines.push(`  Specs: ${setupConfig.docs.specsDir}`);
+    }
+
+    // Dev command
+    const devCmd = resolveDevCommand(setupConfig);
+    if (devCmd) {
+      lines.push(`  Dev command: ${devCmd}`);
     }
 
     // Check for AGENTS.md in the project
@@ -139,6 +145,7 @@ export async function runSetup(): Promise<void> {
   lines.push("CLI commands (for seeding work before the user opens the TUI):");
   lines.push("");
 
+  lines.push("  opcom dev <project>                      Start dev environment");
   lines.push("  opcom ticket list [project]              List tickets");
   lines.push("  opcom ticket create <project> \"<desc>\"   Create a ticket");
   lines.push("  opcom ticket show <project> <id>         Show ticket details");
