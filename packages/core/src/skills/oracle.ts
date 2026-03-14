@@ -256,10 +256,7 @@ export function formatOraclePrompt(input: OracleInput): string {
   sections.push("");
   sections.push("# Instructions");
   sections.push("");
-  sections.push("IMPORTANT: Your response MUST be visible text output (not just internal thinking). Output the structured evaluation below directly.");
-  sections.push("");
-  sections.push("For each acceptance criterion, determine if it is met by the code changes.");
-  sections.push("Respond with:");
+  sections.push("You MUST respond with ONLY the structured evaluation below. Do NOT write analysis, reasoning, or discussion before the structured output. Start your response immediately with '## Criteria' — nothing else before it.");
   sections.push("");
   sections.push("## Criteria");
   sections.push("For each criterion, use this EXACT format:");
@@ -270,6 +267,8 @@ export function formatOraclePrompt(input: OracleInput): string {
   sections.push("## Concerns");
   sections.push("List any concerns about the changes (out-of-scope modifications, missing tests, code quality issues).");
   sections.push("If there are no concerns, write 'None.'");
+  sections.push("");
+  sections.push("Remember: Start your response with '## Criteria' immediately. No preamble.");
 
   return sections.join("\n");
 }
@@ -278,24 +277,24 @@ export function parseOracleResponse(response: string): OracleResult {
   const criteria: OracleResult["criteria"] = [];
   const concerns: string[] = [];
 
-  // Parse criteria section
+  // Parse criteria section — try ## Criteria header first, then fall back
+  // to scanning the entire response for Criterion/Met/Reasoning blocks.
   const criteriaSection = response.match(
     /## Criteria\s*\n([\s\S]*?)(?=\n## |\n#[^#]|$)/,
   );
-  if (criteriaSection) {
-    const blocks = criteriaSection[1].split(/(?=- \*?\*?Criterion\*?\*?:)/);
-    for (const block of blocks) {
-      const criterionMatch = block.match(/\*?\*?Criterion\*?\*?:\s*(.+)/);
-      const metMatch = block.match(/\*?\*?Met\*?\*?:\s*(YES|NO|yes|no|Yes|No)/);
-      const reasoningMatch = block.match(/\*?\*?Reasoning\*?\*?:\s*(.+)/);
+  const criteriaText = criteriaSection ? criteriaSection[1] : response;
+  const blocks = criteriaText.split(/(?=- \*?\*?Criterion\*?\*?:)/);
+  for (const block of blocks) {
+    const criterionMatch = block.match(/\*?\*?Criterion\*?\*?:\s*(.+)/);
+    const metMatch = block.match(/\*?\*?Met\*?\*?:\s*(YES|NO|yes|no|Yes|No)/);
+    const reasoningMatch = block.match(/\*?\*?Reasoning\*?\*?:\s*(.+)/);
 
-      if (criterionMatch) {
-        criteria.push({
-          criterion: criterionMatch[1].trim(),
-          met: metMatch ? metMatch[1].toUpperCase() === "YES" : false,
-          reasoning: reasoningMatch?.[1]?.trim() ?? "",
-        });
-      }
+    if (criterionMatch) {
+      criteria.push({
+        criterion: criterionMatch[1].trim(),
+        met: metMatch ? metMatch[1].toUpperCase() === "YES" : false,
+        reasoning: reasoningMatch?.[1]?.trim() ?? "",
+      });
     }
   }
 

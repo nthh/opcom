@@ -1901,6 +1901,14 @@ export class Executor {
       let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
+        // Dump ALL events before filtering to diagnose oracle failures
+        try {
+          const fs = require("node:fs");
+          fs.appendFileSync(`/tmp/oracle-events-${step.ticketId}.jsonl`,
+            JSON.stringify({ ts: Date.now(), sid: sessionId, oracleSid: oracleSessionId,
+              evType: ev.type, filtered: !oracleSessionId || sessionId !== oracleSessionId,
+              thinking: ev.data?.thinking ?? false, textLen: ev.data?.text?.length ?? 0 }) + "\n");
+        } catch { /* ignore */ }
         if (!oracleSessionId || sessionId !== oracleSessionId) return;
         if (ev.type === "message_delta" && ev.data?.text) {
           if (ev.data.thinking) {
@@ -1910,15 +1918,6 @@ export class Executor {
             hasStructuredText = true;
           }
         }
-        log.debug("oracle event", {
-          ticketId: step.ticketId,
-          evType: ev.type,
-          hasStructuredText,
-          structuredLen: structuredText.length,
-          thinkingLen: thinkingText.length,
-          messageComplete,
-          thinking: ev.data?.thinking ?? false,
-        });
         // Once a message with structured (non-thinking) text completes,
         // stop the session. If only thinking was received, keep waiting —
         // the actual text response may arrive in a follow-up message.

@@ -45,6 +45,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
     if (config.disableAllTools) {
       args.push("--tools", "");
+      args.push("--max-turns", "1");
     } else {
       if (config.allowedTools) {
         for (const tool of config.allowedTools) {
