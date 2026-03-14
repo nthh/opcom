@@ -2311,25 +2311,33 @@ export class Executor {
     // Apply strategy-based reordering (spread/swarm/mixed)
     const sorted = applyStrategy(prioritySorted, this.plan.config.strategy);
 
-    // Collect files claimed by active steps
-    const claimedFiles = new Set<string>();
-    for (const step of this.plan.steps) {
-      if (step.status === "in-progress" || step.status === "verifying") {
-        for (const f of this.getStepFiles(step)) claimedFiles.add(f);
-      }
-    }
-
-    // Filter: skip steps that overlap with claimed files or with each other
+    // Collect files claimed by active steps.
+    // In worktree mode each agent works on an isolated copy, so file overlap
+    // cannot cause conflicts — skip the overlap gate entirely.
     const toStart: PlanStep[] = [];
-    for (const step of sorted) {
-      if (toStart.length >= available) break;
-      const files = this.getStepFiles(step);
-      if (files.length > 0 && files.some((f) => claimedFiles.has(f))) {
-        log.info("holding step due to file overlap", { ticketId: step.ticketId, overlappingFiles: files.filter((f) => claimedFiles.has(f)) });
-        continue;
+    if (this.plan.config.worktree) {
+      for (const step of sorted) {
+        if (toStart.length >= available) break;
+        toStart.push(step);
       }
-      toStart.push(step);
-      for (const f of files) claimedFiles.add(f);
+    } else {
+      const claimedFiles = new Set<string>();
+      for (const step of this.plan.steps) {
+        if (step.status === "in-progress" || step.status === "verifying") {
+          for (const f of this.getStepFiles(step)) claimedFiles.add(f);
+        }
+      }
+
+      for (const step of sorted) {
+        if (toStart.length >= available) break;
+        const files = this.getStepFiles(step);
+        if (files.length > 0 && files.some((f) => claimedFiles.has(f))) {
+          log.info("holding step due to file overlap", { ticketId: step.ticketId, overlappingFiles: files.filter((f) => claimedFiles.has(f)) });
+          continue;
+        }
+        toStart.push(step);
+        for (const f of files) claimedFiles.add(f);
+      }
     }
 
     for (const step of toStart) {

@@ -7,7 +7,7 @@ import { plansDir, planPath, planContextPath } from "../config/paths.js";
 export function defaultConfig(): OrchestratorConfig {
   return {
     maxConcurrentAgents: 3,
-    autoStart: false,
+    autoStart: true,
     backend: "claude-code",
     worktree: true,
     pauseOnFailure: true,
