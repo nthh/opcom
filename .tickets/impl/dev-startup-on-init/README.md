@@ -1,7 +1,7 @@
 ---
 id: dev-startup-on-init
 title: "Dev startup on init: start dev environments during first-run setup"
-status: open
+status: closed
 type: feature
 priority: 2
 deps:
