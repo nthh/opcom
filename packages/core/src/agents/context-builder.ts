@@ -590,3 +590,112 @@ export function buildTicketChatPrompt(
 
   return lines.join("\n");
 }
+
+// --- Scaffold Enrichment ---
+
+export interface ScaffoldEnrichmentSection {
+  anchor: string;
+  title: string;
+  content: string;
+}
+
+export function buildScaffoldEnrichmentPrompt(
+  sections: ScaffoldEnrichmentSection[],
+  linkRefs: string[],
+  ticketsDir: string,
+  templateContent: string,
+  existingTickets: WorkItem[],
+  projectStack?: {
+    languages?: string;
+    frameworks?: string;
+    testing?: string;
+    services?: string;
+  },
+): string {
+  const lines: string[] = [];
+
+  lines.push("# Task: Generate enriched tickets from spec sections");
+  lines.push("");
+  lines.push("## Instructions");
+  lines.push("For each spec section below, create a ticket directory with a README.md containing a rich Context Packet.");
+  lines.push(`Write each ticket to: ${ticketsDir}/<section-anchor>/README.md`);
+  lines.push("");
+  lines.push("Each ticket README.md MUST:");
+  lines.push("1. Start with YAML frontmatter in this exact format:");
+  lines.push("```");
+  lines.push("---");
+  lines.push("id: <anchor>");
+  lines.push('title: "<spec-name>: <section-title>"');
+  lines.push("status: open");
+  lines.push("type: feature");
+  lines.push("priority: 2");
+  lines.push(`created: ${new Date().toISOString().slice(0, 10)}`);
+  lines.push("generated: true");
+  lines.push("deps: []");
+  lines.push("links:");
+  lines.push("  - <spec-relative-path>#<anchor>");
+  lines.push("---");
+  lines.push("```");
+  lines.push("");
+  lines.push("2. Include `generated: true` in the frontmatter so users know to review");
+  lines.push("3. After frontmatter, write a full Context Packet with these sections:");
+  lines.push("   - **Goal:** One sentence — the outcome, not the mechanism");
+  lines.push("   - **Non-Goals:** What is explicitly out of scope");
+  lines.push("   - **Constraints:** Invariants that must hold");
+  lines.push("   - **Repo Anchors:** 3-10 files that define truth for this change");
+  lines.push("   - **Oracle (Done When):** Testable acceptance criteria as a checklist");
+  lines.push("   - **Tasks:** Actionable implementation steps with dependency markers");
+  lines.push("");
+  lines.push("4. Derive the Goal, Tasks, and Constraints from the spec section content");
+  lines.push("5. Use `(deps: task-id)` markers for tasks that depend on each other");
+  lines.push("6. Do NOT modify any existing files — only create new ticket directories and README.md files");
+  lines.push("");
+
+  if (templateContent) {
+    lines.push("## Template Reference");
+    lines.push("Use this template as a format reference:");
+    lines.push("```markdown");
+    lines.push(templateContent);
+    lines.push("```");
+    lines.push("");
+  }
+
+  if (projectStack) {
+    lines.push("## Project Stack");
+    if (projectStack.languages) lines.push(`Languages: ${projectStack.languages}`);
+    if (projectStack.frameworks) lines.push(`Frameworks: ${projectStack.frameworks}`);
+    if (projectStack.testing) lines.push(`Testing: ${projectStack.testing}`);
+    if (projectStack.services) lines.push(`Services: ${projectStack.services}`);
+    lines.push("");
+  }
+
+  if (existingTickets.length > 0) {
+    lines.push("## Existing Tickets (for dependency awareness)");
+    for (const t of existingTickets) {
+      lines.push(`- ${t.id}: ${t.title} (${t.status}, P${t.priority})`);
+    }
+    lines.push("");
+    lines.push("If a new ticket depends on any existing ticket, add their IDs to the `deps` list.");
+    lines.push("");
+  }
+
+  lines.push(`## Spec Sections to Scaffold (${sections.length} total)`);
+  lines.push("");
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    const linkRef = linkRefs[i] ?? `docs/spec/<file>.md#${section.anchor}`;
+    lines.push(`### ${section.title} {#${section.anchor}}`);
+    lines.push(`Link: ${linkRef}`);
+    lines.push("");
+    if (section.content) {
+      lines.push(section.content);
+    } else {
+      lines.push("(No detailed content in spec section — infer from the title and project context)");
+    }
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}

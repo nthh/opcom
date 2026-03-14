@@ -385,8 +385,9 @@ async function main(): Promise<void> {
     case "scaffold": {
       const scaffoldAll = args.includes("--all");
       const scaffoldDryRun = args.includes("--dry-run");
+      const scaffoldFull = args.includes("--full");
       const scaffoldSpec = args.filter(a => !a.startsWith("--"))[1];
-      return runScaffold(scaffoldSpec, { dryRun: scaffoldDryRun, all: scaffoldAll });
+      return runScaffold(scaffoldSpec, { dryRun: scaffoldDryRun, all: scaffoldAll, full: scaffoldFull });
     }
 
     case "audit": {
