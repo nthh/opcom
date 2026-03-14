@@ -1898,7 +1898,6 @@ export class Executor {
     const responseText = await new Promise<string>(async (resolve, reject) => {
       let messageComplete = false;
       let hasStructuredText = false;
-      let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
         // Dump ALL events before filtering to diagnose oracle failures
@@ -1927,26 +1926,10 @@ export class Executor {
           this.sessionManager.stopSession(oracleSessionId).catch(() => {});
           resolve(structuredText);
         }
-        // After a thinking-only message completes, start a grace period.
-        // Claude Code with extended thinking sends thinking first, then text
-        // in a follow-up message. If the follow-up never arrives, try to
-        // extract criteria from thinking text as a fallback.
-        if (ev.type === "message_end" && !messageComplete && !hasStructuredText && thinkingText.length > 0 && !graceTimer) {
-          graceTimer = setTimeout(() => {
-            if (!messageComplete) {
-              messageComplete = true;
-              log.warn("oracle grace timeout: resolving with thinking-only text", {
-                ticketId: step.ticketId, thinkingLen: thinkingText.length,
-              });
-              cleanup();
-              if (oracleSessionId) {
-                this.sessionManager.stopSession(oracleSessionId).catch(() => {});
-              }
-              // Try thinking text — it may contain the structured criteria
-              resolve(thinkingText);
-            }
-          }, 30_000);
-        }
+        // After a thinking-only message completes, don't resolve yet —
+        // the text response arrives in a follow-up message. With --max-turns 1
+        // and --tools "", the process will exit on its own after producing the
+        // text. The onStopped handler and 180s timeout serve as fallbacks.
       };
 
       const onStopped = (stopped: import("@opcom/types").AgentSession) => {
@@ -1979,7 +1962,6 @@ export class Executor {
 
       cleanup = () => {
         clearTimeout(timer);
-        if (graceTimer) clearTimeout(graceTimer);
         this.sessionManager.off("agent_event", onEvent);
         this.sessionManager.off("session_stopped", onStopped);
       };
