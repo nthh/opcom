@@ -26,9 +26,9 @@ describe("runHealthCheck — TCP", () => {
   });
 
   it("reports healthy when port is listening", async () => {
-    const port = 19876;
     server = createServer();
-    await new Promise<void>((resolve) => server.listen(port, resolve));
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as import("node:net").AddressInfo).port;
 
     const config: HealthCheckConfig = {
       strategy: "tcp",
@@ -44,6 +44,12 @@ describe("runHealthCheck — TCP", () => {
   });
 
   it("reports unhealthy when port is not listening", async () => {
+    // Bind and immediately close to get a port that is definitely free
+    const tmp = createServer();
+    await new Promise<void>((resolve) => tmp.listen(0, resolve));
+    const freePort = (tmp.address() as import("node:net").AddressInfo).port;
+    tmp.close();
+
     const config: HealthCheckConfig = {
       strategy: "tcp",
       intervalMs: 1000,
@@ -52,7 +58,7 @@ describe("runHealthCheck — TCP", () => {
       startupGraceMs: 0,
     };
 
-    const result = await runHealthCheck(config, 19877);
+    const result = await runHealthCheck(config, freePort);
     expect(result.healthy).toBe(false);
     expect(result.error).toBeDefined();
   });
@@ -66,12 +72,12 @@ describe("runHealthCheck — HTTP", () => {
   });
 
   it("reports healthy for 200 response", async () => {
-    const port = 19878;
     server = createHttpServer((_, res) => {
       res.writeHead(200);
       res.end("ok");
     });
-    await new Promise<void>((resolve) => server.listen(port, resolve));
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as import("node:net").AddressInfo).port;
 
     const config: HealthCheckConfig = {
       strategy: "http",
@@ -87,12 +93,12 @@ describe("runHealthCheck — HTTP", () => {
   });
 
   it("reports unhealthy for 500 response", async () => {
-    const port = 19879;
     server = createHttpServer((_, res) => {
       res.writeHead(500);
       res.end("error");
     });
-    await new Promise<void>((resolve) => server.listen(port, resolve));
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as import("node:net").AddressInfo).port;
 
     const config: HealthCheckConfig = {
       strategy: "http",
