@@ -182,6 +182,54 @@ describe("init-pipeline shared helpers", () => {
     });
   });
 
+  describe("devStartup", () => {
+    it("is callable and does not throw", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { devStartup } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      // devStartup is a stub — should be a no-op for both modes
+      await devStartup(
+        {
+          id: "test",
+          name: "test",
+          path: "/tmp/test",
+          stack: emptyStack(),
+          git: null,
+          workSystem: null,
+          docs: {},
+          services: [],
+          environments: [],
+          testing: null,
+          linting: [],
+          subProjects: [],
+          cloudServices: [],
+          lastScannedAt: new Date().toISOString(),
+        },
+        "interactive",
+      );
+
+      await devStartup(
+        {
+          id: "test",
+          name: "test",
+          path: "/tmp/test",
+          stack: emptyStack(),
+          git: null,
+          workSystem: null,
+          docs: {},
+          services: [],
+          environments: [],
+          testing: null,
+          linting: [],
+          subProjects: [],
+          cloudServices: [],
+          lastScannedAt: new Date().toISOString(),
+        },
+        "agent",
+      );
+    });
+  });
+
   describe("ensureWorkspace", () => {
     it("creates personal workspace on first run", async () => {
       const { loadGlobalConfig, loadWorkspace } = await import("@opcom/core");
@@ -404,6 +452,32 @@ describe("initPipeline", () => {
     const ws = await loadWorkspace("personal");
     expect(ws!.projectIds).toContain("first-project");
     expect(ws!.projectIds).toContain("second-project");
+  });
+
+  it("runInitFolder uses initPipeline with interactive mode", async () => {
+    const { loadProject, loadWorkspace } = await import("@opcom/core");
+    const { runInitFolder } = await import("../../packages/cli/src/commands/init.js");
+
+    const folderPath = join(tempDir, "new-folder-proj");
+
+    // Provide scripted answers: name (accept default), description, template (none)
+    const answers = ["", "A test project", ""];
+    let answerIdx = 0;
+
+    await runInitFolder({
+      folder: folderPath,
+      promptFn: async () => answers[answerIdx++] ?? "",
+    });
+
+    // Project was persisted via pipeline
+    const loaded = await loadProject("new-folder-proj");
+    expect(loaded).not.toBeNull();
+    expect(loaded!.path).toBe(folderPath);
+
+    // Workspace was created (first run via pipeline's ensureWorkspace)
+    const ws = await loadWorkspace("personal");
+    expect(ws).not.toBeNull();
+    expect(ws!.projectIds).toContain("new-folder-proj");
   });
 
   it("runAdd uses initPipeline with interactive mode", async () => {

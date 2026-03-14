@@ -225,6 +225,16 @@ export async function configureProject(
   return config;
 }
 
+/**
+ * Dev startup hook (stub).
+ * Interactive: would prompt to start dev environment.
+ * Agent: would print dev command in guide.
+ * Wired by dev-startup-on-init ticket once dev-command-detection lands.
+ */
+export async function devStartup(_config: ProjectConfig, _mode: InitMode): Promise<void> {
+  // No-op until dev-command-detection provides profile.commands.dev
+}
+
 /** Save project config + initial summary. */
 export async function persistProject(config: ProjectConfig): Promise<void> {
   await saveProject(config);
@@ -290,11 +300,13 @@ export interface InitPipelineResult {
  * 3. configureProject(result, mode) → ProjectConfig
  * 4. persistProject(config) → save to ~/.opcom/projects/
  * 5. addToWorkspace(projectId) → idempotent add to workspace
+ * 6. devStartup(config, mode) → optional dev environment hook
  */
 export async function initPipeline(options: InitPipelineOptions): Promise<InitPipelineResult> {
   const targetPath = options.path ? resolvePath(options.path) : process.cwd();
 
-  await ensureOpcomDirs();
+  // Ensure workspace exists (idempotent — no-op if already created by caller)
+  await ensureWorkspace();
 
   // Detect
   const detection = await detectProject(targetPath);
@@ -320,6 +332,9 @@ export async function initPipeline(options: InitPipelineOptions): Promise<InitPi
 
   // Add to workspace (no-op if no workspace exists yet)
   await addToWorkspace(config.id);
+
+  // Dev startup (stub — wired by dev-startup-on-init)
+  await devStartup(config, options.mode);
 
   return { config, detection };
 }

@@ -7,18 +7,13 @@ import {
   saveGlobalConfig,
   saveWorkspace,
   defaultSettings,
-  detectProject,
   loadAllTemplates,
   scaffoldFromTemplate,
 } from "@opcom/core";
 import type { WorkspaceConfig, ProjectTemplate } from "@opcom/types";
-import { formatDetectionResult } from "../ui/format.js";
 import {
   resolvePath,
   initPipeline,
-  configureProject,
-  persistProject,
-  addToWorkspace,
 } from "./init-pipeline.js";
 
 function prompt(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
@@ -64,19 +59,12 @@ export async function runInit(): Promise<void> {
       console.log(`\n  Scanning ${projectPath}...\n`);
 
       try {
-        const result = await detectProject(projectPath);
-        console.log(formatDetectionResult(result));
-        console.log("");
-
-        const confirm = (await prompt(rl, "  Add this project? [Y/n]: ")).trim().toLowerCase();
-        if (confirm === "" || confirm === "y" || confirm === "yes") {
-          const config = await configureProject(result, "interactive", { ask });
-          await persistProject(config);
-          await addToWorkspace(config.id);
-          console.log(`  Added ${config.name}\n`);
-        } else {
-          console.log("  Skipped\n");
-        }
+        const { config } = await initPipeline({
+          mode: "interactive",
+          path: pathInput,
+          ask,
+        });
+        console.log(`  Added ${config.name}\n`);
       } catch (err) {
         console.error(`  Error scanning: ${err instanceof Error ? err.message : err}\n`);
       }
@@ -116,35 +104,12 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       console.log(`  Created ${folderPath}`);
     }
 
-    // 2. Prompt for project name
+    // 2. Prompt for project name and description
     const name = (await ask(`  Project name [${folderName}]: `)).trim() || folderName;
     const id = name.toLowerCase().replace(/\s+/g, "-");
-
-    // 3. Prompt for description
     const description = (await ask("  What is this project about? ")).trim();
 
-    // 4. Run detection
-    console.log(`\n  Scanning ${folderPath}...\n`);
-    const result = await detectProject(folderPath);
-
-    const hasStack = result.stack.languages.length > 0 ||
-      result.stack.frameworks.length > 0 ||
-      result.stack.infrastructure.length > 0;
-
-    if (hasStack) {
-      console.log(formatDetectionResult(result));
-    } else {
-      console.log("  No code detected — that's fine, not every project has code.\n");
-    }
-
-    // 4b. Profile confirmation via pipeline helper
-    const configuredConfig = await configureProject(result, "interactive", {
-      ask,
-      description: description || undefined,
-      overrides: { id, name },
-    });
-
-    // 5. Template selection
+    // 3. Template selection and scaffolding (before pipeline so detection picks up scaffolded files)
     const templates = await loadAllTemplates();
     let selectedTemplate: ProjectTemplate | null = null;
 
@@ -165,7 +130,6 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       console.log("");
     }
 
-    // 6. Prompt for template variables and scaffold
     const templateVars: Record<string, string> = { name, description: description || `Project: ${name}` };
 
     if (selectedTemplate) {
@@ -211,14 +175,18 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       }
     }
 
-    // 7. Persist project config + summary
-    await ensureOpcomDirs();
-    await persistProject(configuredConfig);
+    // 4. Unified pipeline: detect, configure, persist, add to workspace
+    console.log(`\n  Scanning ${folderPath}...\n`);
 
-    // 8. Add to workspace
-    await addToWorkspace(id);
+    const { config } = await initPipeline({
+      mode: "interactive",
+      path: opts.folder,
+      ask,
+      overrides: { id, name },
+      description: description || undefined,
+    });
 
-    console.log(`\n  Project "${name}" initialized.`);
+    console.log(`\n  Project "${config.name}" initialized.`);
     console.log("  Run 'opcom status' to see your dashboard.\n");
   } finally {
     rl?.close();

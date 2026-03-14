@@ -8,15 +8,10 @@ import {
   globalConfigPath,
 } from "@opcom/core";
 import type { WorkspaceConfig } from "@opcom/types";
-import { formatDetectionResult } from "../ui/format.js";
 import {
   resolvePath,
   initPipeline,
-  configureProject,
-  persistProject,
-  addToWorkspace,
 } from "./init-pipeline.js";
-import { detectProject } from "@opcom/core";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
@@ -120,17 +115,12 @@ export async function runWelcome(): Promise<void> {
       const moreAbsPath = resolvePath(morePath);
       console.log(`\n  Scanning ${moreAbsPath}...\n`);
       try {
-        const moreResult = await detectProject(moreAbsPath);
-        console.log(formatDetectionResult(moreResult));
-        console.log("");
-
-        const moreConfirm = (await ask("  Add this project? [Y/n]: ")).trim().toLowerCase();
-        if (moreConfirm === "" || moreConfirm === "y" || moreConfirm === "yes") {
-          const moreConfig = await configureProject(moreResult, "interactive", { ask });
-          await persistProject(moreConfig);
-          await addToWorkspace(moreConfig.id);
-          console.log(`  Added ${moreConfig.name}\n`);
-        }
+        const { config: moreConfig } = await initPipeline({
+          mode: "interactive",
+          path: morePath,
+          ask,
+        });
+        console.log(`  Added ${moreConfig.name}\n`);
       } catch (err) {
         console.error(`  Error: ${err instanceof Error ? err.message : err}\n`);
       }
