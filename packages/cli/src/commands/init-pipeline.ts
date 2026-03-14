@@ -234,10 +234,14 @@ export function resolveDevCommand(config: ProjectConfig): string | undefined {
   const profileCmd = config.profile?.commands?.find((c) => c.name === "dev");
   if (profileCmd?.command) return profileCmd.command;
 
-  // 2. Fall back to services with commands (skip if none)
-  // Don't synthesize a single command from multiple services — that's what
-  // "start all services" is for. Only return a command if there's a single
-  // obvious dev service.
+  // 2. Fall back to services list — look for a service named "dev"
+  const devService = config.services.find((s) => s.name === "dev" && s.command);
+  if (devService?.command) return devService.command;
+
+  // 3. If only one service has a command, use it as the dev command
+  const servicesWithCommands = config.services.filter((s) => s.command);
+  if (servicesWithCommands.length === 1) return servicesWithCommands[0].command!;
+
   return undefined;
 }
 

@@ -241,6 +241,70 @@ describe("init-pipeline shared helpers", () => {
 
       expect(result).toBeUndefined();
     });
+
+    it("falls back to service named 'dev' when no profile command", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "dev", command: "npm run dev" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBe("npm run dev");
+    });
+
+    it("falls back to sole service with a command when no dev service", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "web", command: "npm start" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBe("npm start");
+    });
+
+    it("returns undefined when multiple services have commands and none named dev", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [
+          { name: "web", command: "npm start" },
+          { name: "api", command: "npm run api" },
+        ],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+      });
+
+      expect(result).toBeUndefined();
+    });
+
+    it("prefers profile command over service fallback", async () => {
+      const { emptyStack } = await import("@opcom/core");
+      const { resolveDevCommand } = await import("../../packages/cli/src/commands/init-pipeline.js");
+
+      const result = resolveDevCommand({
+        id: "test", name: "test", path: "/tmp/test",
+        stack: emptyStack(), git: null, workSystem: null, docs: {},
+        services: [{ name: "dev", command: "npm start" }],
+        environments: [], testing: null, linting: [],
+        subProjects: [], cloudServices: [], lastScannedAt: new Date().toISOString(),
+        profile: { commands: [{ name: "dev", command: "npm run dev" }] },
+      });
+
+      expect(result).toBe("npm run dev");
+    });
   });
 
   describe("createSyntheticService", () => {
