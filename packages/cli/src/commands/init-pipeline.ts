@@ -13,7 +13,7 @@ import {
   writeProjectSummary,
   createInitialSummaryFromDescription,
 } from "@opcom/core";
-import type { ProjectConfig, DetectionResult, WorkspaceConfig, WorkSystemType } from "@opcom/types";
+import type { ProjectConfig, DetectionResult, WorkspaceConfig, WorkSystemType, ServiceDefinition } from "@opcom/types";
 import { formatDetectionResult, formatProfilePrompt } from "../ui/format.js";
 
 export type InitMode = "interactive" | "agent";
@@ -226,13 +226,78 @@ export async function configureProject(
 }
 
 /**
- * Dev startup hook (stub).
- * Interactive: would prompt to start dev environment.
- * Agent: would print dev command in guide.
- * Wired by dev-startup-on-init ticket once dev-command-detection lands.
+ * Resolve the dev command from a project config.
+ * Priority: profile.commands.dev → first service with a command → undefined.
  */
-export async function devStartup(_config: ProjectConfig, _mode: InitMode): Promise<void> {
-  // No-op until dev-command-detection provides profile.commands.dev
+export function resolveDevCommand(config: ProjectConfig): string | undefined {
+  // 1. profile.commands.dev
+  const profileCmd = config.profile?.commands?.find((c) => c.name === "dev");
+  if (profileCmd?.command) return profileCmd.command;
+
+  // 2. Fall back to services with commands (skip if none)
+  // Don't synthesize a single command from multiple services — that's what
+  // "start all services" is for. Only return a command if there's a single
+  // obvious dev service.
+  return undefined;
+}
+
+/**
+ * Create a synthetic ServiceDefinition when a dev command exists
+ * but no matching service is defined in the project config.
+ */
+export function createSyntheticService(devCommand: string, projectPath: string): ServiceDefinition {
+  return {
+    name: "dev",
+    command: devCommand,
+    cwd: projectPath,
+  };
+}
+
+/**
+ * Dev startup hook.
+ * Interactive: prompts user to start dev environment.
+ * Agent: prints dev command in guide output.
+ */
+export async function devStartup(
+  config: ProjectConfig,
+  mode: InitMode,
+  ask?: (question: string) => Promise<string>,
+): Promise<void> {
+  const devCommand = resolveDevCommand(config);
+
+  if (!devCommand) return;
+
+  if (mode === "agent") {
+    console.log(`  Dev command: ${devCommand}`);
+    console.log(`  Start dev: opcom dev ${config.id}`);
+    console.log("");
+    return;
+  }
+
+  // Interactive mode — prompt user
+  console.log(`  ${GREEN}Dev command:${RESET} ${devCommand}`);
+  console.log("");
+
+  if (ask) {
+    const answer = (await ask("  Start dev environment now? [Y/n]: ")).trim().toLowerCase();
+    if (answer === "n" || answer === "no") {
+      return;
+    }
+
+    // Ensure there's a matching service definition
+    const hasService = config.services.some((s) => s.name === "dev" || s.command === devCommand);
+    if (!hasService) {
+      config.services.push(createSyntheticService(devCommand, config.path));
+    }
+
+    // Start the dev process
+    const { ProcessManager } = await import("@opcom/core");
+    const pm = new ProcessManager();
+    const service = config.services.find((s) => s.name === "dev" || s.command === devCommand)!;
+    await pm.startService(config, service);
+    console.log(`  ${GREEN}Dev environment started.${RESET}`);
+    console.log("");
+  }
 }
 
 /** Save project config + initial summary. */
@@ -333,8 +398,8 @@ export async function initPipeline(options: InitPipelineOptions): Promise<InitPi
   // Add to workspace (no-op if no workspace exists yet)
   await addToWorkspace(config.id);
 
-  // Dev startup (stub — wired by dev-startup-on-init)
-  await devStartup(config, options.mode);
+  // Dev startup — prompt or print dev command if detected
+  await devStartup(config, options.mode, options.ask);
 
   return { config, detection };
 }
