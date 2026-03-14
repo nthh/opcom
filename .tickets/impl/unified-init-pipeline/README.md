@@ -1,7 +1,7 @@
 ---
 id: unified-init-pipeline
 title: "Unified init pipeline: single flow with mode-driven behavior"
-status: open
+status: closed
 type: refactor
 priority: 2
 deps: [dev-command-detection]
