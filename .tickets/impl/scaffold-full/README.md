@@ -1,7 +1,7 @@
 ---
 id: scaffold-full
 title: "Agent-enriched scaffolding: --full flag for rich Context Packets"
-status: open
+status: closed
 type: feature
 priority: 3
 deps:
