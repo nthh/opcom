@@ -273,16 +273,6 @@ export class SessionManager {
 
         session.lastActivity = event.timestamp;
         this.eventStore?.insertEvent(sessionId, event);
-        // Debug: dump oracle events
-        if (session.workItemId?.startsWith("oracle:")) {
-          try {
-            const ticketId = session.workItemId.replace("oracle:", "");
-            require("node:fs").appendFileSync(`/tmp/oracle-sm-events-${ticketId}.jsonl`,
-              JSON.stringify({ ts: Date.now(), sid: sessionId, evType: event.type,
-                thinking: event.data?.thinking ?? false, textLen: event.data?.text?.length ?? 0,
-                listeners: this.listeners.get("agent_event")?.size ?? 0 }) + "\n");
-          } catch { /* ignore */ }
-        }
         this.emit("agent_event", { sessionId, event });
       }
 

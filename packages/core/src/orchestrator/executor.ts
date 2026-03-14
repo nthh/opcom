@@ -1746,13 +1746,6 @@ export class Executor {
           let oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result, oracleInput.screenshots);
           let oracleResult = oracleResponse ? parseOracleResponse(oracleResponse) : null;
 
-          // Dump oracle response to file for debugging
-          const { writeFileSync } = await import("node:fs");
-          try {
-            const dumpPath = `/tmp/oracle-dump-${step.ticketId}-${Date.now()}.txt`;
-            writeFileSync(dumpPath, `=== RESPONSE (${oracleResponse?.length ?? 0} chars) ===\n${oracleResponse ?? "(null)"}\n\n=== PARSED ===\n${JSON.stringify(oracleResult, null, 2)}`);
-          } catch { /* ignore */ }
-
           // Retry once if the model produced only thinking (0 criteria parsed).
           // Extended thinking models sometimes consume the entire response budget
           // on thinking blocks without producing visible structured text.
@@ -1900,14 +1893,6 @@ export class Executor {
       let hasStructuredText = false;
 
       const onEvent = ({ sessionId, event: ev }: { sessionId: string; event: import("@opcom/types").NormalizedEvent }) => {
-        // Dump ALL events before filtering to diagnose oracle failures
-        try {
-          const fs = require("node:fs");
-          fs.appendFileSync(`/tmp/oracle-events-${step.ticketId}.jsonl`,
-            JSON.stringify({ ts: Date.now(), sid: sessionId, oracleSid: oracleSessionId,
-              evType: ev.type, filtered: !oracleSessionId || sessionId !== oracleSessionId,
-              thinking: ev.data?.thinking ?? false, textLen: ev.data?.text?.length ?? 0 }) + "\n");
-        } catch { /* ignore */ }
         if (!oracleSessionId || sessionId !== oracleSessionId) return;
         if (ev.type === "message_delta" && ev.data?.text) {
           if (ev.data.thinking) {

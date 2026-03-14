@@ -683,16 +683,22 @@ describe("Executor oracle agent session", () => {
     await runPromise;
   });
 
-  it("oracle timeout resolves with accumulated thinking text instead of rejecting", async () => {
-    vi.useFakeTimers();
-
-    // Simulate thinking-only response with no follow-up text
+  it("thinking-only response resolves via session stop with thinking text", async () => {
+    // Simulate thinking-only response followed by process exit (no structured text)
     mockSM.onOracleStart = (session) => {
+      // Emit thinking, then message_end, then session stops (process exits)
       mockSM.simulateThinkingOnlyResponse(
         session,
         "Let me analyze... this is thinking content without structured criteria format.",
       );
-      // Never send structured text — simulates the timeout scenario
+      // Process exits — session_stopped fires
+      setTimeout(() => {
+        mockSM.emit("session_stopped", {
+          ...session,
+          state: "stopped",
+          stoppedAt: new Date().toISOString(),
+        });
+      }, 10);
     };
 
     const plan = makePlan([
@@ -702,31 +708,20 @@ describe("Executor oracle agent session", () => {
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
 
     const runPromise = executor.run();
+    await waitFor(() => plan.steps[0].status === "in-progress");
 
-    // Advance time to start the step
-    await vi.advanceTimersByTimeAsync(100);
-
-    // Complete the coding agent
-    if (plan.steps[0].agentSessionId) {
-      mockSM.simulateCompletion(plan.steps[0].agentSessionId);
-    }
-
-    // Advance past oracle grace timer (30s) × 2 attempts + buffer
-    await vi.advanceTimersByTimeAsync(200_000);
+    mockSM.simulateCompletion(plan.steps[0].agentSessionId!);
+    await waitFor(() => plan.steps[0].status === "done" || plan.steps[0].status === "failed");
 
     const step = plan.steps[0];
-    // Should have resolved with thinking text (not thrown a timeout error)
-    // The parser can't extract criteria from thinking text → 0 criteria → failed
-    if (step.verification) {
-      expect(step.verification.passed).toBe(false);
-      // Should NOT have "timed out" error — should have parsed response (even if 0 criteria)
-      const hasTimeoutError = step.verification.failureReasons.some((r) => r.includes("timed out"));
-      expect(hasTimeoutError).toBe(false);
-    }
+    expect(step.status).toBe("failed");
+    expect(step.verification!.passed).toBe(false);
+    // Should NOT have "timed out" error — resolved via session stop
+    const hasTimeoutError = step.verification!.failureReasons.some((r) => r.includes("timed out"));
+    expect(hasTimeoutError).toBe(false);
 
     executor.stop();
     await runPromise;
-    vi.useRealTimers();
   });
 
   it("reports 'could not parse structured response' after retry when oracle returns 0 criteria", async () => {
