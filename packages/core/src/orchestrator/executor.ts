@@ -1885,9 +1885,9 @@ export class Executor {
             hasStructuredText = true;
           }
         }
-        // Oracle has disableAllTools — once a message with structured (non-thinking)
-        // text completes, stop the session. If only thinking was received, keep
-        // waiting — the actual text response may arrive in a follow-up message.
+        // Once a message with structured (non-thinking) text completes,
+        // stop the session. If only thinking was received, keep waiting —
+        // the actual text response may arrive in a follow-up message.
         if (ev.type === "message_end" && !messageComplete && hasStructuredText) {
           messageComplete = true;
           cleanup();
@@ -1980,10 +1980,11 @@ export class Executor {
             model,
             permissionMode: "default",
             // When screenshots are available, enable Read tool so the oracle
-            // can view images. Otherwise, disable all tools for speed.
+            // can view images. Otherwise, omit tool flags entirely —
+            // --tools "" causes intermittent hangs with extended thinking models.
             ...(images && images.length > 0
-              ? { allowedTools: ["Read"], disableAllTools: false }
-              : { disableAllTools: true }),
+              ? { allowedTools: ["Read"] }
+              : {}),
           },
           `oracle:${step.ticketId}`,
         );

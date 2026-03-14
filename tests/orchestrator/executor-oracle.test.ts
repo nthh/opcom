@@ -364,7 +364,7 @@ describe("Executor oracle agent session", () => {
     expect(oracleCall.config.systemPrompt).toBeDefined();
     expect(oracleCall.config.systemPrompt).toContain("Acceptance Criteria");
     expect(oracleCall.config.permissionMode).toBe("default");
-    expect(oracleCall.config.disableAllTools).toBe(true);
+    expect(oracleCall.config.disableAllTools).toBeUndefined();
 
     executor.stop();
     await runPromise;
