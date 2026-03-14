@@ -6,20 +6,15 @@ import {
   ensureOpcomDirs,
   saveGlobalConfig,
   saveWorkspace,
-  saveProject,
-  loadGlobalConfig,
-  loadWorkspace,
-  detectProject,
   defaultSettings,
-  emptyStack,
-  writeProjectSummary,
-  createInitialSummaryFromDescription,
   loadAllTemplates,
   scaffoldFromTemplate,
 } from "@opcom/core";
-import type { WorkspaceConfig, ProjectConfig, ProjectTemplate } from "@opcom/types";
-import { formatDetectionResult } from "../ui/format.js";
-import { detectionToProjectConfig, confirmProfile } from "./add.js";
+import type { WorkspaceConfig, ProjectTemplate } from "@opcom/types";
+import {
+  resolvePath,
+  initPipeline,
+} from "./init-pipeline.js";
 
 function prompt(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
@@ -45,8 +40,11 @@ export async function runInit(): Promise<void> {
     };
 
     await saveGlobalConfig({ defaultWorkspace: wsId, settings: defaultSettings() });
+    await saveWorkspace(workspace);
 
     console.log("");
+
+    const ask = (q: string) => prompt(rl, q);
 
     // Loop adding projects
     let addMore = true;
@@ -57,40 +55,26 @@ export async function runInit(): Promise<void> {
         continue;
       }
 
-      const projectPath = resolve(pathInput.replace(/^~/, process.env.HOME ?? "~"));
+      const projectPath = resolvePath(pathInput);
       console.log(`\n  Scanning ${projectPath}...\n`);
 
       try {
-        const result = await detectProject(projectPath);
-        console.log(formatDetectionResult(result));
-        console.log("");
-
-        const confirm = (await prompt(rl, "  Add this project? [Y/n]: ")).trim().toLowerCase();
-        if (confirm === "" || confirm === "y" || confirm === "yes") {
-          const ask = (q: string) => prompt(rl, q);
-          const confirmedProfile = await confirmProfile(result, ask);
-          const config = detectionToProjectConfig(result);
-          if (confirmedProfile === undefined) {
-            delete config.profile;
-          }
-          await saveProject(config);
-          await writeProjectSummary(
-            config.id,
-            createInitialSummaryFromDescription(config.name),
-          );
-          workspace.projectIds.push(config.id);
-          console.log(`  Added ${config.name}\n`);
-        } else {
-          console.log("  Skipped\n");
-        }
+        const { config } = await initPipeline({
+          mode: "interactive",
+          path: pathInput,
+          ask,
+        });
+        console.log(`  Added ${config.name}\n`);
       } catch (err) {
         console.error(`  Error scanning: ${err instanceof Error ? err.message : err}\n`);
       }
     }
 
-    await saveWorkspace(workspace);
+    // Reload workspace to get all added projects
+    const { loadWorkspace: loadWs } = await import("@opcom/core");
+    const finalWorkspace = await loadWs(wsId);
 
-    console.log(`\n  Workspace "${wsName}" created with ${workspace.projectIds.length} project(s).`);
+    console.log(`\n  Workspace "${wsName}" created with ${finalWorkspace?.projectIds.length ?? 0} project(s).`);
     console.log("  Run 'opcom status' to see your dashboard.\n");
   } finally {
     rl.close();
@@ -111,41 +95,21 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
   const ask = opts.promptFn ?? ((question: string) => prompt(rl!, question));
 
   try {
-    const folderPath = resolve(opts.folder.replace(/^~/, process.env.HOME ?? "~"));
+    const folderPath = resolvePath(opts.folder);
     const folderName = basename(folderPath);
 
     // 1. Create folder if it doesn't exist
-    const folderExisted = existsSync(folderPath);
-    if (!folderExisted) {
+    if (!existsSync(folderPath)) {
       await mkdir(folderPath, { recursive: true });
       console.log(`  Created ${folderPath}`);
     }
 
-    // 2. Prompt for project name
+    // 2. Prompt for project name and description
     const name = (await ask(`  Project name [${folderName}]: `)).trim() || folderName;
     const id = name.toLowerCase().replace(/\s+/g, "-");
-
-    // 3. Prompt for description
     const description = (await ask("  What is this project about? ")).trim();
 
-    // 4. Run detection
-    console.log(`\n  Scanning ${folderPath}...\n`);
-    const result = await detectProject(folderPath);
-
-    const hasStack = result.stack.languages.length > 0 ||
-      result.stack.frameworks.length > 0 ||
-      result.stack.infrastructure.length > 0;
-
-    if (hasStack) {
-      console.log(formatDetectionResult(result));
-    } else {
-      console.log("  No code detected — that's fine, not every project has code.\n");
-    }
-
-    // 4b. Profile confirmation
-    const confirmedProfile = await confirmProfile(result, ask);
-
-    // 5. Template selection
+    // 3. Template selection and scaffolding (before pipeline so detection picks up scaffolded files)
     const templates = await loadAllTemplates();
     let selectedTemplate: ProjectTemplate | null = null;
 
@@ -166,11 +130,9 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       console.log("");
     }
 
-    // 6. Prompt for template variables and scaffold
     const templateVars: Record<string, string> = { name, description: description || `Project: ${name}` };
 
     if (selectedTemplate) {
-      // Prompt for template-specific variables
       if (selectedTemplate.variables) {
         for (const v of selectedTemplate.variables) {
           const defaultHint = v.default ? ` [${v.default}]` : "";
@@ -180,21 +142,21 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
         console.log("");
       }
 
-      const result = await scaffoldFromTemplate({
+      const scaffoldResult = await scaffoldFromTemplate({
         projectDir: folderPath,
         template: selectedTemplate,
         variables: templateVars,
       });
 
-      if (result.directoriesCreated.length > 0) {
-        for (const dir of result.directoriesCreated) {
+      if (scaffoldResult.directoriesCreated.length > 0) {
+        for (const dir of scaffoldResult.directoriesCreated) {
           console.log(`  Created ${dir}/`);
         }
       }
-      if (result.ticketCount > 0) {
-        console.log(`  ${result.ticketCount} ticket(s) created from template`);
+      if (scaffoldResult.ticketCount > 0) {
+        console.log(`  ${scaffoldResult.ticketCount} ticket(s) created from template`);
       }
-      if (result.agentsMdWritten) {
+      if (scaffoldResult.agentsMdWritten) {
         console.log("  Created AGENTS.md");
       }
     } else {
@@ -213,41 +175,18 @@ export async function runInitFolder(opts: InitFolderOptions): Promise<void> {
       }
     }
 
-    // 7. Build and save project config
-    await ensureOpcomDirs();
+    // 4. Unified pipeline: detect, configure, persist, add to workspace
+    console.log(`\n  Scanning ${folderPath}...\n`);
 
-    const config: ProjectConfig = {
-      ...detectionToProjectConfig(result, { description: description || undefined }),
-      id,
-      name,
-    };
-    if (confirmedProfile === undefined) {
-      delete config.profile;
-    }
-    await saveProject(config);
-    await writeProjectSummary(
-      config.id,
-      createInitialSummaryFromDescription(config.name, description || undefined),
-    );
+    const { config } = await initPipeline({
+      mode: "interactive",
+      path: opts.folder,
+      ask,
+      overrides: { id, name },
+      description: description || undefined,
+    });
 
-    // 8. Add to workspace
-    const global = await loadGlobalConfig();
-    let workspace = await loadWorkspace(global.defaultWorkspace);
-    if (!workspace) {
-      workspace = {
-        id: global.defaultWorkspace,
-        name: global.defaultWorkspace,
-        description: `${global.defaultWorkspace} workspace`,
-        projectIds: [],
-        createdAt: new Date().toISOString(),
-      };
-    }
-    if (!workspace.projectIds.includes(id)) {
-      workspace.projectIds.push(id);
-      await saveWorkspace(workspace);
-    }
-
-    console.log(`\n  Project "${name}" initialized.`);
+    console.log(`\n  Project "${config.name}" initialized.`);
     console.log("  Run 'opcom status' to see your dashboard.\n");
   } finally {
     rl?.close();

@@ -1,28 +1,22 @@
 import { createInterface } from "node:readline";
-import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import {
   ensureOpcomDirs,
   saveGlobalConfig,
   saveWorkspace,
-  saveProject,
-  detectProject,
   defaultSettings,
-  writeProjectSummary,
-  createInitialSummaryFromDescription,
-  opcomRoot,
   globalConfigPath,
 } from "@opcom/core";
-import type { WorkspaceConfig, ProjectConfig, WorkSystemType } from "@opcom/types";
-import { formatDetectionResult } from "../ui/format.js";
-import { detectionToProjectConfig, confirmProfile } from "./add.js";
+import type { WorkspaceConfig } from "@opcom/types";
+import {
+  resolvePath,
+  initPipeline,
+} from "./init-pipeline.js";
 
 const DIM = "\x1b[2m";
 const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 const CYAN = "\x1b[36m";
-const GREEN = "\x1b[32m";
-const YELLOW = "\x1b[33m";
 
 function prompt(rl: ReturnType<typeof createInterface>, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
@@ -60,6 +54,7 @@ export async function runWelcome(): Promise<void> {
     const choice = (await ask("  > ")).trim();
     console.log("");
 
+    // ── Create workspace + global config ──
     await ensureOpcomDirs();
 
     const wsId = "personal";
@@ -70,19 +65,20 @@ export async function runWelcome(): Promise<void> {
       projectIds: [],
       createdAt: new Date().toISOString(),
     };
+    await saveGlobalConfig({ defaultWorkspace: wsId, settings: defaultSettings() });
+    await saveWorkspace(workspace);
 
+    // ── Resolve project path ──
     let projectPath: string;
 
     if (choice === "1") {
-      // Integrate existing — ask for path
       const pathInput = (await ask("  Project path: ")).trim();
       if (!pathInput) {
         console.log("  No path given. Run 'opcom init' when you're ready.\n");
         return;
       }
-      projectPath = resolve(pathInput.replace(/^~/, process.env.HOME ?? "~"));
+      projectPath = resolvePath(pathInput);
     } else {
-      // Default: use current directory
       projectPath = process.cwd();
     }
 
@@ -91,97 +87,15 @@ export async function runWelcome(): Promise<void> {
       return;
     }
 
-    // ── Detect project ──
+    // ── First project via pipeline ──
     console.log(`  Scanning ${projectPath}...\n`);
-    const result = await detectProject(projectPath);
-    console.log(formatDetectionResult(result));
-    console.log("");
-
-    // ── Specs location ──
-    if (result.docs.specsDir) {
-      console.log(`  ${GREEN}Specs found:${RESET} ${result.docs.specsDir}`);
-    } else {
-      console.log(`  Where do you keep specs / design docs?`);
-      console.log(`    ${CYAN}[1]${RESET} docs/spec/ ${DIM}(convention, will create if needed)${RESET}`);
-      console.log(`    ${CYAN}[2]${RESET} specs/`);
-      console.log(`    ${CYAN}[3]${RESET} docs/`);
-      console.log(`    ${CYAN}[4]${RESET} Let me type a path`);
-      console.log(`    ${CYAN}[5]${RESET} No specs yet`);
-      console.log("");
-
-      const specChoice = (await ask("  > ")).trim();
-      const specMap: Record<string, string> = {
-        "1": "docs/spec",
-        "2": "specs",
-        "3": "docs",
-      };
-      if (specChoice === "4") {
-        const customPath = (await ask("  Specs path (relative to project): ")).trim();
-        if (customPath) result.docs.specsDir = customPath;
-      } else if (specMap[specChoice]) {
-        result.docs.specsDir = specMap[specChoice];
-      }
-    }
-    console.log("");
-
-    // ── Work system / tasks ──
-    const detectedSystem = result.workSystem?.type;
-    let workSystemType: WorkSystemType | undefined = detectedSystem;
-    let ticketDir: string | undefined;
-
-    if (detectedSystem) {
-      console.log(`  ${GREEN}Tasks found:${RESET} ${detectedSystem} (${result.workSystem!.ticketDir})`);
-    } else {
-      console.log(`  How do you track tasks / tickets?`);
-      console.log(`    ${CYAN}[1]${RESET} Local .tickets/ directory ${DIM}(default, built-in)${RESET}`);
-      console.log(`    ${CYAN}[2]${RESET} plan.md ${DIM}(flat markdown task list)${RESET}`);
-      console.log(`    ${CYAN}[3]${RESET} GitHub Issues`);
-      console.log(`    ${CYAN}[4]${RESET} Jira`);
-      console.log(`    ${CYAN}[5]${RESET} Linear`);
-      console.log(`    ${CYAN}[6]${RESET} None / I'll set this up later`);
-      console.log("");
-
-      const ticketChoice = (await ask("  > ")).trim();
-      const ticketMap: Record<string, WorkSystemType> = {
-        "1": "tickets-dir",
-        "2": "plan-md",
-        "3": "github-issues",
-        "4": "jira",
-        "5": "linear",
-      };
-      workSystemType = ticketMap[ticketChoice];
-
-      // For file-based systems, ask where tasks live if not obvious
-      if (workSystemType === "plan-md") {
-        const defaultPlan = "plan.md";
-        const planInput = (await ask(`  Plan file path [${defaultPlan}]: `)).trim();
-        ticketDir = planInput
-          ? (planInput.includes("/") ? planInput.slice(0, planInput.lastIndexOf("/")) : ".")
-          : ".";
-      } else if (workSystemType === "tickets-dir") {
-        ticketDir = ".tickets/impl";
-      }
-    }
-    console.log("");
-
-    // ── Profile confirmation ──
-    const confirmedProfile = await confirmProfile(result, ask);
-
-    // ── Save config ──
-    const config: ProjectConfig = detectionToProjectConfig(result);
-    if (confirmedProfile === undefined) {
-      delete config.profile;
-    }
-    if (workSystemType && !config.workSystem) {
-      config.workSystem = { type: workSystemType, ticketDir: ticketDir ?? "." };
-    }
-
-    await saveProject(config);
-    await writeProjectSummary(
-      config.id,
-      createInitialSummaryFromDescription(config.name),
-    );
-    workspace.projectIds.push(config.id);
+    const { config } = await initPipeline({
+      mode: "interactive",
+      path: projectPath,
+      ask,
+      promptSpecs: true,
+      promptWorkSystem: true,
+    });
 
     // ── Ask to add more projects ──
     let addMore = true;
@@ -198,34 +112,24 @@ export async function runWelcome(): Promise<void> {
         continue;
       }
 
-      const moreAbsPath = resolve(morePath.replace(/^~/, process.env.HOME ?? "~"));
+      const moreAbsPath = resolvePath(morePath);
       console.log(`\n  Scanning ${moreAbsPath}...\n`);
       try {
-        const moreResult = await detectProject(moreAbsPath);
-        console.log(formatDetectionResult(moreResult));
-        console.log("");
-
-        const moreConfirm = (await ask("  Add this project? [Y/n]: ")).trim().toLowerCase();
-        if (moreConfirm === "" || moreConfirm === "y" || moreConfirm === "yes") {
-          const moreProfile = await confirmProfile(moreResult, ask);
-          const moreConfig = detectionToProjectConfig(moreResult);
-          if (moreProfile === undefined) delete moreConfig.profile;
-          await saveProject(moreConfig);
-          await writeProjectSummary(
-            moreConfig.id,
-            createInitialSummaryFromDescription(moreConfig.name),
-          );
-          workspace.projectIds.push(moreConfig.id);
-          console.log(`  Added ${moreConfig.name}\n`);
-        }
+        const { config: moreConfig } = await initPipeline({
+          mode: "interactive",
+          path: morePath,
+          ask,
+        });
+        console.log(`  Added ${moreConfig.name}\n`);
       } catch (err) {
         console.error(`  Error: ${err instanceof Error ? err.message : err}\n`);
       }
     }
 
-    // ── Save workspace + global config ──
-    await saveGlobalConfig({ defaultWorkspace: wsId, settings: defaultSettings() });
-    await saveWorkspace(workspace);
+    // ── Reload workspace to get all added projects ──
+    const { loadWorkspace: loadWs } = await import("@opcom/core");
+    const finalWorkspace = await loadWs(wsId);
+    const projectCount = finalWorkspace?.projectIds.length ?? 0;
 
     // ── Explain how opcom works ──
     console.log("");
@@ -251,7 +155,7 @@ export async function runWelcome(): Promise<void> {
     console.log(`  Press ${BOLD}Enter${RESET} on an agent to see its live event log and send prompts.`);
     console.log(`  Press ${BOLD}?${RESET} for full keybinding help at any time.`);
     console.log("");
-    console.log(`  ${workspace.projectIds.length} project(s) configured. Launching dashboard...`);
+    console.log(`  ${projectCount} project(s) configured. Launching dashboard...`);
     console.log("");
   } finally {
     rl.close();

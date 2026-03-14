@@ -224,52 +224,69 @@ Project initialization has multiple entry points (welcome, init, add, auto-setup
 
 ### Pipeline Steps
 
+The `initPipeline(options)` function runs these steps sequentially. Entry points call it with mode-specific options and handle post-pipeline behavior (launching TUI, printing guide, etc.) themselves.
+
 ```
 1. resolvePath(input)              → absolute path
-2. detectProject(path)             → DetectionResult
-3. configureProject(result, mode)  → ProjectConfig
-4. saveProject(config)             → persist to ~/.opcom/projects/
-5. addToWorkspace(projectId)       → idempotent add to workspace
-6. devStartup(config, mode)        → optional: start dev environment
-7. postInit(mode)                  → mode-dependent: TUI, print guide, or return
+2. ensureWorkspace()               → idempotent workspace + global config creation
+3. detectProject(path)             → DetectionResult
+4. configureProject(result, mode)  → ProjectConfig
+5. persistProject(config)          → save config + initial summary to ~/.opcom/projects/
+6. addToWorkspace(projectId)       → idempotent add to workspace
+7. devStartup(config, mode)        → dev environment hook (stub until dev-startup-on-init)
 ```
 
 ### Modes
 
-| Mode | Entry Points | Step 3 Behavior | Step 6 Behavior | Step 7 Behavior |
-|------|-------------|-----------------|-----------------|-----------------|
-| `interactive` | `opcom` (first run), `opcom init`, `opcom add` | Prompt for specs dir, work system, profile, dev command | Prompt "Start dev environment? [Y/n]" | Launch TUI (welcome) or return (init/add) |
-| `agent` | `npx opcom` (non-TTY), `opcom init --auto` | Auto-accept all detected values | Print dev command in guide, don't auto-start | Print command guide |
+| Mode | Entry Points | Step 4 Behavior | Step 7 Behavior |
+|------|-------------|-----------------|-----------------|
+| `interactive` | `opcom` (first run), `opcom init`, `opcom add` | Prompt for specs dir, work system, profile | Stub (planned: prompt to start dev environment) |
+| `agent` | `npx opcom` (non-TTY), `opcom init --auto` | Auto-accept all detected values | Stub (planned: print dev command in guide) |
 
 ### Shared Helpers
 
-The pipeline extracts these currently-duplicated operations into shared functions:
+The pipeline extracts these previously-duplicated operations into shared functions in `packages/cli/src/commands/init-pipeline.ts`:
 
 ```typescript
-/** Expand ~, resolve relative paths, validate directory exists */
+/** Expand ~, resolve relative paths */
 function resolvePath(input: string): string;
 
-/** Idempotent: load default workspace, add projectId if not present, save */
-async function addToWorkspace(projectId: string): Promise<void>;
+/** Ensure workspace + global config exist. Creates "personal" workspace on first run.
+ *  Returns true if this was the first run. */
+async function ensureWorkspace(): Promise<boolean>;
 
-/** Interactive: prompt for specs, work system, profile, dev command.
+/** Convert a DetectionResult into a ProjectConfig */
+function detectionToProjectConfig(
+  result: DetectionResult,
+  opts?: { description?: string },
+): ProjectConfig;
+
+/** Mode-driven project configuration.
+ *  Interactive: prompt for specs dir, work system, profile.
  *  Agent: return detection defaults unchanged. */
 async function configureProject(
   detection: DetectionResult,
   mode: "interactive" | "agent",
+  options?: ConfigureProjectOptions,
 ): Promise<ProjectConfig>;
 
-/** Resolve dev command, optionally start via ProcessManager.
- *  Interactive: prompt. Agent: print guide. */
+/** Save project config + write initial project summary */
+async function persistProject(config: ProjectConfig): Promise<void>;
+
+/** Idempotent: load default workspace, add projectId if not present, save */
+async function addToWorkspace(projectId: string): Promise<void>;
+
+/** Dev environment hook (stub).
+ *  Will be wired by dev-startup-on-init once dev-command-detection lands. */
 async function devStartup(
   config: ProjectConfig,
   mode: "interactive" | "agent",
 ): Promise<void>;
 ```
 
-### Interactive Dev Command Prompt
+### Interactive Dev Command Prompt (Planned)
 
-During `configureProject()` in interactive mode, after profile confirmation:
+Once `dev-command-detection` is wired into the pipeline via `dev-startup-on-init`, `configureProject()` in interactive mode will prompt after profile confirmation:
 
 ```
   Dev command: npm run dev               ← auto-detected from package.json
@@ -287,9 +304,9 @@ If no dev command is detected, prompt:
 
 The response is saved to `profile.commands.dev`. Empty input (skip) means no dev command.
 
-### Agent Guide Output
+### Agent Guide Output (Planned)
 
-After auto-setup, the command guide includes the dev command:
+Once dev startup is wired, the agent-mode command guide will include the dev command:
 
 ```
   Project configured: folia
@@ -308,17 +325,17 @@ After auto-setup, the command guide includes the dev command:
 
 ### Entry Point Mapping
 
-After unification, each entry point becomes a thin wrapper around the pipeline:
+Each entry point is a thin wrapper that calls `initPipeline()` and handles post-pipeline behavior:
 
 | Entry Point | Behavior |
 |-------------|----------|
-| `opcom` (TTY, first run) | `pipeline(cwd, "interactive")` + loop for more projects + launch TUI |
-| `opcom` (non-TTY) | `pipeline(cwd, "agent")` + print guide |
-| `opcom init` | Loop: `pipeline(prompted_path, "interactive")` for each project |
-| `opcom init --auto [path]` | `pipeline(path, "agent")` |
-| `opcom add <path>` | `pipeline(path, "interactive")` |
-| `opcom add --auto <path>` | `pipeline(path, "agent")` |
-| `opcom init <folder>` | Create folder + scaffold + `pipeline(folder, "interactive")` |
+| `opcom` (TTY, first run) | `initPipeline(cwd, "interactive")` + loop for more projects + launch TUI |
+| `opcom` (non-TTY) | `initPipeline(cwd, "agent")` + print guide |
+| `opcom init` | Loop: `initPipeline(prompted_path, "interactive")` for each project |
+| `opcom init --auto [path]` | `initPipeline(path, "agent")` |
+| `opcom add <path>` | `initPipeline(path, "interactive")` |
+| `opcom add --auto <path>` | `initPipeline(path, "agent")` |
+| `opcom init <folder>` | Create folder + scaffold + `initPipeline(folder, "interactive")` |
 
 ## Ticket Directory Structure {#ticket-directory-structure}
 

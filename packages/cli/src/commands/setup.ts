@@ -1,22 +1,12 @@
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import {
-  ensureOpcomDirs,
-  saveGlobalConfig,
-  saveWorkspace,
-  saveProject,
-  loadGlobalConfig,
-  loadWorkspace,
-  detectProject,
-  defaultSettings,
-  writeProjectSummary,
-  createInitialSummaryFromDescription,
   globalConfigPath,
   listProjects,
   scanTickets,
 } from "@opcom/core";
-import type { WorkspaceConfig, ProjectConfig } from "@opcom/types";
-import { detectionToProjectConfig } from "./add.js";
+import type { ProjectConfig } from "@opcom/types";
+import { initPipeline, ensureWorkspace } from "./init-pipeline.js";
 
 /**
  * Non-interactive setup: detect project at given path (or cwd),
@@ -24,42 +14,8 @@ import { detectionToProjectConfig } from "./add.js";
  * Designed for agent use — no prompts, no TTY required.
  */
 export async function autoSetup(projectPath?: string): Promise<ProjectConfig> {
-  const targetPath = projectPath
-    ? resolve(projectPath.replace(/^~/, process.env.HOME ?? "~"))
-    : process.cwd();
-
-  await ensureOpcomDirs();
-
-  const result = await detectProject(targetPath);
-  const config = detectionToProjectConfig(result);
-
-  await saveProject(config);
-  await writeProjectSummary(
-    config.id,
-    createInitialSummaryFromDescription(config.name),
-  );
-
-  // Ensure workspace + global config exist
-  const isFirst = !existsSync(globalConfigPath());
-  if (isFirst) {
-    const workspace: WorkspaceConfig = {
-      id: "personal",
-      name: "personal",
-      description: "personal workspace",
-      projectIds: [config.id],
-      createdAt: new Date().toISOString(),
-    };
-    await saveGlobalConfig({ defaultWorkspace: "personal", settings: defaultSettings() });
-    await saveWorkspace(workspace);
-  } else {
-    const global = await loadGlobalConfig();
-    const workspace = await loadWorkspace(global.defaultWorkspace);
-    if (workspace && !workspace.projectIds.includes(config.id)) {
-      workspace.projectIds.push(config.id);
-      await saveWorkspace(workspace);
-    }
-  }
-
+  await ensureWorkspace();
+  const { config } = await initPipeline({ mode: "agent", path: projectPath });
   return config;
 }
 

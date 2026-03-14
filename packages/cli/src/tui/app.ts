@@ -1260,9 +1260,6 @@ export class TuiApp {
         return;
       }
 
-      case "d":
-        // Dev services handled in L2 project detail, no-op at L1
-        return;
     }
   }
 
