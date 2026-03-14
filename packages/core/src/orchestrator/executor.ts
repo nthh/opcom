@@ -2013,12 +2013,12 @@ export class Executor {
             systemPrompt: prompt,
             model,
             permissionMode: "default",
-            // When screenshots are available, enable Read tool so the oracle
-            // can view images. Otherwise, omit tool flags entirely —
-            // --tools "" causes intermittent hangs with extended thinking models.
+            // Disable all tools so the oracle produces structured text
+            // instead of trying to inspect files. When screenshots are
+            // available, enable only Read so it can view images.
             ...(images && images.length > 0
-              ? { allowedTools: ["Read"] }
-              : {}),
+              ? { allowedTools: ["Read"], disableAllTools: false }
+              : { disableAllTools: true }),
           },
           `oracle:${step.ticketId}`,
         );
