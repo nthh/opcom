@@ -133,6 +133,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     });
 
     // Parse NDJSON from stdout
+    // Track readline completion so we don't emit agent_end before
+    // all buffered NDJSON lines have been processed. Without this,
+    // the process "close" event can fire before readline drains its
+    // buffer, causing the last assistant message to be lost.
+    let rlClosed = !proc.stdout;
     if (proc.stdout) {
       const rl = createInterface({ input: proc.stdout });
       rl.on("line", (line) => {
@@ -147,6 +152,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           log.warn("NDJSON parse error", { line: line.slice(0, 200), error: String(err) });
         }
       });
+      rl.on("close", () => { rlClosed = true; });
     }
 
     // Read stderr — collect full output to avoid losing data when process exits quickly
@@ -196,7 +202,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     if (proc.stdout) proc.stdout.once("data", markOutput);
     if (proc.stderr) proc.stderr.once("data", markOutput);
 
-    // Handle process exit
+    // Handle process exit — wait for readline to drain buffered lines
+    // before emitting agent_end, so consumers see all NDJSON events.
     proc.on("close", (code) => {
       clearTimeout(stallTimer);
       if (code !== 0) {
@@ -216,17 +223,42 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           });
         }
       }
-      const r = this.processes.get(sessionId);
-      if (r) {
-        r.session.state = "stopped";
-        r.session.stoppedAt = new Date().toISOString();
+
+      const emitEnd = () => {
+        const r = this.processes.get(sessionId);
+        if (r) {
+          r.session.state = "stopped";
+          r.session.stoppedAt = new Date().toISOString();
+        }
+        this.emitEvent(sessionId, {
+          type: "agent_end",
+          sessionId,
+          timestamp: new Date().toISOString(),
+          data: { reason: code === 0 ? "completed" : `exit code ${code}` },
+        });
+      };
+
+      if (rlClosed) {
+        emitEnd();
+      } else {
+        // Readline hasn't finished draining — wait briefly for it.
+        // In practice readline closes within the same tick, but
+        // use a short poll to be safe.
+        const waitForRl = setInterval(() => {
+          if (rlClosed) {
+            clearInterval(waitForRl);
+            emitEnd();
+          }
+        }, 5);
+        // Safety: don't wait forever
+        setTimeout(() => {
+          clearInterval(waitForRl);
+          if (!rlClosed) {
+            log.warn("readline did not close in time, emitting agent_end anyway", { sessionId });
+          }
+          emitEnd();
+        }, 1000);
       }
-      this.emitEvent(sessionId, {
-        type: "agent_end",
-        sessionId,
-        timestamp: new Date().toISOString(),
-        data: { reason: code === 0 ? "completed" : `exit code ${code}` },
-      });
     });
 
     proc.on("error", (err) => {

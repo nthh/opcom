@@ -1752,6 +1752,7 @@ export class Executor {
           if (oracleResult && oracleResult.criteria.length === 0) {
             log.warn("oracle retry: first attempt returned 0 criteria", {
               ticketId: step.ticketId, responseLen: oracleResponse?.length,
+              responsePreview: oracleResponse?.slice(0, 500),
             });
             oracleResponse = await this.runOracleAgent(step, oraclePrompt, oracleModel, result, oracleInput.screenshots);
             oracleResult = oracleResponse ? parseOracleResponse(oracleResponse) : null;
@@ -1902,6 +1903,15 @@ export class Executor {
             hasStructuredText = true;
           }
         }
+        log.debug("oracle event", {
+          ticketId: step.ticketId,
+          evType: ev.type,
+          hasStructuredText,
+          structuredLen: structuredText.length,
+          thinkingLen: thinkingText.length,
+          messageComplete,
+          thinking: ev.data?.thinking ?? false,
+        });
         // Once a message with structured (non-thinking) text completes,
         // stop the session. If only thinking was received, keep waiting —
         // the actual text response may arrive in a follow-up message.
