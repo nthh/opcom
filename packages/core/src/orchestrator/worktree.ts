@@ -270,6 +270,9 @@ export class WorktreeManager {
       return { merged: false, conflict: false, error: "Worktree not tracked" };
     }
 
+    // Remove .opcom-lock from the branch if an agent accidentally committed it
+    await this.removeInternalFiles(info);
+
     const cwd = info.projectPath;
 
     // Determine target branch (default: current branch of main repo)
@@ -318,6 +321,9 @@ export class WorktreeManager {
     if (!info) {
       return { rebased: false, conflict: false, error: "Worktree not tracked" };
     }
+
+    // Remove .opcom-lock from the branch if an agent accidentally committed it
+    await this.removeInternalFiles(info);
 
     const cwd = info.worktreePath;
 
@@ -407,6 +413,31 @@ export class WorktreeManager {
         stderr: e.stderr ?? String(err),
         exitCode: e.code ?? 1,
       };
+    }
+  }
+
+  /**
+   * Remove internal files (.opcom-lock) from the worktree's git index.
+   * Agents sometimes commit these despite .gitignore; removing them before
+   * merge/rebase prevents trivial conflicts on internal files.
+   */
+  private async removeInternalFiles(info: WorktreeInfo): Promise<void> {
+    try {
+      await execFileAsync("git", ["rm", "--cached", "--ignore-unmatch", LOCK_FILE], {
+        cwd: info.worktreePath,
+      });
+      // Check if the rm created a staged change — if so, amend the last commit
+      const { stdout } = await execFileAsync("git", ["diff", "--cached", "--name-only"], {
+        cwd: info.worktreePath,
+      });
+      if (stdout.trim().length > 0) {
+        await execFileAsync("git", ["commit", "--amend", "--no-edit"], {
+          cwd: info.worktreePath,
+        });
+        log.info("removed .opcom-lock from branch", { stepId: info.stepId });
+      }
+    } catch {
+      // Best effort — non-fatal
     }
   }
 
