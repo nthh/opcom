@@ -1041,6 +1041,7 @@ export class Station {
           stepsDone: p.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
           stepsTotal: p.steps.length,
           updatedAt: p.updatedAt,
+          projectIds: p.scope.projectIds,
         }));
         this.sendToClient(ws, { type: "plans_list", plans: summaries });
         break;

@@ -14,6 +14,7 @@ import {
   getPanelItemCount as getDashboardItemCount,
   getPlanStepsInDisplayOrder,
   getNextPlanId,
+  getBestPlanForProject,
   DASHBOARD_PANEL_COUNT,
   aggregateDeployStatus,
   type DashboardState,
@@ -857,6 +858,7 @@ export class TuiApp {
         if (itemCount > 0) {
           state.selectedIndex[panel] = Math.min(state.selectedIndex[panel] + 1, itemCount - 1);
           this.adjustScroll(state.selectedIndex[panel], state.scrollOffset, panel, this.getPanelHeight(panel));
+          if (panel === 0) this.autoSwitchPlanForSelectedProject();
         }
         return;
 
@@ -865,6 +867,7 @@ export class TuiApp {
         if (itemCount > 0) {
           state.selectedIndex[panel] = Math.max(state.selectedIndex[panel] - 1, 0);
           this.adjustScroll(state.selectedIndex[panel], state.scrollOffset, panel, this.getPanelHeight(panel));
+          if (panel === 0) this.autoSwitchPlanForSelectedProject();
         }
         return;
 
@@ -935,8 +938,9 @@ export class TuiApp {
         }
         return;
 
-      case "]": { // Next plan
-        const nextId = getNextPlanId(state, 1);
+      case "]": { // Next plan (project-scoped when project is selected)
+        const selectedProject = state.projects[state.selectedIndex[0]];
+        const nextId = getNextPlanId(state, 1, selectedProject?.id);
         if (nextId) {
           this.client.switchToPlan(nextId).then(() => {
             this.syncData();
@@ -946,8 +950,9 @@ export class TuiApp {
         return;
       }
 
-      case "[": { // Previous plan
-        const prevId = getNextPlanId(state, -1);
+      case "[": { // Previous plan (project-scoped when project is selected)
+        const selectedProject = state.projects[state.selectedIndex[0]];
+        const prevId = getNextPlanId(state, -1, selectedProject?.id);
         if (prevId) {
           this.client.switchToPlan(prevId).then(() => {
             this.syncData();
@@ -1085,6 +1090,33 @@ export class TuiApp {
         this.client.send({ type: "start_agent", projectId: dw.projectId, workItemId: dw.item.id });
       }
     }
+  }
+
+  /**
+   * Auto-switch the plan panel to the best plan for the currently selected project.
+   * Called when the user navigates j/k in the projects panel.
+   */
+  private autoSwitchPlanForSelectedProject(): void {
+    const state = this.dashboardState;
+    const project = state.projects[state.selectedIndex[0]];
+    if (!project || state.allPlans.length === 0) return;
+
+    const bestId = getBestPlanForProject(state.allPlans, project.id);
+    if (!bestId) {
+      // No plan for this project — clear plan panel
+      if (state.planPanel) {
+        state.planPanel = null;
+      }
+      return;
+    }
+
+    // Already showing this plan — no switch needed
+    if (state.planPanel?.plan.id === bestId) return;
+
+    this.client.switchToPlan(bestId).then(() => {
+      this.syncData();
+      this.scheduleRender();
+    }).catch(() => {});
   }
 
   private scanFromDashboard(): void {

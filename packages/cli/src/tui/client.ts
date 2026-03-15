@@ -415,6 +415,7 @@ export class TuiClient {
         stepsDone: p.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
         stepsTotal: p.steps.length,
         updatedAt: p.updatedAt,
+        projectIds: p.scope.projectIds,
       }));
       // Find the most recent active plan (executing/paused/planning)
       const active = plans.find((p) =>

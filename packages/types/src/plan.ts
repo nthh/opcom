@@ -28,6 +28,7 @@ export interface PlanSummary {
   stepsDone: number;
   stepsTotal: number;
   updatedAt: string;
+  projectIds?: string[];
 }
 
 export interface PlanScope {

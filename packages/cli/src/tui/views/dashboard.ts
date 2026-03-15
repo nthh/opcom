@@ -722,14 +722,58 @@ export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
 }
 
 /**
+ * Filter plans that belong to a specific project.
+ * A plan belongs to a project if its scope.projectIds includes the projectId.
+ * Plans with no projectIds are considered global and match any project.
+ */
+export function getPlansForProject(plans: PlanSummary[], projectId: string): PlanSummary[] {
+  return plans.filter((p) =>
+    !p.projectIds || p.projectIds.length === 0 || p.projectIds.includes(projectId),
+  );
+}
+
+/**
+ * Pick the best plan to display for a given project.
+ * Priority: executing > paused > planning > failed > done > cancelled.
+ * Returns null if no plans match the project.
+ */
+export function getBestPlanForProject(plans: PlanSummary[], projectId: string): string | null {
+  const matching = getPlansForProject(plans, projectId);
+  if (matching.length === 0) return null;
+
+  const statusPriority: Record<string, number> = {
+    executing: 0,
+    paused: 1,
+    planning: 2,
+    failed: 3,
+    done: 4,
+    cancelled: 5,
+  };
+
+  const sorted = [...matching].sort((a, b) => {
+    const aPri = statusPriority[a.status] ?? 6;
+    const bPri = statusPriority[b.status] ?? 6;
+    if (aPri !== bPri) return aPri - bPri;
+    // Tie-break: most recently updated
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+
+  return sorted[0].id;
+}
+
+/**
  * Compute the next plan ID when cycling through plans.
  * Prioritizes non-terminal plans (executing, paused, planning) so running plans
  * are always immediately discoverable — never hidden behind cancelled/done plans.
  * When all plans are terminal, cycles through them normally.
  * @param offset +1 for next, -1 for previous
+ * @param projectId optional — when set, only cycle through plans for this project
  */
-export function getNextPlanId(state: DashboardState, offset: number): string | null {
-  const { allPlans, planPanel } = state;
+export function getNextPlanId(state: DashboardState, offset: number, projectId?: string): string | null {
+  const { planPanel } = state;
+  const allPlans = projectId
+    ? getPlansForProject(state.allPlans, projectId)
+    : state.allPlans;
   if (allPlans.length <= 1) return null;
 
   const currentId = planPanel?.plan.id;
