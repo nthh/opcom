@@ -139,6 +139,48 @@ describe("contextPacketToMarkdown", () => {
     expect(md).toContain("test-ticket");
   });
 
+  it("includes Task Description section when work item has body", async () => {
+    const project = makeProject();
+    const workItem = makeWorkItem({
+      title: "Add caching layer",
+      body: "## Goal\nImplement Redis caching.\n\n## Oracle\n- [ ] Cache hit rate > 90%",
+    });
+    const packet = await buildContextPacket(project, workItem);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).toContain("## Task Description");
+    expect(md).toContain("## Goal");
+    expect(md).toContain("Implement Redis caching");
+    expect(md).toContain("Cache hit rate > 90%");
+  });
+
+  it("omits Task Description section when work item has no body", async () => {
+    const project = makeProject();
+    const workItem = makeWorkItem({ title: "No body ticket" });
+    const packet = await buildContextPacket(project, workItem);
+    const md = contextPacketToMarkdown(packet);
+
+    expect(md).not.toContain("## Task Description");
+  });
+
+  it("renders Task Description before Specification section", async () => {
+    const project = makeProject();
+    const workItem = makeWorkItem({
+      title: "Ordered sections",
+      body: "## Goal\nSome goal here.",
+    });
+    const packet = await buildContextPacket(project, workItem);
+    // Manually add spec to verify ordering
+    packet.workItem!.spec = "# Spec Content\nSome spec details.";
+    const md = contextPacketToMarkdown(packet);
+
+    const descIdx = md.indexOf("## Task Description");
+    const specIdx = md.indexOf("## Specification");
+    expect(descIdx).toBeGreaterThan(-1);
+    expect(specIdx).toBeGreaterThan(-1);
+    expect(descIdx).toBeLessThan(specIdx);
+  });
+
   it("generates markdown without work item", async () => {
     const project = makeProject();
     const packet = await buildContextPacket(project);

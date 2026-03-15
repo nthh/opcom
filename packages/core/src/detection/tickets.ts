@@ -148,6 +148,8 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
   );
   const subtasks = (!hasParent && body) ? extractSubtasks(body) : [];
 
+  const trimmedBody = body?.trim() || undefined;
+
   if (!frontmatter) {
     return {
       id: dirName,
@@ -160,6 +162,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
       links: [],
       tags: {},
       ...(subtasks.length > 0 ? { subtasks } : {}),
+      ...(trimmedBody ? { body: trimmedBody } : {}),
     };
   }
 
@@ -176,7 +179,9 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     created: typeof frontmatter.created === "string" ? frontmatter.created : undefined,
     due: typeof frontmatter.due === "string" ? frontmatter.due : undefined,
     scheduled: typeof frontmatter.scheduled === "string" ? frontmatter.scheduled : undefined,
-    deps: Array.isArray(frontmatter.deps) ? frontmatter.deps.map(String) : [],
+    deps: Array.isArray(frontmatter.deps) ? frontmatter.deps.map(String)
+      : Array.isArray(frontmatter.depends) ? frontmatter.depends.map(String)
+      : [],
     links: Array.isArray(frontmatter.links) ? frontmatter.links.map(String) : [],
     tags: buildTags(frontmatter),
     role: typeof frontmatter.role === "string" ? frontmatter.role : undefined,
@@ -184,6 +189,7 @@ export function parseTicketFile(content: string, filePath: string, dirName: stri
     verification: parseVerificationMode(frontmatter.verification),
     outputs: Array.isArray(frontmatter.outputs) ? frontmatter.outputs.map(String) : undefined,
     ...(subtasks.length > 0 ? { subtasks } : {}),
+    ...(trimmedBody ? { body: trimmedBody } : {}),
   };
 }
 
@@ -223,7 +229,7 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
   for (const line of lines) {
     // List item
     if (line.match(/^\s+-\s+/) && currentKey) {
-      const value = line.replace(/^\s+-\s+/, "").trim();
+      const value = line.replace(/^\s+-\s+/, "").replace(/\s+#.*$/, "").trim();
       if (!currentList) currentList = [];
       currentList.push(value);
       result[currentKey] = currentList;
@@ -259,7 +265,7 @@ export function parseFrontmatter(content: string): Record<string, unknown> | nul
 /** Known frontmatter keys that are not tags. */
 const KNOWN_KEYS = new Set([
   "id", "title", "status", "type", "priority", "created", "due", "scheduled",
-  "milestone", "dir", "links", "deps", "assignee", "role", "team",
+  "milestone", "dir", "links", "deps", "depends", "assignee", "role", "team",
   "verification", "outputs",
 ]);
 

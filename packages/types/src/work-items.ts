@@ -24,6 +24,7 @@ export interface WorkItem {
   verification?: import("./plan.js").VerificationMode;
   outputs?: string[];
   subtasks?: Subtask[];
+  body?: string;
 }
 
 export interface WorkSummary {

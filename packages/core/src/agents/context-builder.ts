@@ -284,6 +284,12 @@ export function contextPacketToMarkdown(
     }
     lines.push("");
 
+    if (ticket.body) {
+      lines.push(`## Task Description`);
+      lines.push(ticket.body);
+      lines.push("");
+    }
+
     if (packet.workItem.spec) {
       lines.push(`## Specification`);
       lines.push(packet.workItem.spec);

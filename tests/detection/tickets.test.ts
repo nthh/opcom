@@ -85,6 +85,56 @@ deps: []
     expect(item!.role).toBe("devops");
   });
 
+  it("populates body with content after frontmatter", () => {
+    const content = `---
+id: with-body
+title: "Ticket With Body"
+status: open
+type: feature
+priority: 2
+deps: []
+---
+
+## Goal
+Implement the caching layer.
+
+## Tasks
+- [ ] Add Redis connection
+- [ ] Wire up cache middleware
+`;
+    const item = parseTicketFile(content, "/path/with-body/README.md", "with-body");
+    expect(item).not.toBeNull();
+    expect(item!.body).toBeDefined();
+    expect(item!.body).toContain("## Goal");
+    expect(item!.body).toContain("Implement the caching layer");
+    expect(item!.body).toContain("## Tasks");
+  });
+
+  it("body is undefined for tickets with whitespace-only body", () => {
+    const content = `---
+id: empty-body
+title: "Empty Body"
+status: open
+deps: []
+---
+
+`;
+    const item = parseTicketFile(content, "/path/empty-body/README.md", "empty-body");
+    expect(item!.body).toBeUndefined();
+  });
+
+  it("populates body for tickets without frontmatter", () => {
+    const content = `# My Ticket
+
+## Goal
+Do something useful.
+`;
+    const item = parseTicketFile(content, "/path/no-fm/README.md", "no-fm");
+    expect(item!.body).toBeDefined();
+    expect(item!.body).toContain("# My Ticket");
+    expect(item!.body).toContain("Do something useful");
+  });
+
   it("role is undefined when not specified", () => {
     const content = `---
 id: no-role
