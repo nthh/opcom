@@ -99,7 +99,7 @@ describe("TuiClient multi-plan isolation", () => {
   });
 
   describe("createPlan while executor is running", () => {
-    it("does not switch activePlan when an executor is running", async () => {
+    it("switches activePlan to new plan even when an executor is running", async () => {
       // Start with an executing plan
       const executingPlan = makePlan({
         id: "plan-executing",
@@ -118,11 +118,10 @@ describe("TuiClient multi-plan isolation", () => {
       client.projectTickets.set("proj1", [makeTicket("t1"), makeTicket("t2"), makeTicket("t3")]);
       const result = await client.createPlan("proj1");
 
-      // activePlan should still be the executing plan, not the new one
-      expect(client.activePlan!.id).toBe("plan-executing");
-      // New plan should have been created
+      // activePlan should switch to the new plan — user just created it
+      expect(client.activePlan!.id).not.toBe("plan-executing");
       expect(result).not.toBeNull();
-      expect(result!.plan.id).not.toBe("plan-executing");
+      expect(client.activePlan!.id).toBe(result!.plan.id);
     });
 
     it("switches activePlan when no executor is running", async () => {

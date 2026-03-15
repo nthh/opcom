@@ -1028,13 +1028,9 @@ export class TuiClient {
 
       await savePlan(plan);
 
-      // Only switch activePlan if no executor is currently running.
-      // If an executor is running for a different plan, switching activePlan
-      // would cause the TUI to show this new plan's "ready" steps instead of
-      // the executing plan's "in-progress" steps — confusing the user.
-      if (!this.activeExecutorPlanId) {
-        this.activePlan = plan;
-      }
+      // Always switch to the newly created plan — the user just created it,
+      // so it should be the active plan regardless of what was running before.
+      this.activePlan = plan;
 
       // Update allPlans so the plan switcher knows about the new plan
       this.allPlans.push({
@@ -1049,12 +1045,15 @@ export class TuiClient {
 
       // Notify handlers so TUI re-renders
       this.handleServerEvent({ type: "plans_list", plans: this.allPlans } as ServerEvent);
-      if (!this.activeExecutorPlanId) {
-        this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
-      }
+      this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
 
-      // Auto-start execution if configured and no executor is already running
-      if (plan.config.autoStart && !this.activeExecutorPlanId) {
+      // Auto-start execution if configured
+      if (plan.config.autoStart) {
+        // Stop existing executor if running — new plan takes priority
+        if (this.activeExecutorPlanId && this.activeExecutor) {
+          this.activeExecutorPlanId = null;
+          this.activeExecutor = null;
+        }
         await this.executePlan(plan.id);
       }
 
