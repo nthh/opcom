@@ -158,6 +158,21 @@ export function computePlan(
     });
   }
 
+  // Set integrationBranch on child steps when worktree mode is enabled.
+  // Children of a parent ticket merge through an integration branch
+  // rather than directly to main, enabling atomic feature delivery.
+  if (mergedConfig.worktree) {
+    for (const [ticketId, { ticket }] of allTickets) {
+      if (ticket.parent && parentIds.has(ticket.parent)) {
+        const stepId = stepIdMap.get(ticketId) ?? ticketId;
+        const step = steps.find((s) => s.ticketId === stepId);
+        if (step) {
+          step.integrationBranch = `work/${ticket.parent}`;
+        }
+      }
+    }
+  }
+
   // Expand team definitions into multi-step sequences
   if (teamResolutions && teamResolutions.size > 0) {
     steps = expandTeamSteps(steps, teamResolutions);
@@ -292,6 +307,7 @@ export function expandTeamSteps(
         verificationMode: ts.verification,
         teamId: team.id,
         teamStepRole: ts.role,
+        integrationBranch: step.integrationBranch,
       });
     }
 
@@ -458,6 +474,7 @@ export function expandSubtaskSteps(
         role: step.role,
         verificationMode: step.verificationMode,
         swarm: true,
+        integrationBranch: step.integrationBranch,
       });
     }
 

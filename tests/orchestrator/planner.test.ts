@@ -389,3 +389,149 @@ describe("applyQuery", () => {
     expect(result.map((t) => t.id)).toEqual(["t1"]);
   });
 });
+
+describe("computePlan integration branch detection", () => {
+  it("sets integrationBranch on child steps when worktree: true", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "feature-epic" }),
+          makeTicket({ id: "child-1", parent: "feature-epic", deps: [] }),
+          makeTicket({ id: "child-2", parent: "feature-epic", deps: ["child-1"] }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "ib-plan", undefined, { worktree: true });
+
+    // Parent should be excluded from steps
+    expect(plan.steps.find((s) => s.ticketId === "feature-epic")).toBeUndefined();
+
+    // Child steps should have integrationBranch set
+    const child1 = plan.steps.find((s) => s.ticketId === "feature-epic/child-1")!;
+    const child2 = plan.steps.find((s) => s.ticketId === "feature-epic/child-2")!;
+
+    expect(child1).toBeDefined();
+    expect(child1.integrationBranch).toBe("work/feature-epic");
+
+    expect(child2).toBeDefined();
+    expect(child2.integrationBranch).toBe("work/feature-epic");
+  });
+
+  it("does not set integrationBranch when worktree: false", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "feature-epic" }),
+          makeTicket({ id: "child-1", parent: "feature-epic" }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "no-wt-plan", undefined, { worktree: false });
+
+    const child1 = plan.steps.find((s) => s.ticketId === "feature-epic/child-1")!;
+    expect(child1).toBeDefined();
+    expect(child1.integrationBranch).toBeUndefined();
+  });
+
+  it("does not set integrationBranch on standalone tickets", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "feature-epic" }),
+          makeTicket({ id: "child-1", parent: "feature-epic" }),
+          makeTicket({ id: "standalone-ticket" }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "mixed-plan", undefined, { worktree: true });
+
+    const standalone = plan.steps.find((s) => s.ticketId === "standalone-ticket")!;
+    expect(standalone).toBeDefined();
+    expect(standalone.integrationBranch).toBeUndefined();
+  });
+
+  it("preserves DAG computation with integration branches", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "feature-epic" }),
+          makeTicket({ id: "child-1", parent: "feature-epic", deps: [] }),
+          makeTicket({ id: "child-2", parent: "feature-epic", deps: ["child-1"] }),
+          makeTicket({ id: "standalone", deps: ["child-2"] }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "dag-plan", undefined, { worktree: true });
+
+    const child1 = plan.steps.find((s) => s.ticketId === "feature-epic/child-1")!;
+    const child2 = plan.steps.find((s) => s.ticketId === "feature-epic/child-2")!;
+    const standalone = plan.steps.find((s) => s.ticketId === "standalone")!;
+
+    // DAG: child-1 ready, child-2 blocked by child-1, standalone blocked by child-2
+    expect(child1.status).toBe("ready");
+    expect(child1.blockedBy).toEqual([]);
+
+    expect(child2.status).toBe("blocked");
+    expect(child2.blockedBy).toEqual(["feature-epic/child-1"]);
+
+    expect(standalone.status).toBe("blocked");
+    expect(standalone.blockedBy).toEqual(["feature-epic/child-2"]);
+
+    // Integration branch only on children, not standalone
+    expect(child1.integrationBranch).toBe("work/feature-epic");
+    expect(child2.integrationBranch).toBe("work/feature-epic");
+    expect(standalone.integrationBranch).toBeUndefined();
+  });
+
+  it("handles multiple parent tickets independently", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "epic-a" }),
+          makeTicket({ id: "a-child-1", parent: "epic-a" }),
+          makeTicket({ id: "a-child-2", parent: "epic-a" }),
+          makeTicket({ id: "epic-b" }),
+          makeTicket({ id: "b-child-1", parent: "epic-b" }),
+        ],
+      },
+    ];
+
+    const plan = computePlan(tickets, {}, "multi-parent-plan", undefined, { worktree: true });
+
+    const ac1 = plan.steps.find((s) => s.ticketId === "epic-a/a-child-1")!;
+    const ac2 = plan.steps.find((s) => s.ticketId === "epic-a/a-child-2")!;
+    const bc1 = plan.steps.find((s) => s.ticketId === "epic-b/b-child-1")!;
+
+    expect(ac1.integrationBranch).toBe("work/epic-a");
+    expect(ac2.integrationBranch).toBe("work/epic-a");
+    expect(bc1.integrationBranch).toBe("work/epic-b");
+  });
+
+  it("uses default config (worktree: true) when no config override", () => {
+    const tickets: TicketSet[] = [
+      {
+        projectId: "proj-a",
+        tickets: [
+          makeTicket({ id: "parent" }),
+          makeTicket({ id: "child", parent: "parent" }),
+        ],
+      },
+    ];
+
+    // No config override — defaults to worktree: true
+    const plan = computePlan(tickets, {}, "default-plan");
+
+    const child = plan.steps.find((s) => s.ticketId === "parent/child")!;
+    expect(child).toBeDefined();
+    expect(child.integrationBranch).toBe("work/parent");
+  });
+});
