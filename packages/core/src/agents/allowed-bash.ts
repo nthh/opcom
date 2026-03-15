@@ -55,13 +55,15 @@ const LANG_PATTERNS: Record<string, string[]> = {
   java: ["mvn *", "gradle *", "./gradlew *"],
 };
 
-/** Testing framework → command patterns (direct invocation without npx). */
+/** Testing framework → command patterns (direct invocation without npx).
+ *  Includes cd-prefixed variants since agents often cd into subdirectories
+ *  before running tests, and Claude Code matches the full command string. */
 const TEST_FRAMEWORK_PATTERNS: Record<string, string[]> = {
-  vitest: ["vitest *", "vitest run*"],
-  jest: ["jest *", "jest --*"],
-  mocha: ["mocha *"],
-  pytest: ["pytest *", "python -m pytest*"],
-  playwright: ["playwright test*", "npx playwright*"],
+  vitest: ["vitest *", "vitest run*", "cd * && *vitest*", "cd *vitest*"],
+  jest: ["jest *", "jest --*", "cd * && *jest*"],
+  mocha: ["mocha *", "cd * && *mocha*"],
+  pytest: ["pytest *", "python -m pytest*", "cd * && *pytest*"],
+  playwright: ["playwright test*", "npx playwright*", "cd * && *playwright*"],
 };
 
 /** Linter name → command patterns. */
