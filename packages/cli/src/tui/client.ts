@@ -1053,6 +1053,11 @@ export class TuiClient {
         this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
       }
 
+      // Auto-start execution if configured and no executor is already running
+      if (plan.config.autoStart && !this.activeExecutorPlanId) {
+        await this.executePlan(plan.id);
+      }
+
       return { plan, assessments: flagged };
     } catch (err) {
       log.error("createPlan failed", { error: String(err) });

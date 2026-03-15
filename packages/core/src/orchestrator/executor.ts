@@ -2582,6 +2582,7 @@ export class Executor {
 
     await savePlan(this.plan);
     this.emit("step_started", { step, session });
+    this.emit("plan_updated", { plan: this.plan });
     this.logPlanEvent("step_started", {
       stepTicketId: step.ticketId,
       agentSessionId: session.id,
@@ -2913,7 +2914,7 @@ export class Executor {
 
       // Pause for user approval
       this.plan.status = "paused";
-      savePlan(this.plan).catch(() => {});
+      await savePlan(this.plan);
       this.emit("plan_paused", { plan: this.plan });
       this.logPlanEvent("plan_paused", { detail: { reason: "stage_gate", stageIndex: stage.index } });
       return true;

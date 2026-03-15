@@ -484,6 +484,38 @@ describe("Executor plan event logging", () => {
   });
 });
 
+describe("Executor plan_updated events", () => {
+  let mockSM: MockSessionManager;
+
+  beforeEach(() => {
+    mockSM = new MockSessionManager();
+    vi.clearAllMocks();
+  });
+
+  it("emits plan_updated when step transitions to in-progress", async () => {
+    const plan = makePlan([
+      { ticketId: "t1", projectId: "p", status: "ready", blockedBy: [] },
+    ]);
+
+    const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
+
+    const planUpdates: unknown[] = [];
+    executor.on("plan_updated", (data) => planUpdates.push(data));
+
+    const runPromise = executor.run();
+    await waitFor(() => plan.steps[0].status === "in-progress");
+
+    // plan_updated should have fired when step became in-progress
+    expect(planUpdates.length).toBeGreaterThanOrEqual(1);
+    const lastUpdate = planUpdates[planUpdates.length - 1] as { plan: Plan };
+    const step = lastUpdate.plan.steps.find((s: PlanStep) => s.ticketId === "t1");
+    expect(step?.status).toBe("in-progress");
+
+    executor.stop();
+    await runPromise;
+  });
+});
+
 describe("Executor auto-commit", () => {
   let mockSM: MockSessionManager;
 
