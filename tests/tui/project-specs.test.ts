@@ -182,45 +182,45 @@ describe("ProjectDetailState with specs", () => {
     expect(state.projectSpecs).toEqual([]);
   });
 
-  it("has 8 panel slots in selectedIndex and scrollOffset", () => {
+  it("has 9 panel slots in selectedIndex and scrollOffset", () => {
     const state = createProjectDetailState(makeProject());
-    expect(state.selectedIndex).toHaveLength(8);
-    expect(state.scrollOffset).toHaveLength(8);
+    expect(state.selectedIndex).toHaveLength(9);
+    expect(state.scrollOffset).toHaveLength(9);
   });
 });
 
 // --- PANEL_COUNT ---
 
 describe("PANEL_COUNT", () => {
-  it("is 8 (tickets, agents, specs, stack, cloud, cicd, infra, chat)", () => {
-    expect(PANEL_COUNT).toBe(8);
+  it("is 9 (tickets, agents, plans, specs, stack, cloud, cicd, infra, chat)", () => {
+    expect(PANEL_COUNT).toBe(9);
   });
 });
 
 // --- getPanelItemCount for specs ---
 
 describe("getPanelItemCount for specs panel", () => {
-  it("returns specs count for panel 2", () => {
+  it("returns specs count for panel 3", () => {
     const state = createProjectDetailState(makeProject());
     state.projectSpecs = [
       { name: "tui", sections: 9, ticketCount: 5, status: "covered" },
       { name: "orchestrator", sections: 8, ticketCount: 3, status: "partial" },
     ];
 
-    expect(getPanelItemCount(state, 2)).toBe(2);
+    expect(getPanelItemCount(state, 3)).toBe(2);
   });
 
   it("returns 0 for specs panel when no specs", () => {
     const state = createProjectDetailState(makeProject());
-    expect(getPanelItemCount(state, 2)).toBe(0);
-  });
-
-  it("returns 0 for stack panel (index 3, not navigable)", () => {
-    const state = createProjectDetailState(makeProject());
     expect(getPanelItemCount(state, 3)).toBe(0);
   });
 
-  it("returns cloud services count for panel 4", () => {
+  it("returns 0 for stack panel (index 4, not navigable)", () => {
+    const state = createProjectDetailState(makeProject());
+    expect(getPanelItemCount(state, 4)).toBe(0);
+  });
+
+  it("returns cloud services count for panel 5", () => {
     const state = createProjectDetailState(makeProject());
     state.cloudServices = [
       {
@@ -235,7 +235,7 @@ describe("getPanelItemCount for specs panel", () => {
         lastCheckedAt: new Date().toISOString(),
       },
     ];
-    expect(getPanelItemCount(state, 4)).toBe(1);
+    expect(getPanelItemCount(state, 5)).toBe(1);
   });
 });
 
@@ -247,19 +247,19 @@ describe("clampSelection for specs panel", () => {
     state.projectSpecs = [
       { name: "tui", sections: 9, ticketCount: 5, status: "covered" },
     ];
-    state.selectedIndex[2] = 5; // Out of range
+    state.selectedIndex[3] = 5; // Out of range
 
     clampSelection(state);
-    expect(state.selectedIndex[2]).toBe(0);
+    expect(state.selectedIndex[3]).toBe(0);
   });
 
   it("resets to 0 when no specs", () => {
     const state = createProjectDetailState(makeProject());
-    state.selectedIndex[2] = 2;
+    state.selectedIndex[3] = 2;
 
     clampSelection(state);
-    expect(state.selectedIndex[2]).toBe(0);
-    expect(state.scrollOffset[2]).toBe(0);
+    expect(state.selectedIndex[3]).toBe(0);
+    expect(state.scrollOffset[3]).toBe(0);
   });
 });
 
@@ -294,22 +294,22 @@ describe("L2 layout includes specs panel", () => {
     expect(specsPanel).toBeDefined();
   });
 
-  it("has 8 panels in level 2 layout", () => {
+  it("has 9 panels in level 2 layout", () => {
     const layout = getLayout(2, 120, 40);
-    expect(layout.panels).toHaveLength(8);
+    expect(layout.panels).toHaveLength(9);
     expect(layout.panels.map((p) => p.id)).toEqual([
-      "tickets", "agents", "specs", "stack", "cloud", "cicd", "infra", "chat",
+      "tickets", "agents", "plans", "specs", "stack", "cloud", "cicd", "infra", "chat",
     ]);
   });
 
-  it("specs panel is between agents and stack", () => {
+  it("specs panel is between plans and stack", () => {
     const layout = getLayout(2, 120, 40);
-    const agents = layout.panels.find((p) => p.id === "agents")!;
+    const plans = layout.panels.find((p) => p.id === "plans")!;
     const specs = layout.panels.find((p) => p.id === "specs")!;
     const stack = layout.panels.find((p) => p.id === "stack")!;
 
-    // specs starts where agents ends
-    expect(specs.y).toBe(agents.y + agents.height);
+    // specs starts where plans ends
+    expect(specs.y).toBe(plans.y + plans.height);
     // stack starts where specs ends
     expect(stack.y).toBe(specs.y + specs.height);
   });
@@ -350,7 +350,7 @@ describe("renderProjectDetail with specs", () => {
     state.projectSpecs = [
       { name: "tui", sections: 9, ticketCount: 5, status: "covered" },
     ];
-    state.focusedPanel = 2; // specs panel
+    state.focusedPanel = 3; // specs panel
 
     renderProjectDetail(buf, layout.panels, state);
     buf.flush();
@@ -365,8 +365,8 @@ describe("renderProjectDetail with specs", () => {
       { name: "tui", sections: 9, ticketCount: 5, status: "covered" },
       { name: "orchestrator", sections: 8, ticketCount: 3, status: "partial" },
     ];
-    state.focusedPanel = 2;
-    state.selectedIndex[2] = 1;
+    state.focusedPanel = 3;
+    state.selectedIndex[3] = 1;
 
     renderProjectDetail(buf, layout.panels, state);
     buf.flush();

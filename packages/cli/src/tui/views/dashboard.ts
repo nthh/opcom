@@ -165,6 +165,7 @@ export interface DashboardState {
   deployStatuses: Map<string, DashboardDeployStatus>; // projectId → deploy status
   planPanel: PlanPanelState | null; // non-null when plan is active
   allPlans: PlanSummary[]; // all plans for the switcher
+  plansByProject: Map<string, PlanSummary[]>; // projectId → plans for that project
   agentsComponent: AgentsListState; // component state for agents panel
   chatComponent: ChatState; // component state for chat panel
 }
@@ -186,6 +187,7 @@ export function createDashboardState(): DashboardState {
     searchQuery: "",
     planPanel: null,
     allPlans: [],
+    plansByProject: new Map(),
     agentsComponent: AgentsListComponent.init(),
     chatComponent: ChatComponent.init(),
   };
@@ -242,7 +244,9 @@ function renderProjectsPanel(
     const isSelected = idx === selected && focused;
 
     const deployStatus = state.deployStatuses.get(project.id) ?? null;
-    const line = formatProjectLine(project, deployStatus, contentWidth);
+    const projectPlans = state.plansByProject.get(project.id);
+    const planCount = projectPlans ? projectPlans.length : 0;
+    const line = formatProjectLine(project, deployStatus, contentWidth, planCount);
     if (isSelected) {
       buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
     } else {
@@ -255,6 +259,7 @@ export function formatProjectLine(
   project: ProjectStatusSnapshot,
   deployStatus: DashboardDeployStatus | null,
   maxWidth: number,
+  planCount?: number,
 ): string {
   const name = bold(project.name);
   const git = project.git;
@@ -279,6 +284,11 @@ export function formatProjectLine(
     ticketStr = dim(` [${ws.open}/${ws.total}]`);
   }
 
+  let planBadge = "";
+  if (planCount && planCount > 0) {
+    planBadge = ` ${color(ANSI.cyan, `\u25b8 ${planCount} plan${planCount !== 1 ? "s" : ""}`)}`;
+  }
+
   let cloudStr = "";
   if (project.cloudHealthSummary && project.cloudHealthSummary.total > 0) {
     cloudStr = ` ${formatCloudDots(project.cloudHealthSummary)}`;
@@ -296,7 +306,7 @@ export function formatProjectLine(
     envStr = ` ${formatServiceDots(es)} ${dim(`${running}/${es.services.length} svc`)}`;
   }
 
-  const line = `${name}${gitStr}${deployStr}${ticketStr}${cloudStr}${infraStr}${envStr}`;
+  const line = `${name}${gitStr}${deployStr}${ticketStr}${planBadge}${cloudStr}${infraStr}${envStr}`;
   return truncate(line, maxWidth);
 }
 
@@ -497,16 +507,17 @@ function renderPlanPanel(
     stageStr = dim(` [stage ${plan.currentStage + 1}/${plan.stages.length}${stageName}]`);
   }
 
-  // Show plan index in switcher if multiple plans exist
+  // Show plan position and project context when multiple plans exist
   const planCount = state.allPlans.length;
-  const planIdx = planCount > 1
-    ? (() => {
-        const idx = state.allPlans.findIndex((p) => p.id === plan.id);
-        return dim(` (${idx + 1}/${planCount})`);
-      })()
-    : "";
+  let planPrefix: string;
+  if (planCount > 1) {
+    const idx = state.allPlans.findIndex((p) => p.id === plan.id);
+    planPrefix = `Plan ${idx + 1}/${planCount} \u00b7 ${plan.name}`;
+  } else {
+    planPrefix = `Plan: ${plan.name}`;
+  }
 
-  const title = `Plan: ${plan.name} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${stageStr}${planStallStr}${planIdx}`;
+  const title = `${planPrefix} ${planStatusIcon} ${plan.status} ${done}/${total}${verifyStr}${stageStr}${planStallStr}`;
 
   drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
 
@@ -722,14 +733,58 @@ export function getPlanStepsInDisplayOrder(plan: Plan): PlanStep[] {
 }
 
 /**
+ * Filter plans that belong to a specific project.
+ * A plan belongs to a project if its scope.projectIds includes the projectId.
+ * Plans with no projectIds are considered global and match any project.
+ */
+export function getPlansForProject(plans: PlanSummary[], projectId: string): PlanSummary[] {
+  return plans.filter((p) =>
+    !p.projectIds || p.projectIds.length === 0 || p.projectIds.includes(projectId),
+  );
+}
+
+/**
+ * Pick the best plan to display for a given project.
+ * Priority: executing > paused > planning > failed > done > cancelled.
+ * Returns null if no plans match the project.
+ */
+export function getBestPlanForProject(plans: PlanSummary[], projectId: string): string | null {
+  const matching = getPlansForProject(plans, projectId);
+  if (matching.length === 0) return null;
+
+  const statusPriority: Record<string, number> = {
+    executing: 0,
+    paused: 1,
+    planning: 2,
+    failed: 3,
+    done: 4,
+    cancelled: 5,
+  };
+
+  const sorted = [...matching].sort((a, b) => {
+    const aPri = statusPriority[a.status] ?? 6;
+    const bPri = statusPriority[b.status] ?? 6;
+    if (aPri !== bPri) return aPri - bPri;
+    // Tie-break: most recently updated
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+
+  return sorted[0].id;
+}
+
+/**
  * Compute the next plan ID when cycling through plans.
  * Prioritizes non-terminal plans (executing, paused, planning) so running plans
  * are always immediately discoverable — never hidden behind cancelled/done plans.
  * When all plans are terminal, cycles through them normally.
  * @param offset +1 for next, -1 for previous
+ * @param projectId optional — when set, only cycle through plans for this project
  */
-export function getNextPlanId(state: DashboardState, offset: number): string | null {
-  const { allPlans, planPanel } = state;
+export function getNextPlanId(state: DashboardState, offset: number, projectId?: string): string | null {
+  const { planPanel } = state;
+  const allPlans = projectId
+    ? getPlansForProject(state.allPlans, projectId)
+    : state.allPlans;
   if (allPlans.length <= 1) return null;
 
   const currentId = planPanel?.plan.id;
@@ -756,6 +811,28 @@ export function getNextPlanId(state: DashboardState, offset: number): string | n
     ? 0
     : ((currentIdx + offset) % allPlans.length + allPlans.length) % allPlans.length;
   return allPlans[nextIdx].id;
+}
+
+/**
+ * Group plans by project ID. Plans with no projectIds are assigned to all given project IDs.
+ */
+export function computePlansByProject(plans: PlanSummary[], projectIds: string[]): Map<string, PlanSummary[]> {
+  const result = new Map<string, PlanSummary[]>();
+  for (const plan of plans) {
+    if (!plan.projectIds || plan.projectIds.length === 0) {
+      // Global plan — assign to all projects
+      for (const pid of projectIds) {
+        if (!result.has(pid)) result.set(pid, []);
+        result.get(pid)!.push(plan);
+      }
+    } else {
+      for (const pid of plan.projectIds) {
+        if (!result.has(pid)) result.set(pid, []);
+        result.get(pid)!.push(plan);
+      }
+    }
+  }
+  return result;
 }
 
 export function clampSelection(state: DashboardState): void {

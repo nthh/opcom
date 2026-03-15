@@ -415,12 +415,30 @@ export class TuiClient {
         stepsDone: p.steps.filter((s) => s.status === "done" || s.status === "skipped").length,
         stepsTotal: p.steps.length,
         updatedAt: p.updatedAt,
+        projectIds: p.scope.projectIds,
       }));
-      // Find the most recent active plan (executing/paused/planning)
+
+      // Project-scoped plan resolution: pick best plan for any project
+      // First try project-scoped: if there are projects, pick best for first project
+      const projectIds = this.projects.map((p) => p.id);
+      if (projectIds.length > 0 && this.allPlans.length > 0) {
+        // Try each project for best active plan
+        for (const pid of projectIds) {
+          const bestId = this.getBestPlanForProjectLocal(pid);
+          if (bestId) {
+            const plan = plans.find((p) => p.id === bestId);
+            if (plan) {
+              this.activePlan = plan;
+              return;
+            }
+          }
+        }
+      }
+
+      // Fallback: global resolution — find most recent active plan
       const active = plans.find((p) =>
         p.status === "executing" || p.status === "paused" || p.status === "planning",
       );
-      // Only fall back to non-terminal plans — skip cancelled/done/failed
       const fallback = plans.find((p) =>
         p.status !== "cancelled" && p.status !== "done" && p.status !== "failed",
       );
@@ -428,6 +446,25 @@ export class TuiClient {
     } catch {
       // Plans dir may not exist yet
     }
+  }
+
+  /** Pick best plan for a project from allPlans (status priority + recency). */
+  private getBestPlanForProjectLocal(projectId: string): string | null {
+    const matching = this.allPlans.filter((p) =>
+      !p.projectIds || p.projectIds.length === 0 || p.projectIds.includes(projectId),
+    );
+    if (matching.length === 0) return null;
+
+    const statusPriority: Record<string, number> = {
+      executing: 0, paused: 1, planning: 2, failed: 3, done: 4, cancelled: 5,
+    };
+    const sorted = [...matching].sort((a, b) => {
+      const aPri = statusPriority[a.status] ?? 6;
+      const bPri = statusPriority[b.status] ?? 6;
+      if (aPri !== bPri) return aPri - bPri;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
+    return sorted[0].id;
   }
 
   private handleServerEvent(event: ServerEvent): void {
@@ -931,6 +968,11 @@ export class TuiClient {
         } catch { /* ignore */ }
       }
     }
+  }
+
+  async loadPlanById(planId: string): Promise<import("@opcom/types").Plan | null> {
+    const { loadPlan } = await import("@opcom/core");
+    return loadPlan(planId);
   }
 
   cancelPlan(planId: string): void {

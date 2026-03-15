@@ -15,6 +15,7 @@ import type {
   ResourceStatus,
   EnvironmentStatus,
   ServiceInstance,
+  PlanSummary,
 } from "@opcom/types";
 import type { Panel } from "../layout.js";
 import type { SpecCoverageItem } from "../health-data.js";
@@ -53,6 +54,7 @@ export interface ProjectDetailState {
   projectConfig: ProjectConfig | null;
   tickets: WorkItem[];
   agents: AgentSession[];
+  plans: PlanSummary[];
   cloudServices: CloudService[];
   projectSpecs: SpecCoverageItem[];
   pipelines: Pipeline[];
@@ -60,7 +62,7 @@ export interface ProjectDetailState {
   infraResources: InfraResource[];
   infraCrashEvents: InfraCrashEvent[];
   environmentStatus: EnvironmentStatus | null;
-  focusedPanel: number; // 0=tickets, 1=agents, 2=specs, 3=stack, 4=cloud, 5=cicd, 6=infra, 7=chat
+  focusedPanel: number; // 0=tickets, 1=agents, 2=plans, 3=specs, 4=stack, 5=cloud, 6=cicd, 7=infra, 8=chat
   selectedIndex: number[]; // per panel
   scrollOffset: number[]; // per panel
   agentsComponent: AgentsListState; // component state for agents panel
@@ -76,6 +78,7 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     projectConfig: null,
     tickets: [],
     agents: [],
+    plans: [],
     cloudServices: [],
     projectSpecs: [],
     pipelines: [],
@@ -84,8 +87,8 @@ export function createProjectDetailState(project: ProjectStatusSnapshot): Projec
     infraCrashEvents: [],
     environmentStatus: null,
     focusedPanel: 0,
-    selectedIndex: [0, 0, 0, 0, 0, 0, 0, 0],
-    scrollOffset: [0, 0, 0, 0, 0, 0, 0, 0],
+    selectedIndex: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+    scrollOffset: [0, 0, 0, 0, 0, 0, 0, 0, 0],
     agentsComponent,
     chatComponent: ChatComponent.init(),
   };
@@ -98,6 +101,7 @@ export function renderProjectDetail(
 ): void {
   const ticketsPanel = panels.find((p) => p.id === "tickets");
   const agentsPanel = panels.find((p) => p.id === "agents");
+  const plansPanel = panels.find((p) => p.id === "plans");
   const specsPanel = panels.find((p) => p.id === "specs");
   const stackPanel = panels.find((p) => p.id === "stack");
   const cloudPanel = panels.find((p) => p.id === "cloud");
@@ -107,15 +111,16 @@ export function renderProjectDetail(
 
   if (ticketsPanel) renderTicketsPanel(buf, ticketsPanel, state, state.focusedPanel === 0);
   if (agentsPanel) AgentsListComponent.render(buf, agentsPanel, state.agentsComponent, state.focusedPanel === 1);
-  if (specsPanel) renderSpecsPanel(buf, specsPanel, state, state.focusedPanel === 2);
-  if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 3);
-  if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 4);
+  if (plansPanel) renderPlansPanel(buf, plansPanel, state, state.focusedPanel === 2);
+  if (specsPanel) renderSpecsPanel(buf, specsPanel, state, state.focusedPanel === 3);
+  if (stackPanel) renderStackPanel(buf, stackPanel, state, state.focusedPanel === 4);
+  if (cloudPanel) renderCloudPanel(buf, cloudPanel, state, state.focusedPanel === 5);
   if (cicdPanel) renderCICDPanel(
     buf, cicdPanel, state.pipelines, state.deployments,
-    state.selectedIndex[5] ?? 0, state.scrollOffset[5] ?? 0, state.focusedPanel === 5,
+    state.selectedIndex[6] ?? 0, state.scrollOffset[6] ?? 0, state.focusedPanel === 6,
   );
-  if (infraPanel) renderInfraPanel(buf, infraPanel, state, state.focusedPanel === 6);
-  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 7);
+  if (infraPanel) renderInfraPanel(buf, infraPanel, state, state.focusedPanel === 7);
+  if (chatPanel) ChatComponent.render(buf, chatPanel, state.chatComponent, state.focusedPanel === 8);
 }
 
 // --- Tickets Panel ---
@@ -247,6 +252,67 @@ function formatTicketLine(
   return truncate(line, maxWidth);
 }
 
+// --- Plans Panel ---
+
+function planStatusIcon(status: string): string {
+  switch (status) {
+    case "executing": return color(ANSI.yellow, "\u25cf"); // ●
+    case "paused": return color(ANSI.cyan, "\u25cc"); // ◌
+    case "planning": return color(ANSI.cyan, "\u25cb"); // ○
+    case "done": return color(ANSI.green, "\u2713"); // ✓
+    case "failed": return color(ANSI.red, "\u2717"); // ✗
+    case "cancelled": return dim("\u2298"); // ⊘
+    default: return "\u25cb"; // ○
+  }
+}
+
+function renderPlansPanel(
+  buf: ScreenBuffer,
+  panel: Panel,
+  state: ProjectDetailState,
+  focused: boolean,
+): void {
+  const count = state.plans.length;
+  const title = count > 0 ? `Plans (${count})` : "Plans";
+  drawBox(buf, panel.x, panel.y, panel.width, panel.height, title, focused);
+
+  const contentWidth = panel.width - 4;
+  const maxItems = panel.height - 2;
+  const selected = state.selectedIndex[2] ?? 0;
+  const scroll = state.scrollOffset[2] ?? 0;
+
+  if (state.plans.length === 0) {
+    buf.writeLine(panel.y + 1, panel.x + 2, dim("No plans"), contentWidth);
+    return;
+  }
+
+  for (let i = 0; i < maxItems && i + scroll < state.plans.length; i++) {
+    const idx = i + scroll;
+    const plan = state.plans[idx];
+    const row = panel.y + 1 + i;
+    const isSelected = idx === selected && focused;
+
+    const line = formatPlanLine(plan, contentWidth);
+    if (isSelected) {
+      buf.writeLine(row, panel.x + 2, ANSI.reverse + line + ANSI.reset, contentWidth);
+    } else {
+      buf.writeLine(row, panel.x + 2, line, contentWidth);
+    }
+  }
+}
+
+export function formatPlanLine(plan: PlanSummary, maxWidth: number): string {
+  const icon = planStatusIcon(plan.status);
+  const progress = dim(` ${plan.stepsDone}/${plan.stepsTotal}`);
+  const line = `${icon} ${plan.name}${progress}`;
+  return truncate(line, maxWidth);
+}
+
+/** Return the plans list for navigation. */
+export function getProjectPlansList(state: ProjectDetailState): PlanSummary[] {
+  return state.plans;
+}
+
 // --- Specs Panel ---
 
 function renderSpecsPanel(
@@ -261,8 +327,8 @@ function renderSpecsPanel(
 
   const contentWidth = panel.width - 4;
   const maxItems = panel.height - 2;
-  const selected = state.selectedIndex[2] ?? 0;
-  const scroll = state.scrollOffset[2] ?? 0;
+  const selected = state.selectedIndex[3] ?? 0;
+  const scroll = state.scrollOffset[3] ?? 0;
 
   if (state.projectSpecs.length === 0) {
     buf.writeLine(panel.y + 1, panel.x + 2, dim("No specs linked"), contentWidth);
@@ -331,8 +397,8 @@ function renderStackPanel(
 
   const contentWidth = panel.width - 4;
   const maxRows = panel.height - 2;
-  const selected = state.selectedIndex[3] ?? 0;
-  const scroll = state.scrollOffset[3] ?? 0;
+  const selected = state.selectedIndex[4] ?? 0;
+  const scroll = state.scrollOffset[4] ?? 0;
 
   if (!config) {
     buf.writeLine(panel.y + 1, panel.x + 2, dim("Loading..."), contentWidth);
@@ -501,8 +567,8 @@ function renderCloudPanel(
 
   const contentWidth = panel.width - 4;
   const maxRows = panel.height - 2;
-  const selected = state.selectedIndex[4] ?? 0;
-  const scroll = state.scrollOffset[4] ?? 0;
+  const selected = state.selectedIndex[5] ?? 0;
+  const scroll = state.scrollOffset[5] ?? 0;
 
   if (state.cloudServices.length === 0) {
     buf.writeLine(panel.y + 1, panel.x + 2, dim("No cloud services detected"), contentWidth);
@@ -700,8 +766,8 @@ function renderInfraPanel(
 
   const contentWidth = panel.width - 4;
   const maxRows = panel.height - 2;
-  const selected = state.selectedIndex[6] ?? 0;
-  const scroll = state.scrollOffset[6] ?? 0;
+  const selected = state.selectedIndex[7] ?? 0;
+  const scroll = state.scrollOffset[7] ?? 0;
 
   if (state.infraResources.length === 0 && state.infraCrashEvents.length === 0) {
     buf.writeLine(panel.y + 1, panel.x + 2, dim("No infrastructure detected"), contentWidth);
@@ -828,18 +894,19 @@ export function getPanelItemCount(state: ProjectDetailState, panelIndex: number)
   switch (panelIndex) {
     case 0: return getTicketsList(state).length;
     case 1: return getVisibleAgents(state.agentsComponent).length;
-    case 2: return getSpecsList(state).length;
-    case 3: return getStackList(state).length;
-    case 4: return getCloudServicesList(state).length;
-    case 5: return getCICDItemCount(state.pipelines, state.deployments);
-    case 6: return getInfraResourcesList(state).length;
-    case 7: return 0; // chat panel uses component scrolling, not index-based
+    case 2: return state.plans.length;
+    case 3: return getSpecsList(state).length;
+    case 4: return getStackList(state).length;
+    case 5: return getCloudServicesList(state).length;
+    case 6: return getCICDItemCount(state.pipelines, state.deployments);
+    case 7: return getInfraResourcesList(state).length;
+    case 8: return 0; // chat panel uses component scrolling, not index-based
     default: return 0;
   }
 }
 
 /** Total number of panels for Tab cycling. */
-export const PANEL_COUNT = 8;
+export const PANEL_COUNT = 9;
 
 export function clampSelection(state: ProjectDetailState): void {
   // Ensure arrays are large enough for all panels

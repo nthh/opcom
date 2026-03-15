@@ -135,14 +135,14 @@ describe("project detail live services", () => {
     state.projectConfig = makeProjectConfig();
 
     // Stack items include: 1 language, 1 pkg manager, 1 testing, 3 services = 6
-    const count = getPanelItemCount(state, 3);
+    const count = getPanelItemCount(state, 4);
     expect(count).toBe(6);
   });
 
   it("stack panel item count is 0 without config", () => {
     const state = createProjectDetailState(makeProject());
 
-    const count = getPanelItemCount(state, 3);
+    const count = getPanelItemCount(state, 4);
     expect(count).toBe(0);
   });
 });
