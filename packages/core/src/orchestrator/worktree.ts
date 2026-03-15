@@ -174,10 +174,11 @@ export class WorktreeManager {
     // Ensure .opcom-lock is git-excluded so agents never commit it
     await ensureGitExclude(projectPath);
 
-    // Install dependencies in the worktree (skip if reusing — deps already exist)
-    if (!reusing) {
-      await this.installDeps(worktreePath);
-    }
+    // Install dependencies in the worktree.
+    // Always run — even for reused branches, git worktree add recreates the
+    // directory from the branch so node_modules (untracked) won't exist.
+    // npmInstallAt still skips if node_modules is already present.
+    await this.installDeps(worktreePath);
 
     const info: WorktreeInfo = {
       stepId,

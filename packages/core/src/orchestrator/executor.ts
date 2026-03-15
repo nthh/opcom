@@ -1381,8 +1381,22 @@ export class Executor {
         return true; // handled (failed)
       }
 
-      // Post-rebase verification passed — merge again
-      const reMerge = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
+      // Post-rebase verification passed — merge again.
+      // The target may have moved during verification (another step merged),
+      // so the merge can still conflict even though rebase was clean.
+      // Tight loop: quick rebase + merge retry WITHOUT re-verifying
+      // (content was just verified against nearly identical code).
+      let reMerge = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
+      if (!reMerge.merged && reMerge.conflict) {
+        const maxQuickRetries = 3;
+        for (let qr = 0; qr < maxQuickRetries && !reMerge.merged; qr++) {
+          const rebaseTarget = step.integrationBranch ?? undefined;
+          const quickRebase = await this.worktreeManager.attemptRebase(this.worktreeKey(step), rebaseTarget);
+          if (!quickRebase.rebased) break; // Real conflict — stop retrying
+          log.info("quick rebase before merge retry (no re-verify)", { ticketId: step.ticketId, attempt: qr + 1 });
+          reMerge = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
+        }
+      }
       if (reMerge.merged) {
         // Success — complete the step
         step.status = "done";
