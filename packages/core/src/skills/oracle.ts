@@ -42,10 +42,21 @@ export async function collectOracleInputs(
   const diffCwd = opts?.worktreePath ?? projectPath;
   let gitDiff = "";
 
+  // Exclude lock files and generated artifacts from the diff — they can be
+  // tens of thousands of lines and consume the entire truncation budget,
+  // hiding actual code changes from the oracle.
+  const diffExcludes = [
+    ":(exclude)**/package-lock.json",
+    ":(exclude)**/yarn.lock",
+    ":(exclude)**/pnpm-lock.yaml",
+    ":(exclude)**/Pipfile.lock",
+    ":(exclude)**/poetry.lock",
+  ];
+
   if (opts?.worktreeBranch) {
     // Worktree mode: diff base..branch to capture all agent changes
     try {
-      const result = await exec("git", ["diff", `main...${opts.worktreeBranch}`], {
+      const result = await exec("git", ["diff", `main...${opts.worktreeBranch}`, "--", ".", ...diffExcludes], {
         cwd: diffCwd,
         maxBuffer: 10 * 1024 * 1024,
       });
@@ -53,7 +64,7 @@ export async function collectOracleInputs(
     } catch {
       // Fallback: diff HEAD against main
       try {
-        const result = await exec("git", ["diff", "main...HEAD"], {
+        const result = await exec("git", ["diff", "main...HEAD", "--", ".", ...diffExcludes], {
           cwd: diffCwd,
           maxBuffer: 10 * 1024 * 1024,
         });
@@ -64,14 +75,14 @@ export async function collectOracleInputs(
     }
   } else {
     try {
-      const result = await exec("git", ["diff", "HEAD~1"], {
+      const result = await exec("git", ["diff", "HEAD~1", "--", ".", ...diffExcludes], {
         cwd: diffCwd,
         maxBuffer: 10 * 1024 * 1024,
       });
       gitDiff = result.stdout;
     } catch {
       try {
-        const result = await exec("git", ["diff", "main"], {
+        const result = await exec("git", ["diff", "main", "--", ".", ...diffExcludes], {
           cwd: diffCwd,
           maxBuffer: 10 * 1024 * 1024,
         });
