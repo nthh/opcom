@@ -248,7 +248,7 @@ describe("Executor auto-rebase on merge conflict", () => {
     mockSM.simulateCompletion(sessionId);
     await waitFor(() => plan.steps[0].status === "done");
 
-    expect(mockAttemptRebase).toHaveBeenCalledWith("t1");
+    expect(mockAttemptRebase).toHaveBeenCalledWith("t1", undefined);
     expect(mockMerge).toHaveBeenCalledTimes(2); // original + post-rebase
     expect(completed).toContain("t1");
     expect(plan.steps[0].status).toBe("done");
@@ -551,7 +551,7 @@ describe("Executor auto-rebase on merge conflict", () => {
 
     // Merge conflicted → rebase succeeded → step completed
     const step = executor.getPlan().steps[0];
-    expect(mockAttemptRebase).toHaveBeenCalledWith("t1");
+    expect(mockAttemptRebase).toHaveBeenCalledWith("t1", undefined);
 
     executor.stop();
     await runPromise;

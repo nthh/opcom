@@ -361,22 +361,35 @@ export class WorktreeManager {
 
   /**
    * Check if the agent made any commits on the worktree's branch.
+   * @param comparisonBase - branch or ref to compare against (default: main repo HEAD).
+   *   For integration branch children, pass the integration branch name so the
+   *   comparison is against the integration branch HEAD, not main HEAD.
    */
-  async hasCommits(stepId: string): Promise<boolean> {
+  async hasCommits(stepId: string, comparisonBase?: string): Promise<boolean> {
     const info = this.worktrees.get(stepId);
     if (!info) return false;
 
     try {
-      // Compare the branch against the main repo HEAD to see if the agent added commits.
-      // The branch was created from HEAD, so any new commits will be ahead of it.
-      const { stdout: mainHead } = await execFileAsync(
-        "git",
-        ["rev-parse", "HEAD"],
-        { cwd: info.projectPath },
-      );
+      // Compare the branch against the base to see if the agent added commits.
+      let base: string;
+      if (comparisonBase) {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["rev-parse", comparisonBase],
+          { cwd: info.projectPath },
+        );
+        base = stdout.trim();
+      } else {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["rev-parse", "HEAD"],
+          { cwd: info.projectPath },
+        );
+        base = stdout.trim();
+      }
       const { stdout } = await execFileAsync(
         "git",
-        ["log", `${mainHead.trim()}..${info.branch}`, "--oneline"],
+        ["log", `${base}..${info.branch}`, "--oneline"],
         { cwd: info.worktreePath },
       );
       return stdout.trim().length > 0;
