@@ -1260,6 +1260,99 @@ interface PlanStep {
 }
 ```
 
+## Integration Branches {#integration-branches}
+
+When a parent ticket has child `.md` ticket files, the executor creates an **integration branch** that serves as the merge target for all children. This provides atomic feature delivery — main receives one merge commit for the entire feature — while preserving full DAG-based parallel execution.
+
+### Detection
+
+A parent ticket qualifies as an integration parent when:
+- It has a directory containing child `.md` ticket files (existing parent detection via `ticket.parent` field)
+- `worktree: true` is enabled in the plan config
+
+No new frontmatter field is required. The behavior is inferred from the existing parent/child relationship.
+
+### Lifecycle
+
+```
+main ───────────────────────────────────────────────●──
+                                                    ↑ (one merge after final gate)
+work/data-export ──●────●──●──●────●──●────●────────
+                   ↑    ↑  ↑  ↑    ↑  ↑    ↑
+                  fw  vec ras tab  cli api batch
+                  (each child worktree branches from integration branch)
+```
+
+1. **Plan computation**: The planner marks integration parents. Parent tickets are still excluded from plan steps (only children are executable). A synthetic `integrationBranch` field is set on each child step pointing to the parent's branch name.
+
+2. **Integration branch creation**: Before any child step starts, the executor creates a long-lived branch `work/<parent-id>` from `main` (or current HEAD). This branch lives in the main repo — no worktree directory is needed for it.
+
+3. **Child worktree creation**: Each child step's worktree is created with `baseBranch` set to the integration branch instead of `HEAD`. Since deps control ordering, the integration branch already contains all prerequisite work when a child is unblocked.
+
+4. **Child merges**: When a child step passes verification, it merges to the integration branch (via `targetBranch` parameter on `WorktreeManager.merge()`). The child's worktree is cleaned up as usual.
+
+5. **Final gate**: When all child steps are done/skipped, the executor runs full verification (full test suite + oracle) on the integration branch. This catches cross-cutting issues that modular per-child tests miss.
+
+6. **Merge to main**: After the final gate passes, the integration branch is merged to `main` with `--no-ff`. The integration branch is then deleted.
+
+7. **Abandonment**: If the plan is cancelled or the feature is abandoned, the integration branch is deleted. Main is untouched.
+
+### Two-Tier Verification
+
+Integration branches enable a two-tier verification strategy:
+
+| Stage | What runs | Purpose |
+|-------|-----------|---------|
+| Per-child merge to integration branch | **Modular tests** — tests matching changed files/modules | Fast feedback, catches obvious breaks |
+| Final merge to main | **Full test suite + oracle** | Integration validation, cross-cutting issues |
+
+Modular test selection uses the existing `testSuites` per-step override or path-based matching (test files sharing a path prefix with changed source files). If no modular tests are configured, per-child verification falls back to the step's `verificationMode`.
+
+### Types
+
+```typescript
+interface PlanStep {
+  // ... existing fields ...
+  integrationBranch?: string;    // "work/<parent-id>" — set for children of integration parents
+}
+```
+
+The `integrationBranch` field on a step tells the executor:
+- Use this as `baseBranch` when creating the child's worktree
+- Use this as `targetBranch` when merging the child's work
+- When all siblings are done, run final verification and merge this branch to main
+
+### Executor Changes
+
+```typescript
+// In startStep — determine base branch for worktree creation
+const baseBranch = step.integrationBranch ?? "HEAD";
+await this.worktreeManager.create(projectPath, stepId, ticketId, baseBranch);
+
+// In handleWorktreeCompletion — determine merge target
+const mergeTarget = step.integrationBranch;  // undefined = main (current behavior)
+const result = await this.worktreeManager.merge(stepId, mergeTarget);
+
+// After all children done — final gate on integration branch
+if (this.allChildrenDone(parentId)) {
+  await this.runFinalIntegrationGate(parentId);
+  await this.mergeIntegrationBranch(parentId);
+}
+```
+
+### Rebase Handling
+
+- **Child → integration branch conflicts**: Same auto-rebase logic as today (up to 3 attempts). The child's worktree branch is rebased onto the integration branch.
+- **Integration branch → main**: Rebased onto main only at the final merge. If main has diverged significantly, the rebase may conflict — same conflict resolution flow (auto-rebase attempts, then `needs-rebase` for manual resolution).
+- **During execution**: The integration branch is NOT rebased onto main as children merge into it. This avoids disrupting in-progress children whose worktrees are based on the integration branch.
+
+### Interaction with Other Features
+
+- **Swarm mode**: Swarm subtasks (inline `## Tasks` checkboxes) continue to work as today — sequential execution in a shared worktree. Integration branches are for child `.md` ticket files. A parent ticket could theoretically use both, but this is not recommended.
+- **Team formation**: Team-expanded steps (`ticketId/role`) within a child ticket work normally — they share a worktree keyed by the child ticket ID, nested under the integration branch.
+- **File-overlap scheduling**: Still applies between child steps. Two children touching the same files are serialized even if the DAG allows parallel execution.
+- **Plan strategies**: `spread`/`mixed`/`swarm` scheduling strategies apply to the child steps as usual. The integration branch only changes the merge target, not the scheduling order.
+
 ## Non-Goals
 
 - **Distributed execution** — the orchestrator runs on one machine. Multi-machine coordination is out of scope.
