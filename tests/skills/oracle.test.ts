@@ -1,12 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   formatOraclePrompt,
   parseOracleResponse,
   runOracle,
   extractCriteriaFromMarkdown,
+  collectOracleInputs,
 } from "@opcom/core";
 import type { OracleInput } from "@opcom/core";
 import type { WorkItem } from "@opcom/types";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+const exec = promisify(execFile);
 
 function makeWorkItem(overrides?: Partial<WorkItem>): WorkItem {
   return {
@@ -412,5 +420,107 @@ None.
     expect(result.passed).toBe(true);
     expect(result.criteria).toHaveLength(1);
     expect(result.concerns).toHaveLength(0);
+  });
+});
+
+describe("collectOracleInputs", () => {
+  let repoDir: string;
+
+  async function initRepo(): Promise<void> {
+    await exec("git", ["init", "-b", "main"], { cwd: repoDir });
+    await exec("git", ["config", "user.email", "test@test.com"], { cwd: repoDir });
+    await exec("git", ["config", "user.name", "Test"], { cwd: repoDir });
+    await writeFile(join(repoDir, "README.md"), "# Project", "utf-8");
+    await exec("git", ["add", "-A"], { cwd: repoDir });
+    await exec("git", ["commit", "-m", "initial"], { cwd: repoDir });
+  }
+
+  beforeEach(async () => {
+    repoDir = await mkdtemp(join(tmpdir(), "oracle-diff-"));
+    await initRepo();
+  });
+
+  afterEach(async () => {
+    await rm(repoDir, { recursive: true, force: true });
+  });
+
+  const ticket: WorkItem = {
+    id: "test-ticket",
+    title: "Test",
+    status: "open",
+    priority: 1,
+    type: "feature",
+    filePath: "/tmp/nonexistent.md",
+    deps: [],
+    links: [],
+    tags: {},
+  };
+
+  it("diffs worktree branch against main by default", async () => {
+    // Create a branch with a change
+    await exec("git", ["checkout", "-b", "work/test-ticket"], { cwd: repoDir });
+    await writeFile(join(repoDir, "feature.py"), "print('hello')", "utf-8");
+    await exec("git", ["add", "-A"], { cwd: repoDir });
+    await exec("git", ["commit", "-m", "add feature"], { cwd: repoDir });
+    await exec("git", ["checkout", "main"], { cwd: repoDir });
+
+    const result = await collectOracleInputs(repoDir, "s1", ticket, {
+      worktreePath: repoDir,
+      worktreeBranch: "work/test-ticket",
+    });
+
+    expect(result.gitDiff).toContain("feature.py");
+    expect(result.gitDiff).toContain("print('hello')");
+  });
+
+  it("diffs against integration branch when provided", async () => {
+    // Simulate: main → integration branch (with sibling changes) → child branch
+    // Create integration branch with sibling work
+    await exec("git", ["checkout", "-b", "work/parent/_integration"], { cwd: repoDir });
+    await writeFile(join(repoDir, "sibling.py"), "# sibling step work", "utf-8");
+    await exec("git", ["add", "-A"], { cwd: repoDir });
+    await exec("git", ["commit", "-m", "sibling work merged to integration"], { cwd: repoDir });
+
+    // Create child branch from integration branch
+    await exec("git", ["checkout", "-b", "work/parent/child-a"], { cwd: repoDir });
+    await writeFile(join(repoDir, "child.py"), "# child step work", "utf-8");
+    await exec("git", ["add", "-A"], { cwd: repoDir });
+    await exec("git", ["commit", "-m", "child work"], { cwd: repoDir });
+    await exec("git", ["checkout", "main"], { cwd: repoDir });
+
+    // Without integration branch: diff includes sibling AND child changes
+    const withoutIntBranch = await collectOracleInputs(repoDir, "s1", ticket, {
+      worktreePath: repoDir,
+      worktreeBranch: "work/parent/child-a",
+    });
+    expect(withoutIntBranch.gitDiff).toContain("sibling.py");
+    expect(withoutIntBranch.gitDiff).toContain("child.py");
+
+    // With integration branch: diff only includes child changes
+    const withIntBranch = await collectOracleInputs(repoDir, "s1", ticket, {
+      worktreePath: repoDir,
+      worktreeBranch: "work/parent/child-a",
+      integrationBranch: "work/parent/_integration",
+    });
+    expect(withIntBranch.gitDiff).not.toContain("sibling.py");
+    expect(withIntBranch.gitDiff).toContain("child.py");
+  });
+
+  it("excludes lock files from diff", async () => {
+    await exec("git", ["checkout", "-b", "work/lock-test"], { cwd: repoDir });
+    await mkdir(join(repoDir, "app"), { recursive: true });
+    await writeFile(join(repoDir, "app", "package-lock.json"), '{"lockfileVersion":3}', "utf-8");
+    await writeFile(join(repoDir, "feature.py"), "# real work", "utf-8");
+    await exec("git", ["add", "-A"], { cwd: repoDir });
+    await exec("git", ["commit", "-m", "add feature and lock file"], { cwd: repoDir });
+    await exec("git", ["checkout", "main"], { cwd: repoDir });
+
+    const result = await collectOracleInputs(repoDir, "s1", ticket, {
+      worktreePath: repoDir,
+      worktreeBranch: "work/lock-test",
+    });
+
+    expect(result.gitDiff).toContain("feature.py");
+    expect(result.gitDiff).not.toContain("package-lock.json");
   });
 });
