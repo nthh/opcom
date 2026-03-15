@@ -27,6 +27,16 @@ export function assessDecomposition(
 ): DecompositionAssessment {
   const criteria: string[] = [];
 
+  // Criterion 0: Child tickets are already the result of decomposition — skip
+  if (ticket.parent) {
+    return {
+      ticketId: ticket.id,
+      needsDecomposition: false,
+      reason: "Child ticket (already decomposed from parent)",
+      criteria: [],
+    };
+  }
+
   // Criterion 1: Multiple providers mentioned in title or description
   const providerKeywords = [
     "adapters", "providers", "backends",
@@ -42,9 +52,14 @@ export function assessDecomposition(
   }
 
   // Criterion 2: Types + implementation + tests scope
-  const scopeKeywords = ["type", "implement", "test", "adapter", "integration"];
-  const scopeMatches = scopeKeywords.filter((kw) => titleLower.includes(kw));
-  if (scopeMatches.length >= 2) {
+  // Requires keywords from at least 2 distinct scope categories — not just any 2 keywords.
+  // A ticket titled "Integration branch types" shouldn't match because both words
+  // fall under "types", not across categories.
+  const hasTypeScope = /\btype[s]?\b/.test(titleLower) || titleLower.includes("interface");
+  const hasImplScope = titleLower.includes("implement") || titleLower.includes("adapter") || titleLower.includes("driver");
+  const hasTestScope = /\btest[s]?\b/.test(titleLower) || titleLower.includes("integration test");
+  const scopeCount = [hasTypeScope, hasImplScope, hasTestScope].filter(Boolean).length;
+  if (scopeCount >= 2) {
     criteria.push("types-impl-tests");
   }
 

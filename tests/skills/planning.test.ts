@@ -139,6 +139,28 @@ describe("assessDecomposition", () => {
     expect(result.needsDecomposition).toBe(true);
     expect(result.criteria).toContain("types-impl-tests");
   });
+
+  it("does not flag child tickets for decomposition", () => {
+    const child = makeWorkItem({
+      id: "integration-branch-types",
+      title: "Integration branch types and WorktreeManager helpers",
+      parent: "integration-branches",
+    });
+    const result = assessDecomposition(child);
+
+    expect(result.needsDecomposition).toBe(false);
+    expect(result.reason).toContain("Child ticket");
+  });
+
+  it("does not flag single-scope keyword matches as types-impl-tests", () => {
+    const ticket = makeWorkItem({
+      id: "integration-branch-tests",
+      title: "Integration branch end-to-end tests",
+    });
+    const result = assessDecomposition(ticket);
+
+    expect(result.criteria).not.toContain("types-impl-tests");
+  });
 });
 
 // --- formatPlanningPrompt ---
