@@ -1709,6 +1709,7 @@ export class Executor {
             {
               worktreePath: step.worktreePath,
               worktreeBranch: step.worktreeBranch,
+              integrationBranch: step.integrationBranch,
             },
           );
 
@@ -3078,9 +3079,11 @@ export class Executor {
       return forced.length > 0 ? forced : suites;
     }
 
-    // Get changed files to match against suite paths
+    // Get changed files to match against suite paths.
+    // For integration branch children, diff against the integration branch
+    // so only THIS step's changes are considered (not sibling step changes).
     const testPath = step.worktreePath ?? project.path;
-    const changedFiles = await this.getChangedFiles(testPath, step.worktreeBranch);
+    const changedFiles = await this.getChangedFiles(testPath, step.worktreeBranch, step.integrationBranch);
 
     const matched: TestSuite[] = [];
     for (const suite of suites) {
@@ -3099,10 +3102,11 @@ export class Executor {
     return matched.length > 0 ? matched : suites.filter((s) => s.required);
   }
 
-  /** Get list of changed files in a worktree/branch relative to main. */
-  private async getChangedFiles(cwd: string, branch?: string): Promise<string[]> {
+  /** Get list of changed files in a worktree/branch relative to a base. */
+  private async getChangedFiles(cwd: string, branch?: string, base?: string): Promise<string[]> {
     try {
-      const diffRef = branch ? `main...${branch}` : "HEAD~1";
+      const diffBase = base ?? "main";
+      const diffRef = branch ? `${diffBase}...${branch}` : "HEAD~1";
       const { stdout } = await execFileAsync("git", ["diff", "--name-only", diffRef, "--",
         ".", ":(exclude)**/package-lock.json", ":(exclude)**/yarn.lock",
         ":(exclude)**/pnpm-lock.yaml", ":(exclude)**/Pipfile.lock", ":(exclude)**/poetry.lock",

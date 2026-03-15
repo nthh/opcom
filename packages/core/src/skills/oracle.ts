@@ -34,6 +34,7 @@ export async function collectOracleInputs(
   opts?: {
     worktreePath?: string;
     worktreeBranch?: string;
+    integrationBranch?: string;
   },
 ): Promise<OracleInput> {
   // Get git diff for the session's changes.
@@ -54,17 +55,21 @@ export async function collectOracleInputs(
   ];
 
   if (opts?.worktreeBranch) {
-    // Worktree mode: diff base..branch to capture all agent changes
+    // Worktree mode: diff base..branch to capture agent changes.
+    // For integration branch children, diff against the integration branch
+    // (not main) so the oracle only sees THIS step's changes, not the
+    // accumulated changes from all siblings on the integration branch.
+    const diffBase = opts.integrationBranch ?? "main";
     try {
-      const result = await exec("git", ["diff", `main...${opts.worktreeBranch}`, "--", ".", ...diffExcludes], {
+      const result = await exec("git", ["diff", `${diffBase}...${opts.worktreeBranch}`, "--", ".", ...diffExcludes], {
         cwd: diffCwd,
         maxBuffer: 10 * 1024 * 1024,
       });
       gitDiff = result.stdout;
     } catch {
-      // Fallback: diff HEAD against main
+      // Fallback: diff HEAD against base
       try {
-        const result = await exec("git", ["diff", "main...HEAD", "--", ".", ...diffExcludes], {
+        const result = await exec("git", ["diff", `${diffBase}...HEAD`, "--", ".", ...diffExcludes], {
           cwd: diffCwd,
           maxBuffer: 10 * 1024 * 1024,
         });
