@@ -63,6 +63,7 @@ export interface PlanStep {
   teamStepRole?: string;                 // role within the team sequence (e.g. "engineer", "qa")
   deniedWriteCount?: number;             // count of write attempts blocked by denyPaths
   swarm?: boolean;                       // true when step was created by expandSubtaskSteps
+  integrationBranch?: string;            // branch for collecting multiple step merges before landing on main
 }
 
 export interface RebaseConflict {

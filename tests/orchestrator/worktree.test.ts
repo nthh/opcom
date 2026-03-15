@@ -496,4 +496,141 @@ describe("WorktreeManager", () => {
       expect(result.error).toBeDefined();
     });
   });
+
+  describe("createBranch", () => {
+    it("creates a branch from HEAD by default", async () => {
+      await WorktreeManager.createBranch(tmpDir, "integration/feature-set");
+      const { stdout } = await exec("git", ["branch"], { cwd: tmpDir });
+      expect(stdout).toContain("integration/feature-set");
+
+      // No worktree directory should be created
+      expect(existsSync(join(tmpDir, ".opcom/worktrees/integration/feature-set"))).toBe(false);
+
+      // Cleanup
+      await exec("git", ["branch", "-D", "integration/feature-set"], { cwd: tmpDir });
+    });
+
+    it("creates a branch from a specified base", async () => {
+      // Create a side branch with an extra commit
+      await exec("git", ["checkout", "-b", "base-branch"], { cwd: tmpDir });
+      await writeFile(join(tmpDir, "base-file.ts"), "export const base = 1;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: tmpDir });
+      await exec("git", ["commit", "-m", "base commit"], { cwd: tmpDir });
+      await exec("git", ["checkout", "main"], { cwd: tmpDir });
+
+      await WorktreeManager.createBranch(tmpDir, "integration/from-base", "base-branch");
+      const { stdout } = await exec("git", ["log", "integration/from-base", "--oneline"], { cwd: tmpDir });
+      expect(stdout).toContain("base commit");
+
+      // Cleanup
+      await exec("git", ["branch", "-D", "integration/from-base"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "base-branch"], { cwd: tmpDir });
+    });
+
+    it("throws when branch already exists", async () => {
+      await WorktreeManager.createBranch(tmpDir, "dup-branch");
+      await expect(WorktreeManager.createBranch(tmpDir, "dup-branch")).rejects.toThrow();
+
+      // Cleanup
+      await exec("git", ["branch", "-D", "dup-branch"], { cwd: tmpDir });
+    });
+  });
+
+  describe("deleteBranch", () => {
+    it("deletes an existing branch", async () => {
+      await WorktreeManager.createBranch(tmpDir, "to-delete");
+      const { stdout: before } = await exec("git", ["branch"], { cwd: tmpDir });
+      expect(before).toContain("to-delete");
+
+      await WorktreeManager.deleteBranch(tmpDir, "to-delete");
+      const { stdout: after } = await exec("git", ["branch"], { cwd: tmpDir });
+      expect(after).not.toContain("to-delete");
+    });
+
+    it("throws when branch does not exist", async () => {
+      await expect(WorktreeManager.deleteBranch(tmpDir, "nonexistent-branch")).rejects.toThrow();
+    });
+  });
+
+  describe("mergeIntegrationBranch", () => {
+    it("merges integration branch into current branch with --no-ff", async () => {
+      // Create integration branch with a commit
+      await exec("git", ["branch", "integration/test"], { cwd: tmpDir });
+      const wtPath = join(tmpDir, ".opcom/worktrees/int-temp");
+      await exec("git", ["worktree", "add", wtPath, "integration/test"], { cwd: tmpDir });
+      await writeFile(join(wtPath, "int-feature.ts"), "export const intFeature = true;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: wtPath });
+      await exec("git", ["commit", "-m", "integration work"], { cwd: wtPath });
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+
+      const result = await WorktreeManager.mergeIntegrationBranch(tmpDir, "integration/test");
+      expect(result.merged).toBe(true);
+      expect(result.conflict).toBe(false);
+
+      // The merge commit should exist (--no-ff creates a merge commit)
+      const { stdout } = await exec("git", ["log", "--oneline", "main"], { cwd: tmpDir });
+      expect(stdout).toContain("opcom: merge integration branch integration/test");
+
+      // File from integration branch should be on main
+      expect(existsSync(join(tmpDir, "int-feature.ts"))).toBe(true);
+
+      // Cleanup
+      await exec("git", ["branch", "-D", "integration/test"], { cwd: tmpDir });
+    });
+
+    it("merges into a specified target branch", async () => {
+      // Create target and integration branches
+      await exec("git", ["branch", "target-branch"], { cwd: tmpDir });
+      await exec("git", ["branch", "integration/targeted"], { cwd: tmpDir });
+
+      // Add a commit on the integration branch
+      const wtPath = join(tmpDir, ".opcom/worktrees/int-temp2");
+      await exec("git", ["worktree", "add", wtPath, "integration/targeted"], { cwd: tmpDir });
+      await writeFile(join(wtPath, "targeted.ts"), "export const t = 1;", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: wtPath });
+      await exec("git", ["commit", "-m", "targeted work"], { cwd: wtPath });
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+
+      const result = await WorktreeManager.mergeIntegrationBranch(tmpDir, "integration/targeted", "target-branch");
+      expect(result.merged).toBe(true);
+
+      // Should have checked out target-branch
+      const { stdout: currentBranch } = await exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: tmpDir });
+      expect(currentBranch.trim()).toBe("target-branch");
+
+      // Go back to main for cleanup
+      await exec("git", ["checkout", "main"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "target-branch"], { cwd: tmpDir });
+      await exec("git", ["branch", "-D", "integration/targeted"], { cwd: tmpDir });
+    });
+
+    it("detects merge conflicts", async () => {
+      // Create integration branch
+      await exec("git", ["branch", "integration/conflict"], { cwd: tmpDir });
+
+      // Change README on integration branch
+      const wtPath = join(tmpDir, ".opcom/worktrees/int-conflict");
+      await exec("git", ["worktree", "add", wtPath, "integration/conflict"], { cwd: tmpDir });
+      await writeFile(join(wtPath, "README.md"), "# Integration change", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: wtPath });
+      await exec("git", ["commit", "-m", "integration conflict"], { cwd: wtPath });
+      await exec("git", ["worktree", "remove", wtPath, "--force"], { cwd: tmpDir });
+
+      // Change README on main too
+      await writeFile(join(tmpDir, "README.md"), "# Main change", "utf-8");
+      await exec("git", ["add", "-A"], { cwd: tmpDir });
+      await exec("git", ["commit", "-m", "main conflict"], { cwd: tmpDir });
+
+      const result = await WorktreeManager.mergeIntegrationBranch(tmpDir, "integration/conflict");
+      expect(result.merged).toBe(false);
+      expect(result.conflict).toBe(true);
+
+      // Main should be clean (abort was called)
+      const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: tmpDir });
+      expect(stdout.trim()).toBe("");
+
+      // Cleanup
+      await exec("git", ["branch", "-D", "integration/conflict"], { cwd: tmpDir });
+    });
+  });
 });

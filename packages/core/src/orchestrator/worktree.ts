@@ -571,6 +571,78 @@ export class WorktreeManager {
   }
 
   /**
+   * Create a git branch without a worktree directory.
+   * Useful for integration branches that collect multiple step merges.
+   */
+  static async createBranch(
+    projectPath: string,
+    branchName: string,
+    base?: string,
+  ): Promise<void> {
+    const startPoint = base ?? "HEAD";
+    await execFileAsync("git", ["branch", branchName, startPoint], {
+      cwd: projectPath,
+    });
+    log.info("created branch", { branchName, base: startPoint });
+  }
+
+  /**
+   * Delete a git branch.
+   */
+  static async deleteBranch(
+    projectPath: string,
+    branchName: string,
+  ): Promise<void> {
+    await execFileAsync("git", ["branch", "-D", branchName], {
+      cwd: projectPath,
+    });
+    log.info("deleted branch", { branchName });
+  }
+
+  /**
+   * Merge an integration branch into a target branch (default: current branch)
+   * using --no-ff.  Returns a MergeResult.
+   */
+  static async mergeIntegrationBranch(
+    projectPath: string,
+    branchName: string,
+    targetBranch?: string,
+  ): Promise<MergeResult> {
+    const cwd = projectPath;
+
+    // If a target is specified, check it out first
+    if (targetBranch) {
+      await execFileAsync("git", ["checkout", targetBranch], { cwd });
+    }
+
+    try {
+      await execFileAsync(
+        "git",
+        ["merge", branchName, "--no-ff", "-m", `opcom: merge integration branch ${branchName}`],
+        { cwd },
+      );
+      log.info("merged integration branch", { branchName, targetBranch });
+      return { merged: true, conflict: false };
+    } catch (err: unknown) {
+      const e = err as { message?: string; stdout?: string; stderr?: string };
+      const combined = [e.message, e.stdout, e.stderr].filter(Boolean).join("\n");
+
+      if (combined.includes("CONFLICT") || combined.includes("Automatic merge failed")) {
+        try {
+          await execFileAsync("git", ["merge", "--abort"], { cwd });
+        } catch {
+          // Best effort abort
+        }
+        log.warn("integration branch merge conflict", { branchName, targetBranch });
+        return { merged: false, conflict: true, error: combined };
+      }
+
+      log.error("integration branch merge failed", { branchName, error: combined });
+      return { merged: false, conflict: false, error: combined };
+    }
+  }
+
+  /**
    * Install dependencies in the worktree.
    * Runs `npm install` instead of symlinking node_modules to avoid
    * ELOOP errors from circular symlinks in monorepo workspaces.
