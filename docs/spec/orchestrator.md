@@ -708,6 +708,8 @@ When a plan is active, the WORK QUEUE panel transforms into the PLAN panel:
 
 When no plan is active, the panel shows the regular WORK QUEUE (existing behavior).
 
+When multiple plans exist, the plan panel follows project selection and supports cycling between plans — see [tui.md § Multi-Plan Navigation](tui.md#multi-plan-nav).
+
 ### Plan Controls
 
 | Key | Context | Action |

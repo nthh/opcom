@@ -556,6 +556,110 @@ interface ChatMessage {
 }
 ```
 
+## Multi-Plan Navigation {#multi-plan-nav}
+
+The station supports multiple concurrent plan executors (`Map<string, Executor>`), but the TUI needs a way to discover and switch between them. Multi-plan navigation ties plan display to project selection, so the natural act of browsing projects reveals their plans.
+
+*Ticket: [multi-plan-nav](.tickets/impl/multi-plan-nav/README.md)*
+
+### Project Row Plan Badges
+
+The projects panel shows a plan count when a project has active plans:
+
+```
+  PROJECTS
+
+  ▸ mtnmap       main  27u      ▸ 2 plans
+    Expo+Firebase+CF Workers
+    25 open / 31 total  3h
+
+    folia        main  ✓
+    Python+Docker (trk)
+    35 open / 45 total  14h
+
+    opcom        main  ✓        ▸ 1 plan
+    TypeScript (tickets)
+    30 open  1h
+```
+
+Badge format: `▸ N plans` (cyan) when N > 0, omitted when 0. Only non-terminal plans count (executing, paused, planning — not done/cancelled).
+
+### Plan Panel Follows Project Selection
+
+When the cursor moves in the Projects panel (L1), the Plan panel updates to show the active plan for the selected project. This creates a master-detail relationship:
+
+- **Project with plans**: Plan panel shows the highest-priority plan (executing > paused > failed > planning > done)
+- **Project without plans**: Plan panel falls back to the cross-project WORK QUEUE
+
+The plan panel header shows the project context and plan position:
+
+```
+┌─ PLAN 1/2 · mtnmap ──────────────────────────────────┐
+│  migrate-auth (executing)  4/7 steps  ✓3  ✗0         │
+│                                                        │
+│  Track: auth                                           │
+│    ✓ auth-provider          done       12m             │
+│    ● session-migration      in-progress  5m            │
+│    ◌ token-refresh          blocked                    │
+│                                                        │
+│  Track: storage                                        │
+│    ✓ storage-adapter        done       8m              │
+│    ✓ cache-layer            done       6m              │
+│    ○ offline-sync           ready                      │
+│    ◌ conflict-resolution    blocked                    │
+│                                                        │
+│  Ready: 1  Blocked: 2  Done: 3  Failed: 0             │
+└────────────────────────────────────────────────────────┘
+```
+
+### Plan Cycling
+
+`]` / `[` cycle through plans for the currently selected project (these keybindings already exist). The panel header updates to reflect position (`PLAN 1/2`, `PLAN 2/2`).
+
+Cycling wraps around — pressing `]` on the last plan goes to the first. If only one plan exists, cycling is a no-op.
+
+| Key | Context | Action |
+|-----|---------|--------|
+| `]` | L1, plan panel visible | Next plan for selected project |
+| `[` | L1, plan panel visible | Previous plan for selected project |
+
+### Project Detail Plan List (L2)
+
+At Level 2, add a PLANS section to the right column (alongside Agents, Specs, Stack):
+
+```
+┌─ mtnmap ── main ── Expo+Firebase ────────────────────────────────────────┐
+│                                                                           │
+│  TICKETS (25 open)                │  AGENTS (1)                          │
+│  ...                              │    mtnmap/session-migration           │
+│                                   │    claude-code  streaming  5m         │
+│                                   │                                       │
+│                                   │  PLANS (2)                            │
+│                                   │    ● migrate-auth    executing  4/7   │
+│                                   │    ⏸ perf-baseline   paused     1/4   │
+│                                   │                                       │
+│                                   │  SPECS                                │
+│                                   │    ...                                │
+│                                   │  STACK                                │
+│                                   │    ...                                │
+└───────────────────────────────────┴───────────────────────────────────────┘
+```
+
+Pressing `Enter` on a plan drills to the Plan Overview (L3). Plan status icons match the status bar convention: `●` executing, `⏸` paused, `○` planning, `✓` done, `✗` failed.
+
+### State
+
+```typescript
+interface MultiPlanState {
+  /** Plans grouped by project ID */
+  plansByProject: Map<string, Plan[]>;
+  /** Index of the currently displayed plan per project */
+  selectedPlanIndex: Map<string, number>;
+}
+```
+
+`loadActivePlan()` changes from picking one global plan to maintaining a per-project plan list. The plan panel reads from `plansByProject[selectedProjectId][selectedPlanIndex]`.
+
 ## State Updates
 
 - Git state: refreshed when entering project view, every 30s background poll

@@ -413,10 +413,10 @@ describe("computePlan integration branch detection", () => {
     const child2 = plan.steps.find((s) => s.ticketId === "feature-epic/child-2")!;
 
     expect(child1).toBeDefined();
-    expect(child1.integrationBranch).toBe("work/feature-epic");
+    expect(child1.integrationBranch).toBe("work/feature-epic/_integration");
 
     expect(child2).toBeDefined();
-    expect(child2.integrationBranch).toBe("work/feature-epic");
+    expect(child2.integrationBranch).toBe("work/feature-epic/_integration");
   });
 
   it("does not set integrationBranch when worktree: false", () => {
@@ -486,8 +486,8 @@ describe("computePlan integration branch detection", () => {
     expect(standalone.blockedBy).toEqual(["feature-epic/child-2"]);
 
     // Integration branch only on children, not standalone
-    expect(child1.integrationBranch).toBe("work/feature-epic");
-    expect(child2.integrationBranch).toBe("work/feature-epic");
+    expect(child1.integrationBranch).toBe("work/feature-epic/_integration");
+    expect(child2.integrationBranch).toBe("work/feature-epic/_integration");
     expect(standalone.integrationBranch).toBeUndefined();
   });
 
@@ -511,9 +511,9 @@ describe("computePlan integration branch detection", () => {
     const ac2 = plan.steps.find((s) => s.ticketId === "epic-a/a-child-2")!;
     const bc1 = plan.steps.find((s) => s.ticketId === "epic-b/b-child-1")!;
 
-    expect(ac1.integrationBranch).toBe("work/epic-a");
-    expect(ac2.integrationBranch).toBe("work/epic-a");
-    expect(bc1.integrationBranch).toBe("work/epic-b");
+    expect(ac1.integrationBranch).toBe("work/epic-a/_integration");
+    expect(ac2.integrationBranch).toBe("work/epic-a/_integration");
+    expect(bc1.integrationBranch).toBe("work/epic-b/_integration");
   });
 
   it("uses default config (worktree: true) when no config override", () => {
@@ -532,6 +532,6 @@ describe("computePlan integration branch detection", () => {
 
     const child = plan.steps.find((s) => s.ticketId === "parent/child")!;
     expect(child).toBeDefined();
-    expect(child.integrationBranch).toBe("work/parent");
+    expect(child.integrationBranch).toBe("work/parent/_integration");
   });
 });

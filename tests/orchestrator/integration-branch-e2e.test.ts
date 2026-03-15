@@ -120,9 +120,9 @@ describe("Integration branch end-to-end", () => {
       const vector = plan.steps.find((s) => s.ticketId === "data-export/export-vector")!;
       const raster = plan.steps.find((s) => s.ticketId === "data-export/export-raster")!;
 
-      expect(framework.integrationBranch).toBe("work/data-export");
-      expect(vector.integrationBranch).toBe("work/data-export");
-      expect(raster.integrationBranch).toBe("work/data-export");
+      expect(framework.integrationBranch).toBe("work/data-export/_integration");
+      expect(vector.integrationBranch).toBe("work/data-export/_integration");
+      expect(raster.integrationBranch).toBe("work/data-export/_integration");
     });
 
     it("worktree: false → no integrationBranch set even for children", () => {
@@ -609,8 +609,8 @@ describe("Integration branch end-to-end", () => {
       const sa = plan.steps.find((s) => s.ticketId === "standalone-a")!;
       const sb = plan.steps.find((s) => s.ticketId === "standalone-b")!;
 
-      expect(c1.integrationBranch).toBe("work/epic");
-      expect(c2.integrationBranch).toBe("work/epic");
+      expect(c1.integrationBranch).toBe("work/epic/_integration");
+      expect(c2.integrationBranch).toBe("work/epic/_integration");
       expect(sa.integrationBranch).toBeUndefined();
       expect(sb.integrationBranch).toBeUndefined();
     });

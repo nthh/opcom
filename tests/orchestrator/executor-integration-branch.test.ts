@@ -242,7 +242,7 @@ describe("Executor integration branch lifecycle", () => {
 
   it("creates integration branch lazily before first child step starts", async () => {
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -251,7 +251,7 @@ describe("Executor integration branch lifecycle", () => {
     await waitFor(() => plan.steps[0].status === "in-progress");
 
     // Integration branch should have been created
-    expect(mockCreateBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent");
+    expect(mockCreateBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent/_integration");
 
     executor.stop();
     await runPromise;
@@ -272,8 +272,8 @@ describe("Executor integration branch lifecycle", () => {
     });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
-      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
+      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true, maxConcurrentAgents: 2 });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -290,7 +290,7 @@ describe("Executor integration branch lifecycle", () => {
 
   it("passes integration branch as baseBranch when creating child worktree", async () => {
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -303,7 +303,7 @@ describe("Executor integration branch lifecycle", () => {
       "/tmp/test-p",
       "child-a",
       "child-a",
-      "work/parent",
+      "work/parent/_integration",
     );
 
     executor.stop();
@@ -315,8 +315,8 @@ describe("Executor integration branch lifecycle", () => {
     mockMerge.mockResolvedValue({ merged: true, conflict: false });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
-      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: ["child-a"], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
+      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: ["child-a"], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -333,7 +333,7 @@ describe("Executor integration branch lifecycle", () => {
     await waitFor(() => completed.includes("child-a"));
 
     // merge() should have been called with integration branch as target
-    expect(mockMerge).toHaveBeenCalledWith("child-a", "work/parent");
+    expect(mockMerge).toHaveBeenCalledWith("child-a", "work/parent/_integration");
 
     executor.stop();
     await runPromise;
@@ -344,7 +344,7 @@ describe("Executor integration branch lifecycle", () => {
     mockMerge.mockResolvedValue({ merged: true, conflict: false });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -357,7 +357,7 @@ describe("Executor integration branch lifecycle", () => {
     await waitFor(() => plan.steps[0].status === "done");
 
     // hasCommits should be called with integration branch as comparison base
-    expect(mockHasCommits).toHaveBeenCalledWith("child-a", "work/parent");
+    expect(mockHasCommits).toHaveBeenCalledWith("child-a", "work/parent/_integration");
 
     executor.stop();
     await runPromise;
@@ -371,7 +371,7 @@ describe("Executor integration branch lifecycle", () => {
     mockMerge.mockResolvedValueOnce({ merged: true, conflict: false });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -384,7 +384,7 @@ describe("Executor integration branch lifecycle", () => {
     await waitFor(() => plan.steps[0].status === "done");
 
     // attemptRebase should target the integration branch
-    expect(mockAttemptRebase).toHaveBeenCalledWith("child-a", "work/parent");
+    expect(mockAttemptRebase).toHaveBeenCalledWith("child-a", "work/parent/_integration");
 
     executor.stop();
     await runPromise;
@@ -404,8 +404,8 @@ describe("Executor integration branch lifecycle", () => {
     }));
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
-      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
+      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true, maxConcurrentAgents: 2 });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -425,9 +425,9 @@ describe("Executor integration branch lifecycle", () => {
     // Final smoke test should have run on the integration gate worktree
     expect(mockRunSmoke).toHaveBeenCalled();
     // Integration branch should be merged to main
-    expect(mockMergeIntegrationBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent");
+    expect(mockMergeIntegrationBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent/_integration");
     // Integration branch should be cleaned up
-    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent");
+    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent/_integration");
 
     executor.stop();
     await runPromise;
@@ -435,8 +435,8 @@ describe("Executor integration branch lifecycle", () => {
 
   it("cleans up integration branch when all children are skipped", async () => {
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
-      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
+      { ticketId: "child-b", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true, maxConcurrentAgents: 2 });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -451,7 +451,7 @@ describe("Executor integration branch lifecycle", () => {
     await waitFor(() => executor.getPlan().status === "done", 5000);
 
     // Integration branch should be cleaned up without running final gate
-    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent");
+    expect(mockDeleteBranch).toHaveBeenCalledWith("/tmp/test-p", "work/parent/_integration");
     // No merge to main (nothing to merge)
     expect(mockMergeIntegrationBranch).not.toHaveBeenCalled();
 
@@ -536,7 +536,7 @@ describe("Executor integration branch lifecycle", () => {
     });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true, pauseOnFailure: false });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -587,7 +587,7 @@ describe("Executor integration branch lifecycle", () => {
     });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true, pauseOnFailure: false });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
@@ -619,7 +619,7 @@ describe("Executor integration branch lifecycle", () => {
     });
 
     const plan = makePlan([
-      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent" },
+      { ticketId: "child-a", projectId: "p", status: "ready", blockedBy: [], integrationBranch: "work/parent/_integration" },
     ], { worktree: true });
 
     const executor = new Executor(plan, mockSM as unknown as import("../../packages/core/src/agents/session-manager.js").SessionManager);
