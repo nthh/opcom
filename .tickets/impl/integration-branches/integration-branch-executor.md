@@ -1,7 +1,7 @@
 ---
 id: integration-branch-executor
 title: "Executor integration branch lifecycle"
-status: open
+status: closed
 type: feature
 priority: 2
 created: 2026-03-15
