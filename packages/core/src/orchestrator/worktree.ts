@@ -282,6 +282,17 @@ export class WorktreeManager {
       target = stdout.trim();
     }
 
+    // Check out target branch if it differs from current HEAD
+    let previousBranch: string | undefined;
+    {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+      const current = stdout.trim();
+      if (current !== target) {
+        previousBranch = current;
+        await execFileAsync("git", ["checkout", target], { cwd });
+      }
+    }
+
     try {
       await execFileAsync(
         "git",
@@ -289,6 +300,9 @@ export class WorktreeManager {
         { cwd },
       );
       log.info("merged worktree branch", { stepId, branch: info.branch, target });
+      if (previousBranch) {
+        await execFileAsync("git", ["checkout", previousBranch], { cwd });
+      }
       return { merged: true, conflict: false };
     } catch (err: unknown) {
       // execFile errors carry stdout/stderr from git
@@ -303,10 +317,16 @@ export class WorktreeManager {
         } catch {
           // Best effort abort
         }
+        if (previousBranch) {
+          try { await execFileAsync("git", ["checkout", previousBranch], { cwd }); } catch { /* best effort */ }
+        }
         log.warn("merge conflict", { stepId, branch: info.branch, target });
         return { merged: false, conflict: true, error: combined };
       }
 
+      if (previousBranch) {
+        try { await execFileAsync("git", ["checkout", previousBranch], { cwd }); } catch { /* best effort */ }
+      }
       log.error("merge failed", { stepId, error: combined });
       return { merged: false, conflict: false, error: combined };
     }
