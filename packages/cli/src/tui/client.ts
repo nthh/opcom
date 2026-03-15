@@ -527,7 +527,24 @@ export class TuiClient {
       case "plan_updated":
       case "plan_completed":
       case "plan_paused":
-        this.activePlan = event.plan;
+        // Only update activePlan if the user is currently viewing this plan.
+        // Prevents an executing plan's updates from hijacking the display
+        // when the user is viewing a different plan.
+        if (!this.activePlan || this.activePlan.id === event.plan.id) {
+          this.activePlan = event.plan;
+        }
+        // Always update the plan summary in allPlans so the switcher stays current
+        this.allPlans = this.allPlans.map((p) =>
+          p.id === event.plan.id
+            ? {
+                ...p,
+                status: event.plan.status,
+                stepsDone: event.plan.steps.filter((s: { status: string }) => s.status === "done" || s.status === "skipped").length,
+                stepsTotal: event.plan.steps.length,
+                updatedAt: event.plan.updatedAt,
+              }
+            : p,
+        );
         break;
 
       case "plan_cancelled":
@@ -1010,13 +1027,30 @@ export class TuiClient {
       }
 
       await savePlan(plan);
-      this.activePlan = plan;
+
+      // Only switch activePlan if no executor is currently running.
+      // If an executor is running for a different plan, switching activePlan
+      // would cause the TUI to show this new plan's "ready" steps instead of
+      // the executing plan's "in-progress" steps — confusing the user.
+      if (!this.activeExecutorPlanId) {
+        this.activePlan = plan;
+      }
+
+      // Update allPlans so the plan switcher knows about the new plan
+      this.allPlans.push({
+        id: plan.id,
+        name: plan.name,
+        status: plan.status,
+        stepsDone: 0,
+        stepsTotal: plan.steps.length,
+        updatedAt: plan.updatedAt,
+        projectIds: plan.scope.projectIds,
+      });
 
       // Notify handlers so TUI re-renders
-      for (const handler of this.handlers) {
-        try {
-          handler({ type: "plan_updated", plan } as ServerEvent);
-        } catch { /* ignore */ }
+      this.handleServerEvent({ type: "plans_list", plans: this.allPlans } as ServerEvent);
+      if (!this.activeExecutorPlanId) {
+        this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
       }
 
       return { plan, assessments: flagged };
@@ -1100,15 +1134,12 @@ export class TuiClient {
       this.activeExecutor = executor;
 
       executor.on("plan_updated", ({ plan }) => {
-        this.activePlan = plan;
         this.handleServerEvent({ type: "plan_updated", plan } as ServerEvent);
       });
       executor.on("plan_paused", ({ plan }) => {
-        this.activePlan = plan;
         this.handleServerEvent({ type: "plan_paused", plan } as ServerEvent);
       });
       executor.on("plan_completed", ({ plan }) => {
-        this.activePlan = plan;
         this.handleServerEvent({ type: "plan_completed", plan } as ServerEvent);
       });
 
