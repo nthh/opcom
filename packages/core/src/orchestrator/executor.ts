@@ -2702,23 +2702,51 @@ export class Executor {
       return;
     }
 
-    // Resolve test command and run full suite
-    const testCommand = await this.resolveSmokeTestCommand();
-    const smokeResult = await runSmoke(gatePath, testCommand);
+    // Run the required test suites (same as step verification) instead of
+    // the generic runSmoke — the gate worktree is a bare checkout without
+    // npm build artifacts, so "npm run build" would fail for non-JS projects.
+    const project = await loadProject(children[0]?.projectId);
+    let gatePassed = true;
+    let gateError = "";
+
+    if (project) {
+      const suites = Array.isArray(project.testing) ? project.testing : [];
+      const requiredSuites = suites.filter((s) => s.required);
+      const suitesToRun = requiredSuites.length > 0 ? requiredSuites : suites.slice(0, 1);
+
+      for (const suite of suitesToRun) {
+        if (!suite.command) continue;
+        try {
+          const result = await this.runTestGate(gatePath, suite.command, suite.timeout);
+          if (!result.passed) {
+            gatePassed = false;
+            gateError += `Suite "${suite.name}" failed: ${result.failedTests}/${result.totalTests} tests failed. `;
+          }
+        } catch (err) {
+          gatePassed = false;
+          gateError += `Suite "${suite.name}" error: ${String(err)}. `;
+        }
+      }
+
+      if (suitesToRun.length === 0) {
+        // No test suites configured — pass the gate (trust step-level verification)
+        log.info("no test suites for integration gate, skipping", { integrationBranch });
+      }
+    }
 
     // Clean up gate worktree
     await this.worktreeManager.remove(gateStepId).catch(() => {});
 
-    if (!smokeResult.passed) {
-      log.error("integration gate failed", { integrationBranch });
+    if (!gatePassed) {
+      log.error("integration gate failed", { integrationBranch, error: gateError });
       this.logPlanEvent("integration_gate_failed", {
-        detail: { integrationBranch, smokeResult },
+        detail: { integrationBranch, error: gateError },
       });
       // Mark done children as failed
       for (const child of children) {
         if (child.status === "done") {
           child.status = "failed";
-          child.error = `Integration gate failed: ${smokeResult.testOutput?.slice(0, 500) ?? "tests failed"}`;
+          child.error = `Integration gate failed: ${gateError || "tests failed"}`;
           child.completedAt = new Date().toISOString();
         }
       }

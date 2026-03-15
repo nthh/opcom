@@ -525,14 +525,30 @@ describe("Executor integration branch lifecycle", () => {
       branch: `work/${ticketId}`,
     }));
 
-    // Final gate smoke test fails
-    mockRunSmoke.mockResolvedValue({
-      passed: false,
-      buildPassed: true,
-      testsPassed: false,
-      buildOutput: "",
-      testOutput: "FAIL tests/integration.test.ts",
-      durationMs: 200,
+    // Provide test suites so the gate has something to run.
+    // loadProject is called during startStep and again during the gate.
+    const { loadProject } = await import("../../packages/core/src/config/loader.js");
+    (loadProject as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "p", name: "p", path: "/tmp/test-p",
+      stack: { languages: [], frameworks: [], packageManagers: [], infrastructure: [], versionManagers: [] },
+      testing: [{ name: "unit", framework: "pytest", command: "pytest tests/", required: true }],
+      linting: [],
+    });
+
+    // Make the test command fail ONLY in the gate worktree (not during step verification).
+    // The gate worktree path contains "__integration-gate-".
+    let callCount = 0;
+    mockExecFile.mockImplementation((cmd: string, args: string[], opts: unknown, cb: (err: Error | null, result: { stdout: string; stderr: string }) => void) => {
+      const cwd = (opts as { cwd?: string })?.cwd ?? "";
+      if (cmd === "pytest" && cwd.includes("__integration-gate-")) {
+        const err = Object.assign(new Error("tests failed"), { stdout: "FAIL tests/integration.test.ts\n1 failed, 0 passed", stderr: "" });
+        cb(err, { stdout: "", stderr: "" });
+      } else if (cmd === "pytest") {
+        // Step verification: tests pass
+        cb(null, { stdout: "1 passed", stderr: "" });
+      } else {
+        cb(null, { stdout: "", stderr: "" });
+      }
     });
 
     const plan = makePlan([
