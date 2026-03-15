@@ -124,6 +124,36 @@ describe("Integration branch end-to-end", () => {
       expect(vector.integrationBranch).toBe("work/data-export");
       expect(raster.integrationBranch).toBe("work/data-export");
     });
+
+    it("worktree: false → no integrationBranch set even for children", () => {
+      const tickets: TicketSet[] = [
+        {
+          projectId: "proj",
+          tickets: [
+            makeTicket({ id: "data-export" }),
+            makeTicket({ id: "export-framework", parent: "data-export" }),
+            makeTicket({ id: "export-vector", parent: "data-export", deps: ["export-framework"] }),
+            makeTicket({ id: "export-raster", parent: "data-export", deps: ["export-framework"] }),
+          ],
+        },
+      ];
+
+      const plan = computePlan(tickets, {}, "e2e-plan", undefined, { worktree: false });
+
+      // Children should still be in the plan
+      const framework = plan.steps.find((s) => s.ticketId === "data-export/export-framework")!;
+      const vector = plan.steps.find((s) => s.ticketId === "data-export/export-vector")!;
+      const raster = plan.steps.find((s) => s.ticketId === "data-export/export-raster")!;
+
+      expect(framework).toBeDefined();
+      expect(vector).toBeDefined();
+      expect(raster).toBeDefined();
+
+      // No integrationBranch when worktree is disabled
+      expect(framework.integrationBranch).toBeUndefined();
+      expect(vector.integrationBranch).toBeUndefined();
+      expect(raster.integrationBranch).toBeUndefined();
+    });
   });
 
   // --- Child worktree branches from integration branch ---
