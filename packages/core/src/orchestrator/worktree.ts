@@ -132,7 +132,14 @@ export class WorktreeManager {
           cwd: projectPath,
         });
       } catch {
-        await rm(worktreePath, { recursive: true, force: true });
+        // Use shell rm -rf instead of Node's fs.rm — the latter can fail with
+        // ENOTEMPTY on macOS when removing deeply nested node_modules trees.
+        try {
+          await execFileAsync("rm", ["-rf", worktreePath]);
+        } catch {
+          // Last resort: Node rm (may work if the race condition doesn't trigger)
+          await rm(worktreePath, { recursive: true, force: true }).catch(() => {});
+        }
         try {
           await execFileAsync("git", ["worktree", "prune"], { cwd: projectPath });
         } catch { /* ignore */ }
