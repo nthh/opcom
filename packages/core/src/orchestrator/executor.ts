@@ -3103,7 +3103,10 @@ export class Executor {
   private async getChangedFiles(cwd: string, branch?: string): Promise<string[]> {
     try {
       const diffRef = branch ? `main...${branch}` : "HEAD~1";
-      const { stdout } = await execFileAsync("git", ["diff", "--name-only", diffRef], {
+      const { stdout } = await execFileAsync("git", ["diff", "--name-only", diffRef, "--",
+        ".", ":(exclude)**/package-lock.json", ":(exclude)**/yarn.lock",
+        ":(exclude)**/pnpm-lock.yaml", ":(exclude)**/Pipfile.lock", ":(exclude)**/poetry.lock",
+      ], {
         cwd,
         maxBuffer: 1024 * 1024,
       });
