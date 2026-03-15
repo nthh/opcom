@@ -33,6 +33,9 @@ const ALWAYS_SAFE = [
   "wc *",
   "cd *",
   "make *",
+  "npx *",
+  "npm test*",
+  "npm run *",
 ];
 
 /** Package manager → allowed command patterns. */
@@ -55,13 +58,14 @@ const LANG_PATTERNS: Record<string, string[]> = {
   java: ["mvn *", "gradle *", "./gradlew *"],
 };
 
-/** Testing framework → command patterns (direct invocation without npx).
- *  Includes cd-prefixed variants since agents often cd into subdirectories
- *  before running tests, and Claude Code matches the full command string. */
+/** Testing framework → command patterns.
+ *  Includes npx variants (project may not detect npm as a package manager
+ *  when it's only in subdirectories) and cd-prefixed variants since agents
+ *  often cd into subdirectories before running tests. */
 const TEST_FRAMEWORK_PATTERNS: Record<string, string[]> = {
-  vitest: ["vitest *", "vitest run*", "cd * && *vitest*", "cd *vitest*"],
-  jest: ["jest *", "jest --*", "cd * && *jest*"],
-  mocha: ["mocha *", "cd * && *mocha*"],
+  vitest: ["vitest *", "vitest run*", "npx vitest*", "npx vitest run*", "cd * && *vitest*", "cd *vitest*"],
+  jest: ["jest *", "jest --*", "npx jest*", "cd * && *jest*"],
+  mocha: ["mocha *", "npx mocha*", "cd * && *mocha*"],
   pytest: ["pytest *", "python -m pytest*", "cd * && *pytest*"],
   playwright: ["playwright test*", "npx playwright*", "cd * && *playwright*"],
 };
