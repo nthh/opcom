@@ -167,7 +167,7 @@ export function computePlan(
         const stepId = stepIdMap.get(ticketId) ?? ticketId;
         const step = steps.find((s) => s.ticketId === stepId);
         if (step) {
-          step.integrationBranch = `work/${ticket.parent}`;
+          step.integrationBranch = `work/${ticket.parent}/_integration`;
         }
       }
     }
@@ -453,10 +453,23 @@ export function expandSubtaskSteps(
       const subStepId = subIdMap.get(sub.id)!;
       const subBlockedBy: string[] = [];
 
-      // Resolve subtask-internal deps
+      // Resolve subtask deps (bare ID or full "parent/subtask" path)
       for (const dep of sub.deps) {
+        // Try bare subtask ID first (sibling reference)
         const depStepId = subIdMap.get(dep);
-        if (depStepId) subBlockedBy.push(depStepId);
+        if (depStepId) {
+          subBlockedBy.push(depStepId);
+        } else {
+          // Try as full step ID (e.g. "identity-and-namespaces/username-and-profiles")
+          // Check if it matches a value in the subIdMap (same parent)
+          const values = new Set(subIdMap.values());
+          if (values.has(dep)) {
+            subBlockedBy.push(dep);
+          } else {
+            // Cross-ticket dep — use as-is (resolved externally)
+            subBlockedBy.push(dep);
+          }
+        }
       }
 
       // Subtasks with no internal deps inherit the parent's external blockedBy
