@@ -31,6 +31,7 @@ const ALWAYS_SAFE = [
   "tail *",
   "find *",
   "wc *",
+  "cd *",
   "make *",
 ];
 
