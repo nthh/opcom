@@ -1,4 +1,4 @@
-import { readFile, writeFile, stat } from "node:fs/promises";
+import { readFile, writeFile, stat, rm } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -829,6 +829,20 @@ export class Executor {
     // Clear rebase conflict context — agent has either resolved it or failed
     const wasRebaseResolution = !!step.rebaseConflict;
     step.rebaseConflict = undefined;
+
+    // Clear lock file — the agent is done, so the worktree no longer needs
+    // PID-based protection.  Stale lock files with recycled PIDs would block
+    // worktree reuse on retry.
+    if (step.worktreePath) {
+      try {
+        const lockPath = join(step.worktreePath, ".opcom-lock");
+        if (existsSync(lockPath)) {
+          await rm(lockPath, { force: true });
+        }
+      } catch {
+        // Best effort
+      }
+    }
 
     // Recover any stashed changes — agents may stash work and forget to pop.
     if (step.worktreePath) {
