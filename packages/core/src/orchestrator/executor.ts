@@ -93,6 +93,7 @@ export class Executor {
   private stallDetector: StallDetector;
   private stallCheckTimer: ReturnType<typeof setInterval> | null = null;
   private stateStore: StateStore;
+  private createdIntegrationBranches = new Set<string>(); // tracks integration branches already created
 
   constructor(plan: Plan, sessionManager: SessionManager, eventStore?: EventStore, stateStore?: StateStore) {
     this.plan = plan;
@@ -780,9 +781,9 @@ export class Executor {
           // Clean up worktree if present
           if (this.plan.config.worktree && step.worktreePath) {
             // Merge first if there are commits
-            const hasCommits = await this.worktreeManager.hasCommits(this.worktreeKey(step)).catch(() => false);
+            const hasCommits = await this.worktreeManager.hasCommits(this.worktreeKey(step), step.integrationBranch).catch(() => false);
             if (hasCommits) {
-              await this.worktreeManager.merge(this.worktreeKey(step)).catch(() => {});
+              await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch).catch(() => {});
             }
             await this.worktreeManager.remove(this.worktreeKey(step)).catch(() => {});
             step.worktreePath = undefined;
@@ -854,7 +855,7 @@ export class Executor {
       }
     }
 
-    const hasWork = await this.worktreeManager.hasCommits(this.worktreeKey(step));
+    const hasWork = await this.worktreeManager.hasCommits(this.worktreeKey(step), step.integrationBranch);
 
     if (event.sessionId) {
       this.sessionToStep.delete(event.sessionId);
@@ -870,8 +871,8 @@ export class Executor {
     if (verificationMode === "none") {
       log.info("verification mode: none — skipping verification", { ticketId: step.ticketId });
       if (hasWork) {
-        // Merge into main
-        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step));
+        // Merge into main (or integration branch for children)
+        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
         if (!mergeResult.merged) {
           step.status = "needs-rebase";
           step.error = `Merge failed: ${mergeResult.error}`;
@@ -945,7 +946,7 @@ export class Executor {
 
       // Output-exists passed — proceed to merge if there are commits
       if (hasWork) {
-        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step));
+        const mergeResult = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
         if (!mergeResult.merged) {
           step.status = "needs-rebase";
           step.error = `Merge failed: ${mergeResult.error}`;
@@ -1153,9 +1154,9 @@ export class Executor {
       return;
     }
 
-    // Verification passed (or skipped) — merge into main tree
+    // Verification passed (or skipped) — merge into target (integration branch or main)
     const mergeId = this.worktreeKey(step);
-    let mergeResult = await this.worktreeManager.merge(mergeId);
+    let mergeResult = await this.worktreeManager.merge(mergeId, step.integrationBranch);
 
     if (mergeResult.conflict) {
       if (verification) step.verification = verification;
@@ -1305,8 +1306,9 @@ export class Executor {
       agentSessionId: event.sessionId,
     });
 
-    // Stage 1: attempt clean rebase
-    const rebaseResult = await this.worktreeManager.attemptRebase(this.worktreeKey(step));
+    // Stage 1: attempt clean rebase (target integration branch for children, main for standalone)
+    const rebaseTarget = step.integrationBranch ?? undefined;
+    const rebaseResult = await this.worktreeManager.attemptRebase(this.worktreeKey(step), rebaseTarget);
 
     if (rebaseResult.rebased) {
       // Clean rebase succeeded — re-verify (upstream changes may break tests)
@@ -1366,7 +1368,7 @@ export class Executor {
       }
 
       // Post-rebase verification passed — merge again
-      const reMerge = await this.worktreeManager.merge(this.worktreeKey(step));
+      const reMerge = await this.worktreeManager.merge(this.worktreeKey(step), step.integrationBranch);
       if (reMerge.merged) {
         // Success — complete the step
         step.status = "done";
@@ -1423,7 +1425,7 @@ export class Executor {
 
       step.rebaseConflict = {
         files: rebaseResult.conflictFiles ?? [],
-        baseBranch: "main",
+        baseBranch: step.integrationBranch ?? "main",
       };
       step.status = "ready";
       step.agentSessionId = undefined;
@@ -2237,6 +2239,9 @@ export class Executor {
     // Close parent tickets whose subtask steps are all done
     await this.closeCompletedSubtaskParents();
 
+    // Check if any integration branches have all children done → run final gate
+    await this.checkIntegrationBranchCompletion();
+
     await savePlan(this.plan);
 
     if (this.plan.status === "executing") {
@@ -2470,14 +2475,22 @@ export class Executor {
       contextPacket.project.path = swarmWorktree.worktreePath;
       log.info("reusing swarm worktree", { ticketId: step.ticketId, worktree: swarmWorktree.worktreePath });
     } else if (this.plan.config.worktree && !step.rebaseConflict) {
+      // Lazily create integration branch before first child step starts
+      if (step.integrationBranch && !this.createdIntegrationBranches.has(step.integrationBranch)) {
+        await this.ensureIntegrationBranch(project.path, step.integrationBranch);
+      }
+
       // Swarm subtasks use parent ID so all siblings share one worktree
       const worktreeId = step.teamId ? baseTicketId(step.ticketId)
         : this.isSwarmSubtask(step) ? baseTicketId(step.ticketId)
         : step.ticketId;
+      // Integration branch children branch from the integration branch, not HEAD
+      const baseBranch = step.integrationBranch ?? undefined;
       const wtInfo = await this.worktreeManager.create(
         project.path,
         worktreeId,
         worktreeId,
+        baseBranch,
       );
       step.worktreePath = wtInfo.worktreePath;
       step.worktreeBranch = wtInfo.branch;
@@ -2589,6 +2602,199 @@ export class Executor {
       }
     }
     return null;
+  }
+
+  // --- Integration branch helpers ---
+
+  /**
+   * Lazily create an integration branch if it doesn't already exist.
+   * Called before the first child step of an integration parent starts.
+   */
+  private async ensureIntegrationBranch(projectPath: string, branchName: string): Promise<void> {
+    try {
+      await WorktreeManager.createBranch(projectPath, branchName);
+      this.createdIntegrationBranches.add(branchName);
+      log.info("created integration branch", { branchName });
+      this.logPlanEvent("integration_branch_created", { detail: { branchName } });
+    } catch (err) {
+      // Branch may already exist (e.g. from a previous run) — verify and track it
+      try {
+        await execFileAsync("git", ["rev-parse", "--verify", branchName], { cwd: projectPath });
+        this.createdIntegrationBranches.add(branchName);
+        log.info("integration branch already exists", { branchName });
+      } catch {
+        throw err; // Branch creation genuinely failed
+      }
+    }
+  }
+
+  /**
+   * Check if all sibling steps sharing an integration branch are terminal
+   * (done or skipped). Used to trigger the final integration gate.
+   */
+  private allIntegrationChildrenDone(integrationBranch: string): boolean {
+    const children = this.plan.steps.filter((s) => s.integrationBranch === integrationBranch);
+    return children.length > 0 && children.every(
+      (s) => s.status === "done" || s.status === "skipped",
+    );
+  }
+
+  /**
+   * Run final verification on the integration branch and merge to main.
+   * Called when all children of an integration parent are done.
+   * Creates a temporary worktree to run the full test suite, then merges to main.
+   */
+  private async runFinalIntegrationGate(
+    integrationBranch: string,
+    projectPath: string,
+  ): Promise<void> {
+    log.info("running final integration gate", { integrationBranch });
+    this.logPlanEvent("integration_gate_started", { detail: { integrationBranch } });
+
+    const children = this.plan.steps.filter((s) => s.integrationBranch === integrationBranch);
+
+    // Create a temporary worktree for the integration branch to run tests
+    const gateStepId = `__integration-gate-${integrationBranch.replace(/\//g, "-")}`;
+    let gatePath: string | undefined;
+    try {
+      const wtInfo = await this.worktreeManager.create(
+        projectPath,
+        gateStepId,
+        gateStepId,
+        integrationBranch,
+      );
+      gatePath = wtInfo.worktreePath;
+    } catch (err) {
+      log.error("failed to create integration gate worktree", { integrationBranch, error: String(err) });
+      this.logPlanEvent("integration_gate_failed", {
+        detail: { integrationBranch, error: String(err) },
+      });
+      return;
+    }
+
+    // Resolve test command and run full suite
+    const testCommand = await this.resolveSmokeTestCommand();
+    const smokeResult = await runSmoke(gatePath, testCommand);
+
+    // Clean up gate worktree
+    await this.worktreeManager.remove(gateStepId).catch(() => {});
+
+    if (!smokeResult.passed) {
+      log.error("integration gate failed", { integrationBranch });
+      this.logPlanEvent("integration_gate_failed", {
+        detail: { integrationBranch, smokeResult },
+      });
+      // Mark done children as failed
+      for (const child of children) {
+        if (child.status === "done") {
+          child.status = "failed";
+          child.error = `Integration gate failed: ${smokeResult.testOutput?.slice(0, 500) ?? "tests failed"}`;
+          child.completedAt = new Date().toISOString();
+        }
+      }
+      return;
+    }
+
+    // Merge integration branch to main
+    const mergeResult = await WorktreeManager.mergeIntegrationBranch(projectPath, integrationBranch);
+    if (!mergeResult.merged) {
+      log.error("integration branch merge to main failed", { integrationBranch, error: mergeResult.error });
+      this.logPlanEvent("integration_merge_failed", {
+        detail: { integrationBranch, error: mergeResult.error },
+      });
+      for (const child of children) {
+        if (child.status === "done") {
+          child.status = "needs-rebase";
+          child.error = `Integration branch merge to main failed: ${mergeResult.error}`;
+          child.completedAt = new Date().toISOString();
+        }
+      }
+      return;
+    }
+
+    // Clean up integration branch
+    await this.cleanupIntegrationBranch(projectPath, integrationBranch);
+
+    log.info("integration gate passed, merged to main", { integrationBranch });
+    this.logPlanEvent("integration_gate_passed", { detail: { integrationBranch } });
+  }
+
+  /**
+   * Delete an integration branch after it has been merged or abandoned.
+   */
+  private async cleanupIntegrationBranch(projectPath: string, branchName: string): Promise<void> {
+    try {
+      await WorktreeManager.deleteBranch(projectPath, branchName);
+      log.info("deleted integration branch", { branchName });
+    } catch (err) {
+      log.warn("failed to delete integration branch", { branchName, error: String(err) });
+    }
+    this.createdIntegrationBranches.delete(branchName);
+  }
+
+  /**
+   * Check if any integration branches have all children done and trigger final gate.
+   * Tracks which branches have already been finalized to avoid duplicate runs.
+   */
+  private async checkIntegrationBranchCompletion(): Promise<void> {
+    // Collect unique integration branches
+    const branches = new Set<string>();
+    for (const step of this.plan.steps) {
+      if (step.integrationBranch) branches.add(step.integrationBranch);
+    }
+
+    for (const branch of branches) {
+      if (this.finalizedIntegrationBranches?.has(branch)) continue;
+      if (!this.allIntegrationChildrenDone(branch)) continue;
+
+      const children = this.plan.steps.filter((s) => s.integrationBranch === branch);
+      const projectId = children[0]?.projectId;
+      if (!projectId) continue;
+
+      const project = await loadProject(projectId);
+      if (!project) continue;
+
+      if (!this.finalizedIntegrationBranches) this.finalizedIntegrationBranches = new Set();
+      this.finalizedIntegrationBranches.add(branch);
+
+      // If all children were skipped (none done), just clean up the branch
+      const anyDone = children.some((s) => s.status === "done");
+      if (!anyDone) {
+        log.info("all integration children skipped, cleaning up branch", { integrationBranch: branch });
+        await this.cleanupIntegrationBranch(project.path, branch);
+        continue;
+      }
+
+      // At least one child has work — run the final gate
+      await this.runFinalIntegrationGate(branch, project.path);
+    }
+  }
+
+  private finalizedIntegrationBranches?: Set<string>;
+
+  /**
+   * Clean up integration branches when plan is cancelled or steps are skipped.
+   * Called for any integration branch whose children are all terminal
+   * but not all "done" (i.e. some failed or were skipped without success).
+   */
+  private async cleanupAbandonedIntegrationBranches(): Promise<void> {
+    const branches = new Set<string>();
+    for (const step of this.plan.steps) {
+      if (step.integrationBranch) branches.add(step.integrationBranch);
+    }
+
+    for (const branch of branches) {
+      if (!this.createdIntegrationBranches.has(branch)) continue;
+
+      const children = this.plan.steps.filter((s) => s.integrationBranch === branch);
+      const projectId = children[0]?.projectId;
+      if (!projectId) continue;
+
+      const project = await loadProject(projectId);
+      if (!project) continue;
+
+      await this.cleanupIntegrationBranch(project.path, branch);
+    }
   }
 
   private async getCommitHash(cwd: string): Promise<string> {
@@ -2959,7 +3165,7 @@ export class Executor {
     if (this.plan.config.worktree) {
       for (const step of this.plan.steps) {
         if (step.status === "in-progress" && step.worktreePath) {
-          const has = await this.worktreeManager.hasCommits(this.worktreeKey(step)).catch(() => false);
+          const has = await this.worktreeManager.hasCommits(this.worktreeKey(step), step.integrationBranch).catch(() => false);
           if (has) stepsWithCommits.add(step.ticketId);
         }
       }

@@ -227,6 +227,7 @@ describe("Executor with worktree isolation", () => {
       "/tmp/test-p",
       "t1",
       "t1",
+      undefined,
     );
 
     // Step should have worktree info
@@ -281,7 +282,7 @@ describe("Executor with worktree isolation", () => {
     await waitFor(() => completed.includes("t1"));
 
     // hasCommits should have been called
-    expect(mockHasCommits).toHaveBeenCalledWith("t1");
+    expect(mockHasCommits).toHaveBeenCalledWith("t1", undefined);
     // Step should be completed via worktree merge
     expect(completed).toContain("t1");
 
@@ -370,7 +371,7 @@ describe("Executor with worktree isolation", () => {
     mockSM.simulateCompletion(sessionId);
     await waitFor(() => plan.steps[0].status === "done");
 
-    expect(mockMerge).toHaveBeenCalledWith("t1");
+    expect(mockMerge).toHaveBeenCalledWith("t1", undefined);
     expect(mockRemove).toHaveBeenCalledWith("t1");
     expect(plan.steps[0].status).toBe("done");
     // Worktree fields should be cleared after cleanup
