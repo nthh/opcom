@@ -291,16 +291,32 @@ export class WorktreeManager {
       target = stdout.trim();
     }
 
-    // Check out target branch if it differs from current HEAD
+    // Check out target branch if it differs from current HEAD.
+    // Auto-stash uncommitted changes so dirty trees don't block checkout.
     let previousBranch: string | undefined;
+    let stashed = false;
     {
       const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
       const current = stdout.trim();
       if (current !== target) {
         previousBranch = current;
+        const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
+        if (status.trim().length > 0) {
+          await execFileAsync("git", ["stash", "push", "-m", "opcom: auto-stash before merge"], { cwd });
+          stashed = true;
+        }
         await execFileAsync("git", ["checkout", target], { cwd });
       }
     }
+
+    const restoreTree = async () => {
+      if (previousBranch) {
+        try { await execFileAsync("git", ["checkout", previousBranch], { cwd }); } catch { /* best effort */ }
+      }
+      if (stashed) {
+        try { await execFileAsync("git", ["stash", "pop"], { cwd }); } catch { /* best effort */ }
+      }
+    };
 
     try {
       await execFileAsync(
@@ -309,33 +325,20 @@ export class WorktreeManager {
         { cwd },
       );
       log.info("merged worktree branch", { stepId, branch: info.branch, target });
-      if (previousBranch) {
-        await execFileAsync("git", ["checkout", previousBranch], { cwd });
-      }
+      await restoreTree();
       return { merged: true, conflict: false };
     } catch (err: unknown) {
-      // execFile errors carry stdout/stderr from git
       const e = err as { message?: string; stdout?: string; stderr?: string };
       const combined = [e.message, e.stdout, e.stderr].filter(Boolean).join("\n");
 
-      // Check if it's a merge conflict
       if (combined.includes("CONFLICT") || combined.includes("Automatic merge failed")) {
-        // Abort the merge
-        try {
-          await execFileAsync("git", ["merge", "--abort"], { cwd });
-        } catch {
-          // Best effort abort
-        }
-        if (previousBranch) {
-          try { await execFileAsync("git", ["checkout", previousBranch], { cwd }); } catch { /* best effort */ }
-        }
+        try { await execFileAsync("git", ["merge", "--abort"], { cwd }); } catch { /* best effort */ }
+        await restoreTree();
         log.warn("merge conflict", { stepId, branch: info.branch, target });
         return { merged: false, conflict: true, error: combined };
       }
 
-      if (previousBranch) {
-        try { await execFileAsync("git", ["checkout", previousBranch], { cwd }); } catch { /* best effort */ }
-      }
+      await restoreTree();
       log.error("merge failed", { stepId, error: combined });
       return { merged: false, conflict: false, error: combined };
     }
@@ -695,8 +698,14 @@ export class WorktreeManager {
   ): Promise<MergeResult> {
     const cwd = projectPath;
 
-    // If a target is specified, check it out first
+    // Auto-stash uncommitted changes so dirty trees don't block checkout.
+    let stashed = false;
     if (targetBranch) {
+      const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
+      if (status.trim().length > 0) {
+        await execFileAsync("git", ["stash", "push", "-m", "opcom: auto-stash before integration merge"], { cwd });
+        stashed = true;
+      }
       await execFileAsync("git", ["checkout", targetBranch], { cwd });
     }
 
@@ -707,6 +716,9 @@ export class WorktreeManager {
         { cwd },
       );
       log.info("merged integration branch", { branchName, targetBranch });
+      if (stashed) {
+        try { await execFileAsync("git", ["stash", "pop"], { cwd }); } catch { /* best effort */ }
+      }
       return { merged: true, conflict: false };
     } catch (err: unknown) {
       const e = err as { message?: string; stdout?: string; stderr?: string };
@@ -718,10 +730,16 @@ export class WorktreeManager {
         } catch {
           // Best effort abort
         }
+        if (stashed) {
+          try { await execFileAsync("git", ["stash", "pop"], { cwd }); } catch { /* best effort */ }
+        }
         log.warn("integration branch merge conflict", { branchName, targetBranch });
         return { merged: false, conflict: true, error: combined };
       }
 
+      if (stashed) {
+        try { await execFileAsync("git", ["stash", "pop"], { cwd }); } catch { /* best effort */ }
+      }
       log.error("integration branch merge failed", { branchName, error: combined });
       return { merged: false, conflict: false, error: combined };
     }
