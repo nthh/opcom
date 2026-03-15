@@ -2474,7 +2474,7 @@ export class Executor {
       agentCwd = swarmWorktree.worktreePath;
       contextPacket.project.path = swarmWorktree.worktreePath;
       log.info("reusing swarm worktree", { ticketId: step.ticketId, worktree: swarmWorktree.worktreePath });
-    } else if (this.plan.config.worktree && !step.rebaseConflict) {
+    } else if (this.plan.config.worktree && !step.rebaseConflict && !step.worktreePath) {
       // Lazily create integration branch before first child step starts
       if (step.integrationBranch && !this.createdIntegrationBranches.has(step.integrationBranch)) {
         await this.ensureIntegrationBranch(project.path, step.integrationBranch);
@@ -3319,9 +3319,13 @@ export class Executor {
    * Scans each project's .opcom/worktrees/ directory.
    */
   private async cleanupOrphanedWorktrees(): Promise<void> {
-    // Collect step IDs that are currently in-progress — their worktrees must be preserved
+    // Collect step IDs whose worktrees must be preserved:
+    // - in-progress/verifying steps (active agents)
+    // - steps with worktreePath set (retrying after verification failure — worktree has agent work)
     const activeStepIds = new Set(
-      this.plan.steps.filter((s) => s.status === "in-progress" || s.status === "verifying").map((s) => s.ticketId),
+      this.plan.steps
+        .filter((s) => s.status === "in-progress" || s.status === "verifying" || s.worktreePath)
+        .map((s) => this.worktreeKey(s)),
     );
     const projectIds = [...new Set(this.plan.steps.map((s) => s.projectId))];
     for (const pid of projectIds) {

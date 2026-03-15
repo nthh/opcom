@@ -511,93 +511,136 @@ export class WorktreeManager {
       return [];
     }
 
+    // Collect actual worktree entries, handling nested paths (e.g. materialization/format-raster).
+    // readdir returns top-level entries; subdirectories that are NOT git worktrees
+    // (no .git file) are parent directories containing nested worktrees — recurse into them.
+    const worktreeEntries: { id: string; path: string }[] = [];
     try {
-      const entries = await readdir(worktreeBase);
-      for (const entry of entries) {
-        if (keep?.has(entry)) {
-          log.debug("skipping active worktree", { entry });
-          continue;
-        }
-
-        // Check if the worktree branch has unmerged commits
-        const branch = `work/${entry}`;
-        try {
-          const { stdout } = await execFileAsync(
-            "git",
-            ["log", `${mainHead}..${branch}`, "--oneline"],
-            { cwd: projectPath },
-          );
-          if (stdout.trim().length > 0) {
-            log.info("skipping worktree with unmerged commits", { entry, branch });
-            continue;
-          }
-        } catch {
-          // Branch doesn't exist or other error — safe to clean up
-        }
-
-        // Check for uncommitted changes (edits the agent wrote but never committed)
-        const worktreePath = join(worktreeBase, entry);
-        try {
-          const { stdout } = await execFileAsync(
-            "git", ["status", "--porcelain"], { cwd: worktreePath },
-          );
-          // Filter out the opcom lock file — it's internal, not agent work
-          const realChanges = stdout.trim().split("\n")
-            .filter((l) => l.length > 0 && !l.endsWith(LOCK_FILE));
-          if (realChanges.length > 0) {
-            log.info("skipping worktree with uncommitted changes", { entry });
-            continue;
-          }
-        } catch {
-          // Can't check status — fall through to other checks
-        }
-
-        // Check for lock file — if the agent process is still alive, skip
-        const lockPath = join(worktreePath, LOCK_FILE);
-        if (existsSync(lockPath)) {
+      const topEntries = await readdir(worktreeBase, { withFileTypes: true });
+      for (const entry of topEntries) {
+        if (!entry.isDirectory()) continue;
+        const entryPath = join(worktreeBase, entry.name);
+        // A git worktree has a .git file (not directory) at its root
+        if (existsSync(join(entryPath, ".git"))) {
+          worktreeEntries.push({ id: entry.name, path: entryPath });
+        } else {
+          // Not a worktree itself — check for nested worktrees (integration branch grouping)
           try {
-            const pidStr = await readFile(lockPath, "utf-8");
-            const pid = parseInt(pidStr.trim(), 10);
-            if (!isNaN(pid) && isProcessAlive(pid)) {
-              log.info("skipping worktree with live agent process", { entry, pid });
-              continue;
+            const subEntries = await readdir(entryPath, { withFileTypes: true });
+            for (const sub of subEntries) {
+              if (!sub.isDirectory()) continue;
+              const subPath = join(entryPath, sub.name);
+              const nestedId = `${entry.name}/${sub.name}`;
+              worktreeEntries.push({ id: nestedId, path: subPath });
             }
-            log.info("lock file found but process is dead, removing", { entry, pid });
           } catch {
-            // Can't read lock — treat as stale
+            // Can't read subdirectory — skip
           }
-        }
-
-        try {
-          await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {
-            cwd: projectPath,
-          });
-          log.info("cleaned up orphaned worktree", { worktreePath });
-        } catch {
-          await rm(worktreePath, { recursive: true, force: true });
-          log.info("force-removed orphaned worktree", { worktreePath });
-        }
-
-        // Delete the branch (only reached if no unmerged commits)
-        try {
-          await execFileAsync("git", ["branch", "-D", branch], { cwd: projectPath });
-        } catch {
-          // Branch may already be gone
-        }
-
-        cleaned.push(entry);
-      }
-
-      // Prune git worktree references
-      if (cleaned.length > 0) {
-        try {
-          await execFileAsync("git", ["worktree", "prune"], { cwd: projectPath });
-        } catch {
-          // Best effort
         }
       }
     } catch (err) {
-      log.warn("cleanupOrphaned failed", { projectPath, error: String(err) });
+      log.warn("cleanupOrphaned: readdir failed", { worktreeBase, error: String(err) });
+      return [];
+    }
+
+    for (const { id: entry, path: worktreePath } of worktreeEntries) {
+      if (keep?.has(entry)) {
+        log.debug("skipping active worktree", { entry });
+        continue;
+      }
+
+      // Check if the worktree branch has unmerged commits
+      const branch = `work/${entry}`;
+      try {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["log", `${mainHead}..${branch}`, "--oneline"],
+          { cwd: projectPath },
+        );
+        if (stdout.trim().length > 0) {
+          log.info("skipping worktree with unmerged commits", { entry, branch });
+          continue;
+        }
+      } catch {
+        // Branch doesn't exist or other error — safe to clean up
+      }
+
+      // Check for uncommitted changes (edits the agent wrote but never committed)
+      try {
+        const { stdout } = await execFileAsync(
+          "git", ["status", "--porcelain"], { cwd: worktreePath },
+        );
+        // Filter out the opcom lock file — it's internal, not agent work
+        const realChanges = stdout.trim().split("\n")
+          .filter((l) => l.length > 0 && !l.endsWith(LOCK_FILE));
+        if (realChanges.length > 0) {
+          log.info("skipping worktree with uncommitted changes", { entry });
+          continue;
+        }
+      } catch {
+        // Can't check status — fall through to other checks
+      }
+
+      // Check for lock file — if the agent process is still alive, skip
+      const lockPath = join(worktreePath, LOCK_FILE);
+      if (existsSync(lockPath)) {
+        try {
+          const pidStr = await readFile(lockPath, "utf-8");
+          const pid = parseInt(pidStr.trim(), 10);
+          if (!isNaN(pid) && isProcessAlive(pid)) {
+            log.info("skipping worktree with live agent process", { entry, pid });
+            continue;
+          }
+          log.info("lock file found but process is dead, removing", { entry, pid });
+        } catch {
+          // Can't read lock — treat as stale
+        }
+      }
+
+      try {
+        await execFileAsync("git", ["worktree", "remove", worktreePath, "--force"], {
+          cwd: projectPath,
+        });
+        log.info("cleaned up orphaned worktree", { worktreePath });
+      } catch {
+        await rm(worktreePath, { recursive: true, force: true });
+        log.info("force-removed orphaned worktree", { worktreePath });
+      }
+
+      // Delete the branch (only reached if no unmerged commits)
+      try {
+        await execFileAsync("git", ["branch", "-D", branch], { cwd: projectPath });
+      } catch {
+        // Branch may already be gone
+      }
+
+      cleaned.push(entry);
+    }
+
+    // Clean up empty parent directories left after nested worktree removal
+    try {
+      const topEntries = await readdir(worktreeBase, { withFileTypes: true });
+      for (const entry of topEntries) {
+        if (!entry.isDirectory()) continue;
+        const entryPath = join(worktreeBase, entry.name);
+        // Skip if it's an actual worktree
+        if (existsSync(join(entryPath, ".git"))) continue;
+        try {
+          const remaining = await readdir(entryPath);
+          if (remaining.length === 0) {
+            await rm(entryPath, { recursive: true, force: true });
+          }
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+
+    // Prune git worktree references
+    if (cleaned.length > 0) {
+      try {
+        await execFileAsync("git", ["worktree", "prune"], { cwd: projectPath });
+      } catch {
+        // Best effort
+      }
     }
 
     return cleaned;
@@ -679,19 +722,46 @@ export class WorktreeManager {
    * Install dependencies in the worktree.
    * Runs `npm install` instead of symlinking node_modules to avoid
    * ELOOP errors from circular symlinks in monorepo workspaces.
+   *
+   * If no root package.json exists (e.g. multi-project repos like Folia
+   * with app/, workers/, schema/ each having their own), scans immediate
+   * subdirectories and installs in each one that has a package.json.
    */
   private async installDeps(worktreePath: string): Promise<void> {
     const pkgJson = join(worktreePath, "package.json");
-    if (!existsSync(pkgJson)) return;
+    if (existsSync(pkgJson)) {
+      // Root-level install (monorepo workspaces, single-package projects)
+      await this.npmInstallAt(worktreePath);
+      return;
+    }
 
+    // No root package.json — scan immediate subdirectories
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(worktreePath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      const subDir = join(worktreePath, entry.name);
+      if (existsSync(join(subDir, "package.json"))) {
+        await this.npmInstallAt(subDir);
+      }
+    }
+  }
+
+  /** Run npm install + npm run build in a directory. */
+  private async npmInstallAt(dir: string): Promise<void> {
     try {
       await execFileAsync("npm", ["install"], {
-        cwd: worktreePath,
+        cwd: dir,
         timeout: 60000,
       });
-      log.debug("installed deps in worktree", { worktreePath });
+      log.debug("installed deps", { dir });
     } catch (err) {
-      log.warn("failed to install deps in worktree", { worktreePath, error: String(err) });
+      log.warn("failed to install deps", { dir, error: String(err) });
       return;
     }
 
@@ -699,12 +769,12 @@ export class WorktreeManager {
     // Without this, monorepo project references (e.g. @opcom/types) can't resolve.
     try {
       await execFileAsync("npm", ["run", "build"], {
-        cwd: worktreePath,
+        cwd: dir,
         timeout: 120_000,
       });
-      log.debug("built packages in worktree", { worktreePath });
+      log.debug("built packages", { dir });
     } catch (err) {
-      log.warn("failed to build in worktree", { worktreePath, error: String(err) });
+      log.warn("failed to build", { dir, error: String(err) });
     }
   }
 }
