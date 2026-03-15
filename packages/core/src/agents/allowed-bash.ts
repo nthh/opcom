@@ -31,6 +31,7 @@ const ALWAYS_SAFE = [
   "tail *",
   "find *",
   "wc *",
+  "make *",
 ];
 
 /** Package manager → allowed command patterns. */
@@ -51,6 +52,15 @@ const LANG_PATTERNS: Record<string, string[]> = {
   rust: ["cargo test*", "cargo build*", "cargo check*", "cargo clippy*", "cargo fmt*"],
   ruby: ["bundle exec *", "bundle install*", "rake *"],
   java: ["mvn *", "gradle *", "./gradlew *"],
+};
+
+/** Testing framework → command patterns (direct invocation without npx). */
+const TEST_FRAMEWORK_PATTERNS: Record<string, string[]> = {
+  vitest: ["vitest *", "vitest run*"],
+  jest: ["jest *", "jest --*"],
+  mocha: ["mocha *"],
+  pytest: ["pytest *", "python -m pytest*"],
+  playwright: ["playwright test*", "npx playwright*"],
 };
 
 /** Linter name → command patterns. */
@@ -100,6 +110,13 @@ export function deriveAllowedBashTools(
   if (Array.isArray(input.testing)) {
     for (const suite of input.testing) {
       if (suite.command) patterns.add(suite.command + "*");
+      // Add framework-specific patterns so agents can run tests directly
+      if (suite.framework) {
+        const fwPatterns = TEST_FRAMEWORK_PATTERNS[suite.framework.toLowerCase()];
+        if (fwPatterns) {
+          for (const p of fwPatterns) patterns.add(p);
+        }
+      }
     }
   } else if (input.testing && "command" in input.testing && input.testing.command) {
     patterns.add(input.testing.command + "*");
