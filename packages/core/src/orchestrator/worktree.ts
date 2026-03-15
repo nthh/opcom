@@ -167,8 +167,10 @@ export class WorktreeManager {
     // Ensure .opcom-lock is git-excluded so agents never commit it
     await ensureGitExclude(projectPath);
 
-    // Install dependencies in the worktree
-    await this.installDeps(worktreePath);
+    // Install dependencies in the worktree (skip if reusing — deps already exist)
+    if (!reusing) {
+      await this.installDeps(worktreePath);
+    }
 
     const info: WorktreeInfo = {
       stepId,
@@ -754,6 +756,12 @@ export class WorktreeManager {
 
   /** Run npm install + npm run build in a directory. */
   private async npmInstallAt(dir: string): Promise<void> {
+    // Skip if node_modules already exists (e.g. from a previous worktree run)
+    if (existsSync(join(dir, "node_modules"))) {
+      log.debug("skipping npm install (node_modules exists)", { dir });
+      return;
+    }
+
     try {
       await execFileAsync("npm", ["install"], {
         cwd: dir,
@@ -767,12 +775,17 @@ export class WorktreeManager {
 
     // Build TypeScript packages so dist/ directories exist.
     // Without this, monorepo project references (e.g. @opcom/types) can't resolve.
+    // Only run if a build script exists.
     try {
-      await execFileAsync("npm", ["run", "build"], {
-        cwd: dir,
-        timeout: 120_000,
-      });
-      log.debug("built packages", { dir });
+      const pkgRaw = await readFile(join(dir, "package.json"), "utf-8");
+      const pkg = JSON.parse(pkgRaw);
+      if (pkg.scripts?.build) {
+        await execFileAsync("npm", ["run", "build"], {
+          cwd: dir,
+          timeout: 120_000,
+        });
+        log.debug("built packages", { dir });
+      }
     } catch (err) {
       log.warn("failed to build", { dir, error: String(err) });
     }
