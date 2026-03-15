@@ -1,7 +1,7 @@
 ---
 id: integration-branch-tests
 title: "Integration branch end-to-end tests"
-status: open
+status: closed
 type: test
 priority: 2
 created: 2026-03-15
