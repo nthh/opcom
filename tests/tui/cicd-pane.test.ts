@@ -370,9 +370,9 @@ describe("renderCICDPanel", () => {
 // --- Project detail CI/CD panel integration ---
 
 describe("project detail CI/CD integration", () => {
-  it("includes CI/CD panel count of 8", async () => {
+  it("includes CI/CD panel count of 9", async () => {
     const { PANEL_COUNT } = await import("../../packages/cli/src/tui/views/project-detail.js");
-    expect(PANEL_COUNT).toBe(8);
+    expect(PANEL_COUNT).toBe(9);
   });
 
   it("creates state with empty CI/CD data", async () => {
@@ -386,11 +386,11 @@ describe("project detail CI/CD integration", () => {
     });
     expect(state.pipelines).toEqual([]);
     expect(state.deployments).toEqual([]);
-    expect(state.selectedIndex).toHaveLength(8);
-    expect(state.scrollOffset).toHaveLength(8);
+    expect(state.selectedIndex).toHaveLength(9);
+    expect(state.scrollOffset).toHaveLength(9);
   });
 
-  it("getPanelItemCount returns CI/CD item count for panel 5", async () => {
+  it("getPanelItemCount returns CI/CD item count for panel 6", async () => {
     const { createProjectDetailState, getPanelItemCount } = await import("../../packages/cli/src/tui/views/project-detail.js");
     const state = createProjectDetailState({
       id: "proj-1",
@@ -401,7 +401,7 @@ describe("project detail CI/CD integration", () => {
     });
     state.pipelines = [makePipeline()];
     state.deployments = [makeDeployment(), makeDeployment({ id: "d2" })];
-    expect(getPanelItemCount(state, 5)).toBe(3);
+    expect(getPanelItemCount(state, 6)).toBe(3);
   });
 
   it("clampSelection handles CI/CD panel", async () => {
@@ -414,8 +414,8 @@ describe("project detail CI/CD integration", () => {
       workSummary: null,
     });
     state.pipelines = [makePipeline()];
-    state.selectedIndex[5] = 10; // out of range
+    state.selectedIndex[6] = 10; // out of range
     clampSelection(state);
-    expect(state.selectedIndex[5]).toBe(0); // clamped to max (1 item, so index 0)
+    expect(state.selectedIndex[6]).toBe(0); // clamped to max (1 item, so index 0)
   });
 });

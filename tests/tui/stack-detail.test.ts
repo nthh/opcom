@@ -184,7 +184,7 @@ describe("getStackList / getPanelItemCount integration", () => {
 
     const items = getStackList(state);
     expect(items.length).toBe(9);
-    expect(getPanelItemCount(state, 3)).toBe(9);
+    expect(getPanelItemCount(state, 4)).toBe(9);
   });
 
   it("returns 0 when no config loaded", () => {

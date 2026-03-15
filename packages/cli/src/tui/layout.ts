@@ -99,8 +99,8 @@ function layoutDashboard(cols: number, rows: number, statusBarY: number): Layout
 function layoutProjectDetail(cols: number, rows: number, statusBarY: number): Layout {
   const leftWidth = Math.max(30, Math.floor(cols * 0.55));
   const rightWidth = cols - leftWidth;
-  // 7 right-column panels: agents, specs, stack, cloud, cicd, infra, chat
-  const sectionCount = 7;
+  // 8 right-column panels: agents, plans, specs, stack, cloud, cicd, infra, chat
+  const sectionCount = 8;
   const sectionH = Math.max(MIN_PANEL_HEIGHT, Math.floor(rows / sectionCount));
   const rightH1 = sectionH;
   const rightH2 = sectionH;
@@ -108,7 +108,8 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
   const rightH4 = sectionH;
   const rightH5 = sectionH;
   const rightH6 = sectionH;
-  const rightH7 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4 - rightH5 - rightH6);
+  const rightH7 = sectionH;
+  const rightH8 = Math.max(MIN_PANEL_HEIGHT, rows - rightH1 - rightH2 - rightH3 - rightH4 - rightH5 - rightH6 - rightH7);
 
   return {
     panels: [
@@ -129,51 +130,59 @@ function layoutProjectDetail(cols: number, rows: number, statusBarY: number): La
         title: "Agents",
       },
       {
-        id: "specs",
+        id: "plans",
         x: leftWidth,
         y: rightH1,
         width: rightWidth,
         height: rightH2,
+        title: "Plans",
+      },
+      {
+        id: "specs",
+        x: leftWidth,
+        y: rightH1 + rightH2,
+        width: rightWidth,
+        height: rightH3,
         title: "Specs",
       },
       {
         id: "stack",
         x: leftWidth,
-        y: rightH1 + rightH2,
+        y: rightH1 + rightH2 + rightH3,
         width: rightWidth,
-        height: rightH3,
+        height: rightH4,
         title: "Stack",
       },
       {
         id: "cloud",
         x: leftWidth,
-        y: rightH1 + rightH2 + rightH3,
+        y: rightH1 + rightH2 + rightH3 + rightH4,
         width: rightWidth,
-        height: rightH4,
+        height: rightH5,
         title: "Cloud",
       },
       {
         id: "cicd",
         x: leftWidth,
-        y: rightH1 + rightH2 + rightH3 + rightH4,
+        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5,
         width: rightWidth,
-        height: rightH5,
+        height: rightH6,
         title: "CI/CD",
       },
       {
         id: "infra",
         x: leftWidth,
-        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5,
+        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5 + rightH6,
         width: rightWidth,
-        height: rightH6,
+        height: rightH7,
         title: "Infrastructure",
       },
       {
         id: "chat",
         x: leftWidth,
-        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5 + rightH6,
+        y: rightH1 + rightH2 + rightH3 + rightH4 + rightH5 + rightH6 + rightH7,
         width: rightWidth,
-        height: rightH7,
+        height: rightH8,
         title: "Chat",
       },
     ],

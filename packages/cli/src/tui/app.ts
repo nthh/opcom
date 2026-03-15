@@ -15,6 +15,7 @@ import {
   getPlanStepsInDisplayOrder,
   getNextPlanId,
   getBestPlanForProject,
+  computePlansByProject,
   DASHBOARD_PANEL_COUNT,
   aggregateDeployStatus,
   type DashboardState,
@@ -409,6 +410,10 @@ export class TuiApp {
       this.dashboardState.planPanel = null;
     }
     this.dashboardState.allPlans = this.client.allPlans;
+    this.dashboardState.plansByProject = computePlansByProject(
+      this.client.allPlans,
+      this.dashboardState.projects.map((p) => p.id),
+    );
 
     clampDashboard(this.dashboardState);
 
@@ -432,6 +437,8 @@ export class TuiApp {
         if (this.healthData) {
           this.projectDetailState.projectSpecs = computeProjectSpecs(tickets, this.healthData.specs);
         }
+        // Sync plans for this project
+        this.projectDetailState.plans = this.dashboardState.plansByProject.get(this.focusedProjectId) ?? [];
         const cloudServices = this.client.projectCloudServices.get(this.focusedProjectId) ?? [];
         this.projectDetailState.cloudServices = cloudServices;
         const pipelines = this.client.projectPipelines.get(this.focusedProjectId) ?? [];
@@ -1158,7 +1165,7 @@ export class TuiApp {
     }
 
     // Dispatch to chat component when focused
-    if (panel === 6) {
+    if (panel === 7) {
       const result = ChatComponent.handleKey(data, state.chatComponent);
       if (result.handled) {
         state.chatComponent = result.state;
@@ -1198,7 +1205,7 @@ export class TuiApp {
 
       case "\r":
       case "\n":
-        if (panel === 6 && state.chatComponent.boundAgentId) {
+        if (panel === 7 && state.chatComponent.boundAgentId) {
           this.enterChatInputMode();
           return;
         }
@@ -1218,7 +1225,7 @@ export class TuiApp {
         return;
 
       case "v": // Focus cloud panel
-        state.focusedPanel = 4;
+        state.focusedPanel = 5;
         return;
 
       case "M": // Run migrations on selected database
@@ -1316,6 +1323,18 @@ export class TuiApp {
         this.navigateToAgent(agent);
       }
     } else if (panel === 2) {
+      // Drill into plan — navigate to Plan Overview (L3)
+      const plans = state.plans;
+      const plan = plans[selected];
+      if (plan) {
+        this.client.loadPlanById(plan.id).then((fullPlan) => {
+          if (fullPlan) {
+            this.navigateToPlanOverview(fullPlan);
+          }
+          this.scheduleRender();
+        }).catch(() => {});
+      }
+    } else if (panel === 3) {
       // Drill into spec — open health view drilled to this spec
       const specs = getSpecsList(state);
       const spec = specs[selected];
@@ -1328,7 +1347,7 @@ export class TuiApp {
           this.scheduleRender();
         }).catch(() => {});
       }
-    } else if (panel === 3) {
+    } else if (panel === 4) {
       // Drill into stack item (service items navigate to service detail)
       const items = getStackList(state);
       const item = items[selected];
@@ -1341,14 +1360,14 @@ export class TuiApp {
       } else if (item && state.projectConfig) {
         this.navigateToStackItem(item, state.projectConfig);
       }
-    } else if (panel === 4) {
+    } else if (panel === 5) {
       // Drill into cloud service
       const services = getCloudServicesList(state);
       const service = services[selected];
       if (service) {
         this.navigateToCloudService(service);
       }
-    } else if (panel === 5) {
+    } else if (panel === 6) {
       // Drill into pipeline or deployment
       const pipeline = getPipelineAtIndex(state.pipelines, state.deployments, selected);
       if (pipeline) {
@@ -1359,7 +1378,7 @@ export class TuiApp {
           this.navigateToDeploymentDetail(deployment.environment);
         }
       }
-    } else if (panel === 6) {
+    } else if (panel === 7) {
       // Drill into infrastructure resource (pods only)
       const resources = getInfraResourcesList(state);
       const resource = resources[selected];
@@ -1777,7 +1796,7 @@ export class TuiApp {
       this.dashboardState.focusedPanel = 3;
       this.syncChatAgentBinding();
     } else if (this.level === 2 && this.projectDetailState) {
-      this.projectDetailState.focusedPanel = 6;
+      this.projectDetailState.focusedPanel = 7;
       this.syncChatAgentBinding();
     }
   }
@@ -2183,6 +2202,7 @@ export class TuiApp {
     this.level = 2;
     this.projectDetailState = createProjectDetailState(project);
     this.projectDetailState.agents = this.client.agents;
+    this.projectDetailState.plans = this.dashboardState.plansByProject.get(project.id) ?? [];
 
     // Load project config and tickets async
     this.client.getProjectConfig(project.id).then((config) => {
@@ -3107,9 +3127,9 @@ export class TuiApp {
     const state = this.projectDetailState;
 
     // If cloud panel is focused, migrate the selected service
-    if (state.focusedPanel === 4) {
+    if (state.focusedPanel === 5) {
       const services = getCloudServicesList(state);
-      const service = services[state.selectedIndex[4]];
+      const service = services[state.selectedIndex[5]];
       if (service && service.capabilities.includes("migrate")) {
         this.triggerMigrationOnService(service);
       }
