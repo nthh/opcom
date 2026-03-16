@@ -301,11 +301,13 @@ export class WorktreeManager {
       const current = stdout.trim();
       if (current !== target) {
         previousBranch = current;
-        const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
-        if (status.trim().length > 0) {
-          await execFileAsync("git", ["stash", "push", "-m", "opcom: auto-stash before merge"], { cwd });
-          stashed = true;
-        }
+        try {
+          const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
+          if (status.trim().length > 0) {
+            await execFileAsync("git", ["stash", "push", "-u", "-m", "opcom-auto-stash"], { cwd });
+            stashed = true;
+          }
+        } catch { /* best effort — checkout may still work if changes don't conflict */ }
         await execFileAsync("git", ["checkout", target], { cwd });
       }
     }
@@ -702,11 +704,13 @@ export class WorktreeManager {
     // Auto-stash uncommitted changes so dirty trees don't block checkout.
     let stashed = false;
     if (targetBranch) {
-      const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
-      if (status.trim().length > 0) {
-        await execFileAsync("git", ["stash", "push", "-m", "opcom: auto-stash before integration merge"], { cwd });
-        stashed = true;
-      }
+      try {
+        const { stdout: status } = await execFileAsync("git", ["status", "--porcelain"], { cwd });
+        if (status.trim().length > 0) {
+          await execFileAsync("git", ["stash", "push", "-u", "-m", "opcom-auto-stash"], { cwd });
+          stashed = true;
+        }
+      } catch { /* best effort — checkout may still work if changes don't conflict */ }
       await execFileAsync("git", ["checkout", targetBranch], { cwd });
     }
 
